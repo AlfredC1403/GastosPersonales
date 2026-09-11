@@ -1,6 +1,6 @@
 import { store, cerrarModal, cerrarAviso } from '../store.js';
 
-const { ref, watch, watchEffect, onBeforeUnmount, nextTick } = Vue;
+const { ref, watch, nextTick } = Vue;
 
 const TRAZOS = {
   mas: 'M12 5v14M5 12h14',
@@ -16,49 +16,30 @@ const TRAZOS = {
   descargar: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   subir: 'M12 20V9M7 14l5-5 5 5M5 4h14',
   usuario: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0',
+  casa: 'M4 11l8-6 8 6M6.5 10v9h11v-9',
+  calendario: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4',
+  flechas: 'M4 8h12M13 5l3 3-3 3M20 16H8M11 13l-3 3 3 3',
+  puntos: 'M5 12h.01M12 12h.01M19 12h.01',
+  sol: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  luna: 'M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z',
+  tendencia: 'M3 7l6 6 4-4 8 8M21 17h-5M21 17v-5',
+  pastel: 'M12 3a9 9 0 1 0 9 9h-9z',
+  banco: 'M3 7h18v12H3zM3 7l3-4h12l3 4M3 12h18',
+  ajustes: 'M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4',
 };
 
 export const Icono = {
-  props: { n: { type: String, required: true }, t: { type: Number, default: 18 } },
-  template: `<svg :width="t" :height="t" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  props: {
+    n: { type: String, required: true },
+    t: { type: Number, default: 18 },
+    g: { type: Number, default: 1.8 },
+  },
+  template: `<svg :width="t" :height="t" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="g"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path :d="trazo"/></svg>`,
   computed: {
     trazo() {
       return TRAZOS[this.n] || '';
     },
-  },
-};
-
-// Envuelve un gráfico de Chart.js. `config` es una función que devuelve la configuración
-// (o null si no hay datos); el gráfico se rehace cuando cambian los datos que usa.
-export const ChartBox = {
-  props: {
-    config: { type: Function, required: true },
-    alto: { type: Number, default: 220 },
-    etiqueta: { type: String, default: '' },
-    vacio: { type: String, default: 'Sin datos todavía.' },
-  },
-  template: `<div class="grafico" :style="{ height: alto + 'px' }">
-    <canvas v-show="!sinDatos" ref="lienzo" role="img" :aria-label="etiqueta"></canvas>
-    <div v-if="sinDatos" class="grafico-vacio">{{ vacio }}</div>
-  </div>`,
-  setup(props) {
-    const lienzo = ref(null);
-    const sinDatos = ref(false);
-    let grafico = null;
-    const detener = watchEffect(() => {
-      const cfg = props.config();
-      grafico?.destroy();
-      grafico = null;
-      const vacio = !cfg || !window.Chart;
-      sinDatos.value = vacio;
-      if (!vacio && lienzo.value) grafico = new Chart(lienzo.value, cfg);
-    }, { flush: 'post' });
-    onBeforeUnmount(() => {
-      detener();
-      grafico?.destroy();
-    });
-    return { lienzo, sinDatos };
   },
 };
 
@@ -68,7 +49,7 @@ export const ModalHost = {
     <div v-if="store.modal" class="modal-caja">
       <header class="modal-cab">
         <h2 id="titulo-modal">{{ store.modal.titulo }}</h2>
-        <button type="button" class="icono-btn" aria-label="Cerrar" @click="cerrarModal"><icono n="x"/></button>
+        <button type="button" class="btn-icono" aria-label="Cerrar" @click="cerrarModal"><icono n="x"/></button>
       </header>
       <component :is="store.modal.componente" :key="store.modal.id" v-bind="store.modal.props" @listo="cerrarModal"/>
     </div>

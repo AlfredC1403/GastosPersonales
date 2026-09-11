@@ -61,8 +61,10 @@ export const buscar = (coleccion, id) => (id ? store.doc[coleccion].find((r) => 
 export const nombrePersona = (id) => buscar('personas', id)?.nombre || 'Hogar';
 export const nombreCuenta = (id) => buscar('cuentas', id)?.nombre || '—';
 export const nombreCategoria = (id) => buscar('categorias', id)?.nombre || 'Sin categoría';
-export const fmt = (n) => dinero(n, { simbolo: store.doc.config.moneda || 'L' });
-export const fmtCorto = (n) => dineroCorto(n, store.doc.config.moneda || 'L');
+export const simbolo = () => store.doc.config.moneda || 'L';
+export const fmt = (n) => dinero(n, { simbolo: simbolo() });
+export const fmtEntero = (n) => dinero(n, { simbolo: simbolo(), decimales: false });
+export const fmtCorto = (n) => dineroCorto(n, simbolo());
 export const personas = () => vivos('personas').sort((a, b) => a.nombre.localeCompare(b.nombre));
 export const cuentas = () => vivos('cuentas');
 export const categorias = () => vivos('categorias').sort((a, b) => a.nombre.localeCompare(b.nombre));

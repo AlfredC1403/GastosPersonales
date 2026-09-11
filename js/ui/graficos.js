@@ -1,157 +1,157 @@
-// Configuraciones de Chart.js con la misma paleta en toda la app. El color sigue a la
-// entidad (Préstamos siempre azul, Fijos siempre naranja…), nunca a su posición.
-import { dinero, dineroCorto } from '../core/util.js';
-import { store } from '../store.js';
+// Gráficos en SVG y CSS. Los colores son variables CSS, así cambian solos con el tema.
+// El color sigue a la entidad: Préstamos siempre --s1, Fijos --s2, y así.
+const { ref, computed } = Vue;
 
-const oscuro = () => matchMedia('(prefers-color-scheme: dark)').matches;
-
-const PALETA = {
-  claro: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'],
-  oscuro: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'],
-};
-export const serie = (i) => (oscuro() ? PALETA.oscuro : PALETA.claro)[i];
-export const violeta = () => (oscuro() ? '#9085e9' : '#6250d6');
-export const gris = () => (oscuro() ? '#6b6a65' : '#b4b2a9');
-export const grisClaro = () => (oscuro() ? '#3d3d3a' : '#e1e0d9');
-
-// Tipos de gasto que se grafican, en orden fijo (define su color).
 export const CLASES_GRAFICO = [
-  ['prestamo', 'Préstamos'],
-  ['fijo', 'Fijos'],
-  ['fijo_variable', 'Fijos variables'],
-  ['provision', 'Pagos anuales'],
-  ['adicional', 'Adicionales'],
+  { clave: 'prestamo', nombre: 'Préstamos', color: 'var(--s1)' },
+  { clave: 'fijo', nombre: 'Fijos', color: 'var(--s2)' },
+  { clave: 'fijo_variable', nombre: 'Fijos variables', color: 'var(--s3)' },
+  { clave: 'provision', nombre: 'Pagos anuales', color: 'var(--s4)' },
+  { clave: 'adicional', nombre: 'Adicionales', color: 'var(--s5)' },
 ];
 
-function tinta() {
-  const css = getComputedStyle(document.documentElement);
-  return {
-    texto2: css.getPropertyValue('--texto-2').trim(),
-    sup: css.getPropertyValue('--sup').trim(),
-    rejilla: oscuro() ? '#2c2c2a' : '#e8e7e0',
-    base: oscuro() ? '#3a3a37' : '#c9c8bf',
-  };
-}
-
-export function prepararChart() {
-  if (!window.Chart) return;
-  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
-  Chart.defaults.font.size = 12;
-  Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--texto-3').trim();
-  Chart.defaults.plugins.legend.display = false;
-  Chart.defaults.maintainAspectRatio = false;
-  Chart.defaults.animation.duration = 250;
-}
-
-const simbolo = () => store.doc.config.moneda || 'L';
-const $ = (v) => dinero(v, { simbolo: simbolo() });
-const ejeDinero = () => ({
-  grid: { color: tinta().rejilla },
-  border: { display: false },
-  ticks: { callback: (v) => dineroCorto(v, simbolo()) },
-});
-
-// Escribe el valor al final de cada barra horizontal.
-const etiquetasValor = {
-  id: 'etiquetasValor',
-  afterDatasetsDraw(chart) {
-    const { ctx } = chart;
-    const datos = chart.data.datasets[0].data;
-    ctx.save();
-    ctx.font = `12px ${Chart.defaults.font.family}`;
-    ctx.fillStyle = tinta().texto2;
-    ctx.textBaseline = 'middle';
-    chart.getDatasetMeta(0).data.forEach((barra, i) => {
-      if (datos[i]) ctx.fillText(dineroCorto(datos[i], simbolo()), barra.x + 6, barra.y);
-    });
-    ctx.restore();
+// Barra horizontal dividida en segmentos proporcionales: [{ valor, color, titulo }].
+export const BarraSegmentos = {
+  props: { segmentos: { type: Array, required: true }, clase: { type: String, default: '' } },
+  template: `<div class="barra-seg" :class="clase" role="img" :aria-label="etiqueta">
+    <span v-for="(s, i) in visibles" :key="i" :style="{ flex: s.valor, background: s.color }" :title="s.titulo"></span>
+  </div>`,
+  computed: {
+    visibles() {
+      return this.segmentos.filter((s) => s.valor > 0);
+    },
+    etiqueta() {
+      return this.visibles.map((s) => s.titulo).filter(Boolean).join(', ');
+    },
   },
 };
 
-export function barrasHorizontales(etiquetas, valores, colores) {
-  const t = tinta();
-  return {
-    type: 'bar',
-    data: {
-      labels: etiquetas,
-      datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 20 }],
-    },
-    options: {
-      indexAxis: 'y',
-      layout: { padding: { right: 58 } },
-      plugins: { tooltip: { callbacks: { label: (c) => ` ${$(c.raw)}` } } },
-      scales: {
-        x: { ...ejeDinero(), beginAtZero: true },
-        y: { grid: { display: false }, border: { color: t.base }, ticks: { color: t.texto2 } },
-      },
-    },
-    plugins: [etiquetasValor],
-  };
-}
+// Columnas apiladas por mes. `meses`: [{ periodo, etiqueta, largo, total, textoTotal, valores: [..] }].
+// Al tocar o pasar el cursor por una columna se muestra su detalle debajo.
+export const ColumnasApiladas = {
+  props: {
+    meses: { type: Array, required: true },
+    series: { type: Array, required: true }, // [{ nombre, color }] en el mismo orden que `valores`
+    formatear: { type: Function, required: true },
+  },
+  template: `
+  <div>
+    <svg class="grafico" viewBox="0 0 336 150" preserveAspectRatio="none" style="height: 150px"
+         role="img" :aria-label="etiqueta" @mouseleave="elegido = null">
+      <line v-for="y in [12, 51, 90, 129]" :key="y" x1="0" x2="336" :y1="y" :y2="y" stroke="var(--linea)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <g v-for="c in columnas" :key="c.periodo" class="clic" @click="elegir(c.i)" @mouseenter="elegido = c.i">
+        <rect :x="c.xSlot" y="0" :width="slot" height="150" fill="transparent"/>
+        <rect v-for="(s, j) in c.segs" :key="j" :x="c.x" :y="s.y" :width="ancho" :height="s.h" :fill="s.color"
+              :opacity="elegido === null || elegido === c.i ? 1 : 0.4"/>
+      </g>
+    </svg>
+    <div class="eje-meses" :style="{ gridTemplateColumns: 'repeat(' + meses.length + ', 1fr)' }">
+      <div v-for="(m, i) in meses" :key="m.periodo" class="clic" :class="{ activo: elegido === i }" @click="elegir(i)">
+        <div class="mes">{{ m.etiqueta }}</div>
+        <div class="total">{{ m.textoTotal }}</div>
+      </div>
+    </div>
+    <p class="grafico-info">{{ info }}</p>
+  </div>`,
+  setup(props) {
+    const elegido = ref(null);
+    const slot = computed(() => 336 / Math.max(1, props.meses.length));
+    const ancho = computed(() => Math.min(34, slot.value * 0.62));
+    const maximo = computed(() => Math.max(1, ...props.meses.map((m) => m.total)));
+    const columnas = computed(() => props.meses.map((m, i) => {
+      let y = 130;
+      const segs = m.valores.map((v, j) => {
+        const h = (v / maximo.value) * 118;
+        y -= h;
+        return { y: y + (h > 3 ? 1 : 0), h: Math.max(0, h - (h > 3 ? 1 : 0)), color: props.series[j].color };
+      }).filter((s) => s.h > 0);
+      return { i, periodo: m.periodo, segs, xSlot: slot.value * i, x: slot.value * i + (slot.value - ancho.value) / 2 };
+    }));
+    const info = computed(() => {
+      if (elegido.value === null) return 'Toca una columna para ver el detalle del mes.';
+      const m = props.meses[elegido.value];
+      if (!m) return '';
+      const partes = m.valores.map((v, j) => (v > 0 ? `${props.series[j].nombre} ${props.formatear(v)}` : null)).filter(Boolean);
+      return `${m.largo}: ${partes.length ? partes.join(' · ') + ' · ' : ''}total ${props.formatear(m.total)}`;
+    });
+    const etiqueta = computed(() => `Gasto por tipo en ${props.meses.length} meses`);
+    const elegir = (i) => { elegido.value = elegido.value === i ? null : i; };
+    return { elegido, slot, ancho, columnas, info, etiqueta, elegir };
+  },
+};
 
-export function columnasApiladas(etiquetas, series) {
-  const t = tinta();
-  return {
-    type: 'bar',
-    data: {
-      labels: etiquetas,
-      datasets: series.map((s, i) => ({
-        label: s.nombre, data: s.valores, backgroundColor: serie(i),
-        borderColor: t.sup, borderWidth: { top: 2 }, borderSkipped: 'start', maxBarThickness: 40,
-      })),
+// Línea pequeña de tendencia.
+export const Sparkline = {
+  props: { valores: { type: Array, required: true }, color: { type: String, default: 'var(--s3)' } },
+  template: `<svg viewBox="0 0 120 44" preserveAspectRatio="none" style="width: 120px; height: 44px; flex: none" role="img" aria-label="Tendencia de la deuda">
+    <polyline :points="puntos" fill="none" :stroke="color" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+  </svg>`,
+  computed: {
+    puntos() {
+      const v = this.valores;
+      const max = Math.max(...v);
+      const min = Math.min(...v);
+      const rango = max - min || 1;
+      return v.map((x, i) => `${((i * 120) / Math.max(1, v.length - 1)).toFixed(1)},${(40 - ((x - min) / rango) * 34).toFixed(1)}`).join(' ');
     },
-    options: {
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        tooltip: {
-          filter: (c) => c.raw > 0,
-          callbacks: {
-            label: (c) => ` ${c.dataset.label}: ${$(c.raw)}`,
-            footer: (items) => `Total: ${$(items.reduce((a, c) => a + c.raw, 0))}`,
-          },
-        },
-      },
-      scales: {
-        x: { stacked: true, grid: { display: false }, border: { color: t.base } },
-        y: { stacked: true, ...ejeDinero() },
-      },
-    },
-  };
-}
+  },
+};
 
-// Saldo total de las deudas mes a mes: sin plan (gris, punteada) vs. con plan (azul).
-// `periodos` en formato 'YYYY-MM'; el eje muestra solo años y el detalle sale al pasar el cursor.
-export function lineasDeuda(periodos, sinPlan, conPlan, formatear = (p) => p) {
-  const t = tinta();
-  const anios = periodos.length / 12;
-  const paso = anios > 20 ? 5 : anios > 8 ? 2 : 1;
-  const etiqueta = (i) => {
-    const p = periodos[i];
-    return p.endsWith('-01') && Number(p.slice(0, 4)) % paso === 0 ? p.slice(0, 4) : '';
-  };
-  return {
-    type: 'line',
-    data: {
-      labels: periodos,
-      datasets: [
-        { label: 'Sin plan', data: sinPlan, borderColor: gris(), borderDash: [6, 4], borderWidth: 2, pointRadius: 0, pointHitRadius: 6 },
-        { label: 'Con el plan', data: conPlan, borderColor: serie(0), backgroundColor: `${serie(0)}1f`, fill: 'origin', borderWidth: 2, pointRadius: 0, pointHitRadius: 6 },
-      ],
-    },
-    options: {
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        tooltip: {
-          callbacks: {
-            title: (items) => formatear(periodos[items[0].dataIndex]),
-            label: (c) => ` ${c.dataset.label}: ${$(c.raw)}`,
-          },
-        },
-      },
-      scales: {
-        x: { grid: { display: false }, border: { color: t.base }, ticks: { autoSkip: false, maxRotation: 0, callback: (v, i) => etiqueta(i) } },
-        y: { ...ejeDinero(), beginAtZero: true },
-      },
-    },
-  };
-}
+// Saldo de las deudas mes a mes: sin plan (punteada) y con el plan (línea y área).
+// `periodos` en formato 'YYYY-MM'. Al tocar o pasar el cursor se muestran los valores del mes.
+export const LineaPlan = {
+  props: {
+    periodos: { type: Array, required: true },
+    sin: { type: Array, required: true },
+    con: { type: Array, required: true },
+    formatearMes: { type: Function, required: true },
+    formatear: { type: Function, required: true },
+  },
+  template: `
+  <div>
+    <svg ref="lienzo" class="grafico" viewBox="0 0 336 170" preserveAspectRatio="none" style="height: 180px; touch-action: pan-y"
+         role="img" aria-label="Saldo total de las deudas con y sin plan" @pointermove="mover" @pointerdown="mover" @pointerleave="indice = null">
+      <line v-for="y in [10, 47.5, 85, 122.5, 160]" :key="y" x1="0" x2="336" :y1="y" :y2="y" stroke="var(--linea)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <polygon :points="area" fill="var(--acento)" opacity="0.1"/>
+      <polyline :points="lineaSin" fill="none" stroke="var(--tinta3)" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+      <polyline :points="lineaCon" fill="none" stroke="var(--acento)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <line v-if="indice !== null" :x1="x(indice)" :x2="x(indice)" y1="0" y2="170" stroke="var(--tinta2)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="eje-anios"><span v-for="a in anios" :key="a">{{ a }}</span></div>
+    <p class="grafico-info">{{ info }}</p>
+  </div>`,
+  setup(props) {
+    const lienzo = ref(null);
+    const indice = ref(null);
+    const n = computed(() => props.periodos.length);
+    const tope = computed(() => Math.max(1, props.sin[0] || 0, props.con[0] || 0) * 1.05);
+    const x = (i) => (n.value > 1 ? (i * 336) / (n.value - 1) : 0);
+    const y = (v) => 160 - ((v || 0) / tope.value) * 150;
+    const puntos = (serie) => serie.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const lineaSin = computed(() => puntos(props.sin));
+    const lineaCon = computed(() => puntos(props.con));
+    const area = computed(() => `0,160 ${lineaCon.value} ${x(n.value - 1).toFixed(1)},160`);
+    const anios = computed(() => {
+      if (!n.value) return [];
+      const desde = Number(props.periodos[0].slice(0, 4));
+      const hasta = Number(props.periodos[n.value - 1].slice(0, 4));
+      const total = hasta - desde + 1;
+      const paso = Math.max(1, Math.ceil(total / 7));
+      const lista = [];
+      for (let a = desde; a <= hasta; a += paso) lista.push(a);
+      if (lista[lista.length - 1] !== hasta) lista.push(hasta);
+      return lista;
+    });
+    function mover(e) {
+      const r = lienzo.value.getBoundingClientRect();
+      const i = Math.round(((e.clientX - r.left) / r.width) * (n.value - 1));
+      indice.value = Math.min(n.value - 1, Math.max(0, i));
+    }
+    const info = computed(() => {
+      const i = indice.value;
+      if (i === null) return 'Toca o pasa el cursor sobre el gráfico para ver el saldo de cada mes.';
+      return `${props.formatearMes(props.periodos[i])} · sin plan ${props.formatear(props.sin[i])} · con el plan ${props.formatear(props.con[i])}`;
+    });
+    return { lienzo, indice, x, lineaSin, lineaCon, area, anios, mover, info };
+  },
+};

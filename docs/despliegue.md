@@ -112,29 +112,29 @@ Comprueba que en **Autenticación**, dentro de **Aplicación de página única**
    git push
    ```
 
-Espera uno o dos minutos y recarga la app publicada. En **Ajustes**, la sección **OneDrive** debe mostrar el botón **Conectar con Microsoft**.
+Espera uno o dos minutos y recarga la app publicada. En **Más** > **Ajustes**, la sección **OneDrive** debe mostrar el botón **Conectar con Microsoft**.
 
 ## 6. Cargar los datos y crear el archivo en OneDrive
 
 Estos pasos los hace la persona en cuyo OneDrive va a quedar el archivo, desde el equipo donde está `privado/finanzas-inicial.json`.
 
-1. Abre la app publicada y ve a **Ajustes**.
+1. Abre la app publicada y ve a **Más** > **Ajustes**.
 2. Haz clic en **Importar archivo** y elige `C:\Repos\GastosPersonales\privado\finanzas-inicial.json`.
 3. En **Quién usa este dispositivo**, elige tu nombre.
 4. Haz clic en **Conectar con Microsoft** e inicia sesión. La pantalla de permisos muestra la app como no verificada porque el registro es tuyo. Acepta los permisos.
 5. De vuelta en la app, haz clic en **Usar mi OneDrive**.
 
-Comprueba que en tu OneDrive existe `GastosHogar\finanzas.json` y que la parte superior de la app muestra **Sincronizado**.
+Comprueba que en tu OneDrive existe `GastosHogar\finanzas.json` y que la sección **OneDrive** de **Ajustes** muestra **Sincronizado**. El ícono de la nube de la parte superior se ve en verde.
 
 ## 7. Dar acceso a la otra persona
 
 1. En `https://onedrive.live.com`, selecciona la carpeta `GastosHogar` y haz clic en **Compartir**.
 2. Escribe el correo de la cuenta de Microsoft de la otra persona, deja el permiso en **Puede editar** y haz clic en **Enviar**. OneDrive le envía un correo con el enlace a la carpeta.
-3. En el celular de la otra persona, abre `https://<usuario>.github.io/GastosPersonales/`, elige su nombre en el aviso **¿Quién usa este dispositivo?** y ve a **Ajustes**.
+3. En el celular de la otra persona, abre `https://<usuario>.github.io/GastosPersonales/`, elige su nombre en el aviso **¿Quién usa este dispositivo?** y ve a **Más** > **Ajustes**.
 4. Haz clic en **Conectar con Microsoft** e inicia sesión con la cuenta de esa persona.
 5. En **Me compartieron el archivo**, pega el enlace del correo de OneDrive y haz clic en **Abrir archivo compartido**.
 
-Para comprobarlo, registra un gasto en un dispositivo y toca el indicador **Sincronizado** en el otro. El gasto debe aparecer en **Movimientos**, y el texto `anotó` debe mostrar el nombre de quien lo registró.
+Para comprobarlo, registra un gasto en un dispositivo y toca el ícono de la nube de la parte superior en el otro. El gasto debe aparecer en **Movimientos**, y el texto `anotó` debe mostrar el nombre de quien lo registró.
 
 ## 8. Instalar en el celular
 
@@ -158,11 +158,11 @@ GitHub Pages publica la nueva versión en uno o dos minutos. Los datos no cambia
 
 ### Recuperar una versión anterior de los datos
 
-OneDrive guarda versiones anteriores de `finanzas.json`. En `https://onedrive.live.com`, haz clic derecho en el archivo y elige **Historial de versiones**. Para tener además una copia propia, usa **Ajustes** > **Descargar respaldo (JSON)** en la app.
+OneDrive guarda versiones anteriores de `finanzas.json`. En `https://onedrive.live.com`, haz clic derecho en el archivo y elige **Historial de versiones**. Para tener además una copia propia, usa **Más** > **Ajustes** > **Descargar respaldo (JSON)** en la app.
 
 ### Reconectar la sesión
 
-Microsoft limita la sesión de este tipo de apps a 24 horas. Cuando vence, el indicador de la parte superior muestra **Reconectar**. Tócalo; si la sesión de Microsoft del navegador sigue abierta, vuelve sin pedir la contraseña.
+Microsoft limita la sesión de este tipo de apps a 24 horas. Cuando vence, el ícono de la nube de la parte superior se pone amarillo. Tócalo; si la sesión de Microsoft del navegador sigue abierta, vuelve sin pedir la contraseña.
 
 ## Problemas comunes
 

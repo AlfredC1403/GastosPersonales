@@ -8,6 +8,7 @@ import { hoy, periodoDe, periodoActual, nombrePeriodo, nombreMes, redondear } fr
 const { reactive, ref, computed } = Vue;
 
 const copia = (x) => JSON.parse(JSON.stringify(x ?? {}));
+const TIPOS_CORTOS = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferir', abono: 'Abono', ajuste: 'Ajuste' };
 const quien = (id) => buscar('personas', id)?.nombre || 'alguien';
 const fechaHora = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -61,7 +62,7 @@ export const MovimientoForm = {
   template: `
   <form class="formulario" novalidate @submit.prevent="enviar">
     <div v-if="!vinculado" class="segmentos" role="group" aria-label="Tipo de movimiento">
-      <button v-for="(n, k) in tipos" :key="k" type="button" :class="{ activo: m.tipo === k }" :aria-pressed="m.tipo === k" @click="m.tipo = k">{{ n }}</button>
+      <button v-for="(n, k) in tipos" :key="k" type="button" :class="{ activo: m.tipo === k }" :aria-pressed="m.tipo === k" :title="nombresTipo[k]" @click="m.tipo = k">{{ n }}</button>
     </div>
     <p v-else class="nota">Corresponde a <strong>{{ nombreVinculo }}</strong> de {{ nombrePeriodo(m.periodo) }}.</p>
 
@@ -143,7 +144,7 @@ export const MovimientoForm = {
 
     return {
       m, vinculado, nombreVinculo, saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar, fmt, nombrePeriodo,
-      tipos: TIPOS_MOVIMIENTO, listaCuentas: computed(cuentas), listaPersonas: computed(personas), listaCategorias: computed(categorias),
+      tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO, listaCuentas: computed(cuentas), listaPersonas: computed(personas), listaCategorias: computed(categorias),
       listaPrestamos: computed(() => vivos('prestamos')), ...f,
     };
   },
@@ -419,6 +420,21 @@ export const nuevoMovimiento = (base = {}) =>
 export const editarMovimiento = (m) => abrirModal('Editar movimiento', MovimientoForm, { inicial: m });
 export const registrarCompromiso = (item, periodo) =>
   abrirModal(`Registrar: ${item.nombre}`, MovimientoForm, { inicial: movimientoParaCompromiso(item, periodo) });
+
+// Abre el pago ya registrado para editarlo, o el formulario para registrarlo.
+export const abrirCompromiso = (item, periodo) =>
+  (item.hecho ? editarMovimiento(item.movimientos[0]) : registrarCompromiso(item, periodo));
+
+// Toque en el círculo de un compromiso: lo fijo se registra al instante con el monto de
+// siempre (con opción de deshacer); lo variable abre el formulario para escribir el monto real.
+export function marcarCompromiso(item, periodo) {
+  if (item.hecho) return editarMovimiento(item.movimientos[0]);
+  if (item.clase === 'fijo_variable' || (item.clase === 'provision' && item.parte === 'pagar')) {
+    return registrarCompromiso(item, periodo);
+  }
+  const m = guardar('movimientos', movimientoParaCompromiso(item, periodo));
+  aviso(`Registrado: ${item.nombre}, ${fmt(item.esperado)}`, 'ok', 6000, { texto: 'Deshacer', fn: () => borrar('movimientos', m.id) });
+}
 export const editarPlantilla = (t = {}) => abrirModal(t.id ? 'Editar compromiso' : 'Nuevo compromiso', PlantillaForm, { inicial: t });
 export const editarPrestamo = (p = {}) => abrirModal(p.id ? 'Editar préstamo' : 'Nuevo préstamo', PrestamoForm, { inicial: p });
 export const editarCuenta = (c = {}) => abrirModal(c.id ? 'Editar cuenta' : 'Nueva cuenta', CuentaForm, { inicial: c });

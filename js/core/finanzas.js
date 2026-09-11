@@ -99,6 +99,15 @@ export function estadoPrestamo(p, movimientos = []) {
   };
 }
 
+// Deuda total estimada al cierre de `periodo`, con los pagos registrados hasta ese mes.
+// Antes del saldo conocido de un préstamo se usa ese saldo.
+export function deudaAl(doc, periodo) {
+  const movs = doc.movimientos.filter((m) => vivo(m) && (m.periodo || periodoDe(m.fecha)) <= periodo);
+  const total = doc.prestamos.filter(vivo).reduce(
+    (a, p) => a + (periodo < p.saldoPeriodo ? Number(p.saldo) || 0 : estadoPrestamo(p, movs).saldo), 0);
+  return redondear(total);
+}
+
 // Un préstamo sigue activo en `periodo` si no pasó su última cuota ni se terminó de pagar antes.
 function prestamoActivoEn(p, periodo, movimientos) {
   if (periodo > periodoDe(p.ultimaCuota)) return false;

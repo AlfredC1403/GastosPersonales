@@ -1,8 +1,8 @@
-import { store, fmt, vivos, nombrePersona, guardarConfig } from '../store.js';
+import { store, fmt, fmtEntero, fmtCorto, vivos, nombrePersona, guardarConfig } from '../store.js';
 import { estadoPrestamo, prestamosParaSimular, simularDeudas, ordenarPrioridad } from '../core/finanzas.js';
 import { nombrePeriodo, sumarMeses, mesesEntre, duracion, periodoActual } from '../core/util.js';
-import { ChartBox, Icono } from './componentes.js';
-import { lineasDeuda, violeta, gris, grisClaro, serie } from './graficos.js';
+import { Icono } from './componentes.js';
+import { BarraSegmentos, LineaPlan } from './graficos.js';
 import { nuevoMovimiento, editarPrestamo } from './formularios.js';
 
 const { reactive, computed, watch, onBeforeUnmount } = Vue;
@@ -10,75 +10,89 @@ const { reactive, computed, watch, onBeforeUnmount } = Vue;
 const PLAN_INICIAL = { estrategia: 'bola', extraMensual: 0, extraJunio: 0, extraDiciembre: 0, excluidos: [], orden: [] };
 const copia = (x) => JSON.parse(JSON.stringify(x));
 
+// "−10 m", "−2 a", "−21 a 8 m"
+function antesCorto(meses) {
+  if (!(meses > 0)) return '';
+  if (meses < 12) return `−${meses} m`;
+  const a = Math.floor(meses / 12);
+  const m = meses % 12;
+  return `−${a} a${m ? ` ${m} m` : ''}`;
+}
+
 // ---------------------------------------------------------------- Simulador bola de nieve
 
 export const Simulador = {
-  components: { ChartBox, Icono },
+  components: { Icono, LineaPlan },
   template: `
-  <section class="seccion">
-    <h2>Plan bola de nieve</h2>
-    <p class="nota">Simula cuánto pagarle a las deudas de ahora en adelante. Cada mes se paga lo mismo que hoy
-      ({{ fmt(cuotasIncluidas) }} en cuotas) más lo extra, y cuando un préstamo se termina, su cuota completa pasa al siguiente de la lista.</p>
+  <div class="pila">
+    <div style="margin-top: 8px">
+      <h2 class="cifra" style="font-size: 1.5rem">Plan bola de nieve</h2>
+      <p class="nota" style="margin-top: 4px">Cada mes se paga lo mismo que hoy ({{ fmt(cuotasIncluidas) }} en cuotas) más lo extra.
+        Cuando un préstamo se termina, su cuota completa pasa al siguiente.</p>
+    </div>
 
-    <div class="tarjeta">
+    <article class="tarjeta">
       <div class="segmentos" role="group" aria-label="Estrategia">
         <button v-for="e in estrategias" :key="e.id" type="button" :class="{ activo: plan.estrategia === e.id }" :aria-pressed="plan.estrategia === e.id" @click="plan.estrategia = e.id">{{ e.nombre }}</button>
       </div>
-      <p class="nota">{{ estrategiaActual.ayuda }}</p>
-      <div class="fila-campos">
+      <p class="nota" style="margin-top: 10px">{{ estrategiaActual.ayuda }}</p>
+      <div class="fila-campos" style="margin-top: 14px">
         <label class="campo"><span>Extra cada mes</span><input v-model.number="plan.extraMensual" type="number" min="0" step="500" inputmode="decimal"></label>
-        <label class="campo"><span>Extra en junio (décimo cuarto)</span><input v-model.number="plan.extraJunio" type="number" min="0" step="1000" inputmode="decimal"></label>
-        <label class="campo"><span>Extra en diciembre (décimo tercero)</span><input v-model.number="plan.extraDiciembre" type="number" min="0" step="1000" inputmode="decimal"></label>
+        <label class="campo"><span>Extra en junio</span><input v-model.number="plan.extraJunio" type="number" min="0" step="1000" inputmode="decimal"></label>
+        <label class="campo"><span>Extra en diciembre</span><input v-model.number="plan.extraDiciembre" type="number" min="0" step="1000" inputmode="decimal"></label>
       </div>
-      <h3 style="margin: 16px 0 4px">Orden de pago</h3>
-      <ul class="lista">
-        <li v-for="(p, i) in listaOrden" :key="p.id">
-          <label class="casilla crece">
-            <input type="checkbox" :checked="!plan.excluidos.includes(p.id)" @change="alternar(p.id)">
-            <span><strong v-if="!plan.excluidos.includes(p.id)">{{ i + 1 }}.</strong> {{ p.nombre }}
-              <span class="tenue">· {{ fmt(p.saldo) }} · {{ p.tasa }}%</span></span>
-          </label>
-          <template v-if="plan.estrategia === 'personalizado' && !plan.excluidos.includes(p.id)">
-            <button type="button" class="icono-btn" :aria-label="'Subir ' + p.nombre" @click="mover(p.id, -1)"><icono n="arriba"/></button>
-            <button type="button" class="icono-btn" :aria-label="'Bajar ' + p.nombre" @click="mover(p.id, 1)"><icono n="abajo"/></button>
+      <p class="nota chica" style="margin-top: 8px">Junio y diciembre sirven para simular abonos con el décimo cuarto y el décimo tercer mes.</p>
+      <h3 class="titulo-grupo" style="margin-top: 18px">Orden de pago</h3>
+      <ol class="lista" style="margin-top: 6px">
+        <li v-for="(p, i) in listaOrden" :key="p.id" class="fila">
+          <span class="num-circulo" :class="{ fuera: fuera(p.id) }">{{ fuera(p.id) ? '–' : i + 1 }}</span>
+          <span class="fila-titulo" :class="{ tenue: fuera(p.id) }" style="flex: 1; min-width: 0; font-size: 0.92rem">{{ p.nombre }}</span>
+          <span class="tenue" style="font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap">{{ fmtEntero(p.saldo) }} · {{ p.tasa }}%</span>
+          <template v-if="plan.estrategia === 'personalizado' && !fuera(p.id)">
+            <button type="button" class="btn-icono" :aria-label="'Subir ' + p.nombre" @click="mover(p.id, -1)"><icono n="arriba" :t="16"/></button>
+            <button type="button" class="btn-icono" :aria-label="'Bajar ' + p.nombre" @click="mover(p.id, 1)"><icono n="abajo" :t="16"/></button>
           </template>
+          <button type="button" class="interruptor chico" :class="{ on: !fuera(p.id) }" role="switch" :aria-checked="!fuera(p.id)"
+                  :aria-label="(fuera(p.id) ? 'Incluir ' : 'Sacar del plan ') + p.nombre" @click="alternar(p.id)"><span></span></button>
         </li>
-      </ul>
-    </div>
+      </ol>
+    </article>
 
-    <p v-if="!incluidos.length" class="vacio">Marca al menos un préstamo para simular.</p>
+    <p v-if="!incluidos.length" class="vacio">Activa al menos un préstamo para simular.</p>
     <template v-else>
-      <div class="resultado">
-        <div class="kpi destacado"><span>Con el plan terminan en</span><strong>{{ nombrePeriodo(con.fin) }}</strong><small>{{ duracion(con.meses) }} desde hoy</small></div>
-        <div class="kpi"><span>Sin plan terminarían en</span><strong>{{ nombrePeriodo(sin.fin) }}</strong><small>{{ mesesAntes > 0 ? duracion(mesesAntes) + ' más tarde' : 'lo mismo' }}</small></div>
-        <div class="kpi"><span>Intereses y seguros que se ahorran</span><strong>{{ fmt(ahorro) }}</strong><small>{{ fmt(con.interes + con.seguros) }} con el plan</small></div>
-        <div class="kpi"><span>Pago mensual a deudas</span><strong>{{ fmt(con.presupuesto) }}</strong><small v-if="extrasAnuales">+ {{ fmt(extrasAnuales) }} al año en junio y diciembre</small><small v-else>cuotas actuales + extra</small></div>
+      <div class="kpis">
+        <div class="kpi destacado"><div class="kpi-et">Con el plan terminan en</div><div class="kpi-val">{{ nombrePeriodo(con.fin) }}</div><div class="kpi-nota">{{ duracion(con.meses) }} desde hoy</div></div>
+        <div class="kpi"><div class="kpi-et">Sin plan</div><div class="kpi-val">{{ nombrePeriodo(sin.fin) }}</div><div class="kpi-nota">{{ mesesAntes > 0 ? duracion(mesesAntes) + ' más tarde' : 'lo mismo' }}</div></div>
+        <div class="kpi"><div class="kpi-et">Se ahorran</div><div class="kpi-val positivo">{{ fmtEntero(ahorro) }}</div><div class="kpi-nota">en intereses y seguros</div></div>
+        <div class="kpi"><div class="kpi-et">Pago mensual</div><div class="kpi-val">{{ fmt(con.presupuesto) }}</div><div class="kpi-nota">{{ extrasAnuales ? '+ ' + fmtEntero(extrasAnuales) + ' al año en junio y diciembre' : 'cuotas actuales + extra' }}</div></div>
       </div>
-      <div class="tarjeta">
-        <div class="leyenda">
-          <span><i :style="{ background: colorSin }"></i>Sin plan (línea punteada)</span>
-          <span><i :style="{ background: colorCon }"></i>Con el plan</span>
+
+      <article class="tarjeta">
+        <div class="leyenda" style="margin: 0 0 12px">
+          <span><i class="linea-sin"></i>Sin plan</span>
+          <span><i class="linea-con"></i>Con el plan</span>
         </div>
-        <chart-box :config="cfg" :alto="260" etiqueta="Saldo total de las deudas mes a mes, con y sin plan"/>
-        <div class="envoltura-tabla" style="margin-top: 12px">
+        <linea-plan :periodos="grafico.periodos" :sin="grafico.sin" :con="grafico.con" :formatear-mes="(p) => nombrePeriodo(p)" :formatear="fmtCorto"/>
+        <div class="envoltura-tabla">
           <table class="tabla">
-            <thead><tr><th>#</th><th>Préstamo</th><th class="num">Saldo hoy</th><th>Sin plan</th><th>Con el plan</th><th class="num">Antes</th></tr></thead>
+            <thead><tr><th>Préstamo</th><th class="num">Saldo</th><th>Sin plan</th><th>Con el plan</th></tr></thead>
             <tbody>
               <tr v-for="f in filas" :key="f.id">
-                <td>{{ f.i }}</td><td>{{ f.nombre }}</td><td class="num">{{ fmt(f.saldo) }}</td>
-                <td>{{ nombrePeriodo(f.finSin, true) }}</td><td><strong>{{ nombrePeriodo(f.finCon, true) }}</strong></td>
-                <td class="num">{{ f.antes > 0 ? duracion(f.antes) : '—' }}</td>
+                <td>{{ f.nombre }}</td>
+                <td class="num">{{ fmtEntero(f.saldo) }}</td>
+                <td class="tenue">{{ nombrePeriodo(f.finSin, true) }}</td>
+                <td><b style="font-weight: 600">{{ nombrePeriodo(f.finCon, true) }}</b><span v-if="f.antes > 0" class="positivo" style="display: block; font-size: 0.74rem">{{ antesCorto(f.antes) }}</span></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="plan.excluidos.length && con.fin" class="nota">Desde {{ nombrePeriodo(sumarMeses(con.fin, 1)) }} quedarían libres {{ fmt(con.presupuesto) }} al mes;
-          los préstamos fuera del plan siguen su calendario normal.</p>
-        <p class="nota">Supuestos: tasas fijas, sin penalidades y con abonos a capital permitidos. Es una simulación, no asesoría financiera.
-          El plan se guarda y lo ven todos en el hogar.</p>
-      </div>
+        <p v-if="plan.excluidos.length && con.fin" class="nota" style="margin-top: 14px">Desde {{ nombrePeriodo(sumarMeses(con.fin, 1)) }} quedarían libres
+          {{ fmt(con.presupuesto) }} al mes; los préstamos fuera del plan siguen su calendario normal.</p>
+        <p class="nota chica" style="margin-top: 14px">Supuestos: tasas fijas, sin penalidades y con abonos a capital permitidos.
+          Es una simulación, no asesoría financiera. El plan se guarda y lo ven todos en el hogar.</p>
+      </article>
     </template>
-  </section>`,
+  </div>`,
   setup() {
     const plan = reactive({ ...copia(PLAN_INICIAL), ...copia(store.doc.config.plan || {}) });
 
@@ -96,13 +110,14 @@ export const Simulador = {
     onBeforeUnmount(() => clearTimeout(temporizador));
 
     const todos = computed(() => prestamosParaSimular(store.doc));
-    const incluidos = computed(() => todos.value.filter((p) => !plan.excluidos.includes(p.id)));
+    const fuera = (id) => plan.excluidos.includes(id);
+    const incluidos = computed(() => todos.value.filter((p) => !fuera(p.id)));
     const cuotasIncluidas = computed(() => incluidos.value.reduce((a, p) => a + p.cuota, 0));
     const desde = computed(() => {
       const ultimos = todos.value.map((p) => p.ultimoPeriodo).sort();
       return ultimos.length ? sumarMeses(ultimos[ultimos.length - 1], 1) : sumarMeses(periodoActual(), 1);
     });
-    const ordenManual = computed(() => plan.orden.length ? plan.orden : ordenarPrioridad(incluidos.value, 'bola').map((p) => p.id));
+    const ordenManual = computed(() => (plan.orden.length ? plan.orden : ordenarPrioridad(incluidos.value, 'bola').map((p) => p.id)));
     const opciones = computed(() => ({
       desde: desde.value, estrategia: plan.estrategia, orden: ordenManual.value,
       extraMensual: Number(plan.extraMensual) || 0, extraJunio: Number(plan.extraJunio) || 0, extraDiciembre: Number(plan.extraDiciembre) || 0,
@@ -114,16 +129,25 @@ export const Simulador = {
     const extrasAnuales = computed(() => (Number(plan.extraJunio) || 0) + (Number(plan.extraDiciembre) || 0));
     const listaOrden = computed(() => [
       ...con.value.orden.map((id) => todos.value.find((p) => p.id === id)),
-      ...todos.value.filter((p) => plan.excluidos.includes(p.id)),
+      ...todos.value.filter((p) => fuera(p.id)),
     ].filter(Boolean));
-    const filas = computed(() => con.value.orden.map((id, i) => {
+    const filas = computed(() => con.value.orden.map((id) => {
       const c = con.value.prestamos.find((p) => p.id === id);
       const s = sin.value.prestamos.find((p) => p.id === id);
-      return { i: i + 1, id, nombre: c.nombre, saldo: c.saldoInicial, finSin: s?.fin, finCon: c.fin, antes: s?.fin && c.fin ? mesesEntre(c.fin, s.fin) : 0 };
+      return { id, nombre: c.nombre, saldo: c.saldoInicial, finSin: s?.fin, finCon: c.fin, antes: s?.fin && c.fin ? mesesEntre(c.fin, s.fin) : 0 };
     }));
 
+    // El gráfico cubre hasta que termina el plan (unos meses más para ver la línea en cero).
+    const grafico = computed(() => {
+      const total = incluidos.value.reduce((a, p) => a + p.saldo, 0);
+      const n = Math.min(sin.value.serie.length, con.value.meses + 6) + 1;
+      const periodos = Array.from({ length: n }, (_, i) => sumarMeses(desde.value, i - 1));
+      const valores = (serie) => periodos.map((_, i) => (i === 0 ? total : serie[i - 1]?.total ?? 0));
+      return { periodos, sin: valores(sin.value.serie), con: valores(con.value.serie) };
+    });
+
     function alternar(id) {
-      plan.excluidos = plan.excluidos.includes(id) ? plan.excluidos.filter((x) => x !== id) : [...plan.excluidos, id];
+      plan.excluidos = fuera(id) ? plan.excluidos.filter((x) => x !== id) : [...plan.excluidos, id];
     }
     function mover(id, delta) {
       const ids = ordenarPrioridad(incluidos.value, 'personalizado', ordenManual.value).map((p) => p.id);
@@ -134,16 +158,6 @@ export const Simulador = {
       plan.orden = ids;
     }
 
-    const cfg = () => {
-      const s = sin.value.serie;
-      const c = con.value.serie;
-      if (!s.length) return null;
-      const periodos = Array.from({ length: Math.max(s.length, c.length) + 1 }, (_, i) => sumarMeses(desde.value, i - 1));
-      const total = incluidos.value.reduce((a, p) => a + p.saldo, 0);
-      const valores = (serieSim) => periodos.map((_, i) => (i === 0 ? total : serieSim[i - 1]?.total ?? 0));
-      return lineasDeuda(periodos, valores(s), valores(c), (p) => nombrePeriodo(p, true));
-    };
-
     const estrategias = [
       { id: 'bola', nombre: 'Bola de nieve', ayuda: 'Primero el préstamo con menor saldo: se terminan deudas más rápido y se ve el avance.' },
       { id: 'avalancha', nombre: 'Avalancha', ayuda: 'Primero el préstamo con la tasa más alta: suele ahorrar más en intereses.' },
@@ -152,8 +166,8 @@ export const Simulador = {
     const estrategiaActual = computed(() => estrategias.find((e) => e.id === plan.estrategia) || estrategias[0]);
 
     return {
-      plan, todos, incluidos, cuotasIncluidas, sin, con, mesesAntes, ahorro, extrasAnuales, listaOrden, filas, alternar, mover, cfg,
-      estrategias, estrategiaActual, fmt, nombrePeriodo, duracion, sumarMeses, colorSin: gris(), colorCon: serie(0),
+      plan, incluidos, cuotasIncluidas, sin, con, mesesAntes, ahorro, extrasAnuales, listaOrden, filas, grafico, fuera, alternar, mover,
+      estrategias, estrategiaActual, fmt, fmtEntero, fmtCorto, nombrePeriodo, duracion, sumarMeses, antesCorto,
     };
   },
 };
@@ -161,39 +175,41 @@ export const Simulador = {
 // ---------------------------------------------------------------- Vista de préstamos
 
 export const VistaPrestamos = {
-  components: { Simulador },
+  components: { Simulador, BarraSegmentos },
   template: `
-  <section>
-    <div class="kpis">
-      <div class="kpi"><span>Deuda total</span><strong>{{ fmt(totales.saldo) }}</strong><small>{{ activos.length }} préstamos activos</small></div>
-      <div class="kpi"><span>Cuotas al mes</span><strong>{{ fmt(totales.cuotas) }}</strong><small>incluye seguros</small></div>
-      <div class="kpi"><span>Interés este mes</span><strong>{{ fmt(totales.interes) }}</strong><small>{{ totales.cuotas ? Math.round(totales.interes / totales.cuotas * 100) : 0 }}% de las cuotas</small></div>
+  <section class="pila">
+    <div>
+      <p class="etiqueta">Deuda total</p>
+      <p class="hero-num">{{ fmt(totales.saldo) }}</p>
+      <p class="hero-texto">{{ activos.length }} {{ activos.length === 1 ? 'préstamo activo' : 'préstamos activos' }} · {{ fmt(totales.cuotas) }} al mes · {{ fmt(totales.interes) }} de eso es interés.</p>
     </div>
 
-    <div class="tarjetas">
-      <article v-for="x in lista" :key="x.p.id" class="tarjeta">
-        <header><h3>{{ x.p.nombre }}</h3><span class="chip">{{ nombrePersona(x.p.responsableId) }}</span><span v-if="x.e.pagado" class="chip ok">Pagado</span></header>
-        <p class="grande monto">{{ fmt(x.e.saldo) }}</p>
-        <p class="nota" style="margin-top: 2px">Saldo estimado · {{ x.p.tasa }}% anual · cuota {{ fmt(x.p.cuota) }}</p>
-        <template v-if="!x.e.pagado">
-          <div class="reparto" role="img" :aria-label="descripcionReparto(x)">
-            <span v-for="s in partes(x)" :key="s.n" :style="{ flex: s.v, background: s.c }"></span>
-          </div>
-          <div class="leyenda"><span v-for="s in partes(x)" :key="s.n"><i :style="{ background: s.c }"></i>{{ s.n }} {{ fmt(s.v) }}</span></div>
-          <dl class="datos">
-            <dt>Termina</dt><dd>{{ nombrePeriodo(x.e.finEstimado) }}</dd>
-            <dt>Cuotas que faltan</dt><dd>{{ x.e.restantes }}</dd>
-            <dt>Seguro en la cuota</dt><dd>{{ fmt(x.e.seguro) }}{{ x.p.seguro == null ? ' (estimado)' : '' }}</dd>
-            <dt>Saldo según</dt><dd>cuota de {{ nombrePeriodo(x.p.saldoPeriodo, true) }}{{ x.e.cuotasPagadas ? ' + ' + x.e.cuotasPagadas + ' pagos registrados' : '' }}</dd>
-          </dl>
-        </template>
-        <div class="botones">
-          <button v-if="!x.e.pagado" type="button" class="btn chico" @click="abonar(x.p)">Abonar a capital</button>
-          <button type="button" class="btn chico" @click="editarPrestamo(x.p)">Editar o actualizar saldo</button>
+    <article v-for="x in lista" :key="x.p.id" class="tarjeta">
+      <div class="tarjeta-cab pegada">
+        <h2>{{ x.p.nombre }}</h2>
+        <span class="chip">{{ nombrePersona(x.p.responsableId) }}</span>
+        <span v-if="x.e.pagado" class="chip ok">Pagado</span>
+      </div>
+      <p class="hero-num" style="font-size: 1.85rem; margin-top: 8px">{{ fmt(x.e.saldo) }}</p>
+      <p class="nota chica" style="margin: 6px 0 14px">{{ x.p.tasa }}% anual · cuota {{ fmt(x.p.cuota) }}{{ x.e.pagado ? '' : ' · ' + x.e.restantes + ' cuotas' }}</p>
+      <template v-if="!x.e.pagado">
+        <barra-segmentos clase="fina" :segmentos="partes(x)"/>
+        <div class="leyenda">
+          <span v-for="s in partes(x)" :key="s.nombre"><i class="punto" :style="{ background: s.color, border: s.borde }"></i>{{ s.nombre }} {{ fmtEntero(s.valor) }}</span>
         </div>
-      </article>
-    </div>
-    <div class="botones"><button type="button" class="btn" @click="editarPrestamo()">+ Nuevo préstamo</button></div>
+        <dl class="datos">
+          <dt>Termina</dt><dd>{{ nombrePeriodo(x.e.finEstimado) }}</dd>
+          <dt>Cuotas que faltan</dt><dd>{{ x.e.restantes }}</dd>
+          <dt>Seguro en la cuota</dt><dd>{{ fmt(x.e.seguro) }}{{ x.p.seguro == null ? ' (estimado)' : '' }}</dd>
+          <dt>Saldo según</dt><dd>cuota de {{ nombrePeriodo(x.p.saldoPeriodo, true) }}{{ x.e.cuotasPagadas ? ' + ' + x.e.cuotasPagadas + ' pagos' : '' }}</dd>
+        </dl>
+      </template>
+      <div class="botones">
+        <button v-if="!x.e.pagado" type="button" class="btn" @click="abonar(x.p)">Abonar a capital</button>
+        <button type="button" class="btn" @click="editarPrestamo(x.p)">Editar</button>
+      </div>
+    </article>
+    <button type="button" class="btn-punteado" @click="editarPrestamo()">+ Nuevo préstamo</button>
 
     <simulador v-if="activos.length"/>
   </section>`,
@@ -210,13 +226,12 @@ export const VistaPrestamos = {
     const partes = (x) => {
       const capital = Math.max(0, x.p.cuota - x.e.seguro - x.e.interesMes);
       return [
-        { n: 'Interés', v: x.e.interesMes, c: violeta() },
-        { n: 'Capital', v: capital, c: gris() },
-        { n: 'Seguro', v: x.e.seguro, c: grisClaro() },
+        { nombre: 'Interés', valor: x.e.interesMes, color: 'var(--s2)', titulo: `Interés ${fmt(x.e.interesMes)}` },
+        { nombre: 'Capital', valor: capital, color: 'var(--s3)', titulo: `Capital ${fmt(capital)}` },
+        { nombre: 'Seguro', valor: x.e.seguro, color: 'var(--sup2)', borde: '1px solid var(--linea2)', titulo: `Seguro ${fmt(x.e.seguro)}` },
       ];
     };
-    const descripcionReparto = (x) => partes(x).map((s) => `${s.n} ${fmt(s.v)}`).join(', ');
     const abonar = (p) => nuevoMovimiento({ tipo: 'abono', prestamoId: p.id, cuentaId: p.cuentaId || 'gastos', personaId: store.yo });
-    return { lista, activos, totales, partes, descripcionReparto, abonar, editarPrestamo, fmt, nombrePersona, nombrePeriodo };
+    return { lista, activos, totales, partes, abonar, editarPrestamo, fmt, fmtEntero, nombrePersona, nombrePeriodo };
   },
 };

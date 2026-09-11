@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cuotasRestantes, seguroEstimado, seguroDe, estadoPrestamo, saldosCuentas, compromisosDelMes,
-  movimientoParaCompromiso, resumenMes, presupuestoMensual, prestamosParaSimular, simularDeudas, equivalenteMensual,
+  movimientoParaCompromiso, resumenMes, presupuestoMensual, prestamosParaSimular, simularDeudas, equivalenteMensual, deudaAl,
 } from '../js/core/finanzas.js';
 import { sumarMeses, mesesEntre, dinero, dineroCorto, duracion } from '../js/core/util.js';
 import { docVacio } from '../js/core/modelo.js';
@@ -67,6 +67,18 @@ test('un abono del mismo día del saldo cuenta solo si se anotó después de reg
   const abono = (creado) => ({ id: creado, tipo: 'abono', prestamoId: 'rap', fecha: '2026-09-10', monto: 5000, creado });
   cerca(estadoPrestamo(rap, [abono('2026-09-10T15:00:00Z')]).saldo, 40036.66);
   cerca(estadoPrestamo(rap, [abono('2026-09-10T09:00:00Z')]).saldo, 45036.66);
+});
+
+test('deuda al cierre de cada mes usa solo los pagos registrados hasta ese mes', () => {
+  const doc = { prestamos: PRESTAMOS, movimientos: [
+    { id: 'o', tipo: 'gasto', prestamoId: 'casa', periodo: '2026-10', fecha: '2026-10-07', monto: 14916.23 },
+    { id: 'a', tipo: 'abono', prestamoId: 'rap', periodo: '2026-11', fecha: '2026-11-15', monto: 5000, creado: '2026-11-15T10:00:00Z' },
+  ] };
+  const inicial = 168000 + 277297.49 + 45036.66 + 1679956.53;
+  cerca(deudaAl(doc, '2026-09'), inicial);
+  cerca(deudaAl(doc, '2026-10'), inicial - 1078.21);
+  cerca(deudaAl(doc, '2026-11'), inicial - 1078.21 - 5000);
+  cerca(deudaAl(doc, '2026-08'), inicial); // antes del saldo conocido
 });
 
 test('sin plan, cada préstamo termina en la fecha del banco', () => {

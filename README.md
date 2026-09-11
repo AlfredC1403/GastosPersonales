@@ -9,7 +9,8 @@ Los datos se guardan en un archivo JSON en OneDrive y en una copia en el navegad
 | Capa | Tecnología | Versión |
 |---|---|---|
 | Interfaz | Vue (cargado desde CDN, sin paso de compilación) | 3.5.42 |
-| Gráficos | Chart.js | 4.5.1 |
+| Gráficos | SVG y CSS propios, con colores del tema | |
+| Tipografía | Inter y Outfit (Google Fonts) | |
 | Datos | Archivo JSON en OneDrive mediante Microsoft Graph | |
 | Publicación | GitHub Pages | |
 | Pruebas | Node.js (`node --test`) | 22 o superior |
@@ -42,7 +43,7 @@ Sin `clientId`, la app guarda los datos solo en el navegador.
 python -m http.server 8080 --bind 127.0.0.1
 ```
 
-Abre `http://localhost:8080`. Para cargar datos, usa **Ajustes** > **Importar archivo**.
+Abre `http://localhost:8080`. Para cargar datos, usa **Más** > **Ajustes** > **Importar archivo**.
 
 Pruebas:
 
@@ -53,10 +54,11 @@ npm test
 ## Estructura del proyecto
 
 ```text
-index.html        Página, política de seguridad y carga de Vue y Chart.js
-css/app.css       Estilos (modo claro y oscuro)
+index.html        Página, política de seguridad, fuentes y carga de Vue
+css/app.css       Estilos y variables de color (modo claro y oscuro)
 js/core/          Cálculos sin interfaz (préstamos, bola de nieve, saldos, fusión de datos)
-js/ui/            Vistas, formularios y gráficos
+js/ui/            Vistas, formularios y gráficos SVG
+js/tema.js        Preferencias del dispositivo (tema y vista de pendientes)
 js/store.js       Estado, guardado en el navegador y sincronización
 js/onedrive.js    Inicio de sesión con Microsoft y lectura y escritura del archivo
 sw.js             Caché para abrir la app sin conexión
