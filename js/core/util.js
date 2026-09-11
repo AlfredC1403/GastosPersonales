@@ -1,0 +1,69 @@
+// Utilidades puras: dinero, fechas ('YYYY-MM-DD') y periodos ('YYYY-MM').
+
+export const redondear = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+export function hoy(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export const periodoDe = (fecha) => String(fecha).slice(0, 7);
+export const periodoActual = () => periodoDe(hoy());
+export const mesDe = (periodo) => Number(periodo.slice(5, 7));
+
+export function sumarMeses(periodo, n) {
+  const [y, m] = periodo.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+}
+
+export function mesesEntre(desde, hasta) {
+  const [ya, ma] = desde.split('-').map(Number);
+  const [yb, mb] = hasta.split('-').map(Number);
+  return (yb - ya) * 12 + (mb - ma);
+}
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const MESES_CORTOS = MESES.map((m) => m.slice(0, 3));
+
+export const nombreMes = (m) => MESES[m - 1];
+
+export function nombrePeriodo(periodo, corto = false) {
+  if (!periodo) return '—';
+  const [y, m] = periodo.split('-').map(Number);
+  return `${(corto ? MESES_CORTOS : MESES)[m - 1]} ${y}`;
+}
+
+export function fechaCorta(fecha) {
+  if (!fecha) return '';
+  const [, m, d] = fecha.split('-').map(Number);
+  return `${d} ${MESES_CORTOS[m - 1]}`;
+}
+
+// "7 años y 3 meses", "11 meses"
+export function duracion(meses) {
+  if (!Number.isFinite(meses)) return 'nunca';
+  const a = Math.floor(meses / 12);
+  const m = meses % 12;
+  const partes = [];
+  if (a) partes.push(`${a} ${a === 1 ? 'año' : 'años'}`);
+  if (m || !a) partes.push(`${m} ${m === 1 ? 'mes' : 'meses'}`);
+  return partes.join(' y ');
+}
+
+const fmt2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+
+// dinero(-1234.5) → "-L1,234.50"
+export function dinero(n, { simbolo = 'L', decimales = true } = {}) {
+  const v = redondear(n || 0);
+  return `${v < 0 ? '-' : ''}${simbolo}${(decimales ? fmt2 : fmt0).format(Math.abs(v))}`;
+}
+
+// 12500 → "L12.5k", 1680000 → "L1.68M"
+export function dineroCorto(n, simbolo = 'L') {
+  const v = Math.abs(n || 0);
+  const s = n < 0 ? '-' : '';
+  if (v >= 1e6) return `${s}${simbolo}${+(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${s}${simbolo}${+(v / 1e3).toFixed(1)}k`;
+  return `${s}${simbolo}${Math.round(v)}`;
+}

@@ -1,0 +1,10 @@
+{
+  "name": "gastos-hogar",
+  "private": true,
+  "type": "module",
+  "description": "Finanzas del hogar: app web estática que guarda los datos en OneDrive.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "dev": "python -m http.server 8080 --bind 127.0.0.1"
+  }
+}

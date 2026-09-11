@@ -1,0 +1,11 @@
+# Datos personales: NUNCA van al repositorio (en GitHub Pages gratis el repo es público).
+privado/
+*.respaldo.json
+gastos-respaldo-*.json
+movimientos-*.csv
+
+# Herramientas locales
+.claude/
+node_modules/
+.DS_Store
+Thumbs.db
