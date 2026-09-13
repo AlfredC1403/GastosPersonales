@@ -3,7 +3,7 @@
 // sigue con localStorage como antes.
 const BD = 'gastos-hogar';
 const TABLA = 'datos';
-const CLAVES_LOCALES = { doc: 'gastos.doc', sync: 'gastos.sync' };
+const CLAVES_LOCALES = { doc: 'gastos.doc', sync: 'gastos.sync', agenda: 'gastos.agenda' };
 const CLAVE_MODO = 'gastos.almacen'; // 'local' si IndexedDB falló alguna vez en este navegador
 const CLAVE_MIGRADO = 'gastos.almacen.desde'; // fecha en que se pasó de localStorage a IndexedDB
 
@@ -134,6 +134,9 @@ export async function cargar() {
 
 export const guardarDoc = (doc) => escribir('doc', JSON.stringify(doc));
 export const guardarSync = (sync) => escribir('sync', JSON.stringify(sync));
+// Lo que vence en los próximos días, ya calculado, para que sw.js pueda avisar sin cargar la app
+// entera (un service worker no puede recalcular el documento). Ver js/notificaciones.js.
+export const guardarAgenda = (agenda) => escribir('agenda', JSON.stringify(agenda));
 
 // Copia del documento antes de migrarlo a otro esquema. Se guarda una sola vez por nombre;
 // si no hay espacio, se sigue sin ella (el respaldo principal queda en OneDrive).

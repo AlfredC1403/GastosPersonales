@@ -64,24 +64,31 @@ export const VistaReparto = {
         <barra-segmentos clase="media" :segmentos="barra" style="margin-top: 12px"/>
         <div class="envoltura-tabla">
           <table class="tabla">
-            <thead><tr><th>Persona</th><th class="num">Ingreso</th><th class="num">Le tocaría</th><th class="num">Paga hoy</th><th class="num">Diferencia</th></tr></thead>
+            <thead><tr><th>Persona</th><th class="num">Ingreso</th><th class="num">Le tocaría</th><th class="num">Según el plan</th><th class="num">Pagó de verdad</th><th class="num">Diferencia</th></tr></thead>
             <tbody>
               <tr v-for="p in r.personas" :key="p.id">
                 <td><i class="punto" :style="{ background: colorPersona(p.id), borderRadius: '50%' }"></i> {{ p.nombre }} <span class="tenue">{{ p.pct }}%</span></td>
                 <td class="num">{{ fmt(p.ingreso) }}</td>
                 <td class="num">{{ fmt(p.leToca) }}</td>
-                <td class="num">{{ fmt(p.pagaHoy) }}</td>
-                <td class="num">{{ p.diferencia > 0 ? '+' : '' }}{{ fmt(p.diferencia) }}</td>
+                <td class="num tenue">{{ fmt(p.pagaHoy) }}</td>
+                <td class="num">{{ fmt(p.pagadoReal) }}</td>
+                <td class="num" :class="{ negativo: p.diferenciaReal < 0, positivo: p.diferenciaReal > 0 }">{{ p.diferenciaReal > 0 ? '+' : '' }}{{ fmt(p.diferenciaReal) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <p class="nota" style="margin-top: 10px">{{ textoDiferencia }}</p>
+        <div v-if="r.liquidacion" class="caja-corte" style="margin-top: 10px">
+          <span><strong>Para quedar a cero en {{ nombrePeriodo(r.periodo) }}:</strong> {{ nombrePersona(r.liquidacion.de) }} le transfiere {{ fmt(r.liquidacion.monto) }} a {{ nombrePersona(r.liquidacion.a) }}.</span>
+          <span class="tenue" style="font-size: 0.8rem">Sale de lo que cada quien pagó de verdad este mes, no del plan. Las sugerencias de abajo cambian el plan de los meses que vienen.</span>
+        </div>
+        <p v-else-if="r.pagadoReal > 0" class="nota chica" style="margin-top: 6px">Lo que cada quien pagó de verdad este mes ya está a la par de lo que le tocaba.</p>
+        <p v-else class="nota chica" style="margin-top: 6px">Todavía no hay gastos registrados en {{ nombrePeriodo(r.periodo) }} con responsable, así que no hay nada que cuadrar.</p>
         <p v-if="r.sinResponsable" class="nota chica" style="margin-top: 6px">Además, {{ fmt(r.sinResponsable) }} no tienen responsable. Con los mismos porcentajes: {{ r.personas.map((p) => p.nombre + ' ' + fmt(p.parteSinResponsable)).join(' y ') }}.</p>
       </article>
 
       <article class="tarjeta">
-        <h2>Sugerencias</h2>
+        <h2>Sugerencias para el plan</h2>
         <p v-if="!r.sugerencias.length" class="vacio" style="padding: 10px 0">Lo que paga cada uno ya está cerca de lo que le tocaría.</p>
         <ul v-else class="lista" style="margin-top: 8px">
           <li v-for="(s, i) in r.sugerencias" :key="i" class="fila">
@@ -158,8 +165,8 @@ export const VistaReparto = {
       const orden = [...r.value.personas].sort((a, b) => b.diferencia - a.diferencia);
       const de = orden[0];
       const a = orden[orden.length - 1];
-      if (!de || Math.abs(de.diferencia) < 1) return 'Cada uno paga lo que le tocaría.';
-      return `${de.nombre} paga ${fmt(de.diferencia)} más de lo que le tocaría${a && a.diferencia < -1 ? `; ${a.nombre}, ${fmt(-a.diferencia)} menos` : ''}.`;
+      if (!de || Math.abs(de.diferencia) < 1) return 'En el plan, cada uno tiene asignado lo que le tocaría.';
+      return `En el plan, ${de.nombre} tiene asignado ${fmt(de.diferencia)} más de lo que le tocaría${a && a.diferencia < -1 ? `; ${a.nombre}, ${fmt(-a.diferencia)} menos` : ''}.`;
     });
     const titulo = (s) => (s.tipo === 'mover'
       ? `Pasar ${s.partidas.map((p) => `${p.nombre} (${fmt(p.monto)})`).join(' y ')} de ${nombrePersona(s.de)} a ${nombrePersona(s.a)}`

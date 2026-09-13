@@ -2,7 +2,7 @@ import {
   store, iniciar, sincronizar, soyYo, aviso, confirmar, personas, buscar, vivos, avisos, anioCargado, aniosDeLaCarpeta, abrirAnio, editarAnio,
   cerrarAniosAbiertos,
 } from './store.js';
-import { nombrePeriodo, sumarMeses, periodoActual, hoy } from './core/util.js';
+import { nombrePeriodo, sumarMeses, periodoActual, hoy, periodoDe } from './core/util.js';
 import { estadoVisible } from './sincronizacion.js';
 import * as od from './onedrive.js';
 import { prefs, alternarMenuContraido } from './tema.js';
@@ -10,12 +10,13 @@ import { pinActivo, minutosBloqueo, debeBloquear } from './bloqueo.js';
 import { Icono, ModalHost, Avisos, ConfirmHost, SelectorPersona, FranjaPersona } from './ui/componentes.js';
 import { PantallaBloqueo } from './ui/bloqueo.js';
 import { MenuLateral } from './ui/menu.js';
-import { nuevoMovimiento } from './ui/formularios.js';
+import { nuevoMovimiento, abrirRegistro } from './ui/formularios.js';
 import { VistaInicio } from './ui/inicio.js';
 import { VistaMes } from './ui/mes.js';
 import { VistaMovimientos } from './ui/movimientos.js';
 import { VistaAvisos } from './ui/avisos.js';
 import { iniciarRecordatorios } from './recordatorios.js';
+import { guardarAgenda, avisarAlAbrir } from './notificaciones.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw, defineAsyncComponent } = Vue;
 
@@ -100,6 +101,24 @@ const ACCESOS = [
 
 const partesRuta = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('/').map((x) => decodeURIComponent(x));
 const parametrosActuales = () => partesRuta().slice(1).filter(Boolean);
+
+// '#/registrar[/tipo/id/fecha]' no es una pantalla: abre el formulario que toca (el enlace de un
+// recordatorio de Outlook, o el acceso directo del icono) y deja la app donde corresponda.
+// Se resuelve antes de pintar la ruta, y sustituye la entrada del historial para que el botón
+// «atrás» no vuelva a abrir el formulario.
+function atenderRegistro() {
+  const [primero, ...resto] = partesRuta();
+  if (primero !== 'registrar') return false;
+  // Con datos de otro mes, primero se cambia de mes: el formulario se abre sobre el mes correcto.
+  const fecha = resto[2];
+  if (fecha) store.periodo = periodoDe(fecha);
+  const destino = abrirRegistro(resto) || '#/inicio';
+  history.replaceState(null, '', destino);
+  // replaceState no dispara hashchange: se avisa para que la pantalla siga a la dirección nueva.
+  // No se repite, porque la dirección ya no empieza por 'registrar'.
+  window.dispatchEvent(new Event('hashchange'));
+  return true;
+}
 
 const rutaActual = () => {
   const id = partesRuta()[0];
@@ -210,6 +229,7 @@ const App = {
     const menuAbierto = ref(false);
     const dlgMenu = ref(null);
     window.addEventListener('hashchange', () => {
+      if (atenderRegistro()) return; // ya redirigió y volvió a avisar con la dirección nueva
       ruta.value = rutaActual();
       parametros.value = parametrosActuales();
       menuAbierto.value = false;
@@ -331,6 +351,21 @@ const App = {
   },
 };
 
+// La agenda que lee sw.js para avisar: se rehace al abrir, al cambiar el día y unos segundos
+// después de cada edición (registrar un pago quita lo que ya no hay que recordar).
+let esperaAgenda = null;
+function refrescarAgenda() {
+  clearTimeout(esperaAgenda);
+  esperaAgenda = setTimeout(() => guardarAgenda(), 4000);
+}
+
 createApp(App).mount('#app');
-iniciar().then(iniciarRecordatorios);
+// Con los datos ya cargados se puede resolver '#/registrar/...' de la dirección con la que se abrió.
+iniciar().then(() => {
+  atenderRegistro();
+  guardarAgenda();
+  avisarAlAbrir();
+  watch(() => [store.hoy, store.rev], refrescarAgenda);
+  return iniciarRecordatorios();
+});
 precargarVistas();

@@ -1,8 +1,8 @@
 // Avisos: lo que conviene atender hoy, esta semana o cuando se pueda. Se calculan cada vez;
 // en el dispositivo solo se guarda qué avisos se pospusieron o se descartaron.
 import { vivo, TIPOS_RECIBO } from './modelo.js';
-import { periodoDe, sumarMeses, sumarDias, fechaEnMes, ultimoDia, fechaCorta, nombrePeriodo, dinero } from './util.js';
-import { resumenMes } from './reportes.js';
+import { periodoDe, sumarMeses, sumarDias, fechaEnMes, ultimoDia, fechaCorta, nombrePeriodo, dinero, diasDesde } from './util.js';
+import { resumenMes, ritmoDelMes, categoriasSobreSuPromedio } from './reportes.js';
 import { pagosSinRegistrar, estadoRecibo, netoEsperadoDe } from './nomina.js';
 import { resumenTarjeta, proximoCobro, fechaSaldoDe } from './tarjetas.js';
 import { estadoMetas } from './metas.js';
@@ -180,6 +180,64 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
       titulo: `Faltan montos en ${plural(sinMonto.length, 'partida o salario', 'partidas o salarios')}`, texto: `${sinMonto.join(', ')}.`,
       acciones: [{ tipo: 'ruta', ruta: '#/presupuesto', texto: 'Definir' }],
     });
+  }
+
+  // Ritmo del mes: partidas variables que van más rápido que el mes, y categorías muy por encima de
+  // lo normal. No son obligaciones, son hábitos: van en "Para revisar" y una sola vez por mes.
+  const ritmo = ritmoDelMes(ix, actual, 0);
+  if (ritmo) {
+    for (const it of resumenMes(ix, actual).partidas) {
+      const variable = it.forma === 'variable' || it.forma === 'abonos';
+      if (!variable || it.hecho || it.planilla || !(it.esperado > 0) || !(it.real > 0)) continue;
+      const avance = it.real / it.esperado;
+      if (avance <= ritmo.fraccion + 0.25) continue;
+      const pct = (x) => `${Math.round(x * 100)} %`;
+      agregar({
+        id: `ritmo:${it.clave}:${actual}`, cuando: 'revisar', tipo: 'ritmo', personaId: it.responsableId || null,
+        titulo: `${it.nombre} va más rápido que el mes`,
+        texto: avance >= 1
+          ? `Ya lleva ${L(it.real)} de ${L(it.esperado)} y el mes va por el ${pct(ritmo.fraccion)} (día ${ritmo.dia} de ${ritmo.dias}).`
+          : `Lleva ${L(it.real)} de ${L(it.esperado)}, el ${pct(avance)}, y el mes va por el ${pct(ritmo.fraccion)} (día ${ritmo.dia} de ${ritmo.dias}).`,
+        acciones: [{ tipo: 'ruta', ruta: '#/mes', texto: 'Ver el mes' }],
+      });
+    }
+    // Las dos categorías con más exceso: más de dos avisos de estos se vuelven ruido.
+    for (const c of categoriasSobreSuPromedio(ix, actual).slice(0, 2)) {
+      const nombre = ix.categorias.get(c.categoriaId)?.nombre || 'Sin categoría';
+      agregar({
+        id: `sobre-promedio:${c.categoriaId}:${actual}`, cuando: 'revisar', tipo: 'ritmo',
+        titulo: `${nombre} va muy por encima de lo normal`,
+        texto: `${L(c.gasto)} este mes, contra ${L(c.promedio)} de promedio en los meses anteriores.`,
+        acciones: [{ tipo: 'ruta', ruta: '#/movimientos', texto: 'Ver movimientos' }],
+      });
+    }
+  }
+
+  // La tasa de referencia, cuando el hogar tiene algo en dólares: mientras un cargo no se paga,
+  // su estimado en lempiras cuelga de esta tasa, y una vieja distorsiona en silencio la deuda de
+  // la tarjeta y el patrimonio. Solo se avisa si hay dólares de por medio.
+  const hayDolares = (ix.doc.cuentas || []).some((c) => vivo(c) && c.moneda === 'USD')
+    || [...ix.tarjetas.values()].some((t) => t.dolares?.cargos?.length > 0);
+  if (hayDolares) {
+    const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = ix.config;
+    const dias = desde ? diasDesde(desde, hoy) : null;
+    if (!tasa) {
+      agregar({
+        id: `tasa-falta:${actual}`, cuando: 'revisar', tipo: 'configuracion',
+        titulo: 'Falta la tasa de referencia del dólar',
+        texto: 'Sin ella, lo que está en dólares y no se ha pagado no se puede estimar en lempiras.',
+        acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Anotarla' }],
+      });
+    } else if (dias === null || dias > 35) {
+      agregar({
+        id: `tasa-vieja:${actual}`, cuando: 'revisar', tipo: 'configuracion',
+        titulo: 'La tasa de referencia del dólar está vieja',
+        texto: dias === null
+          ? `La anotada es ${tasa} y no se sabe de cuándo es.`
+          : `La anotada es ${tasa}, de hace ${dias} días. Con ella se estiman los cargos en dólares sin pagar.`,
+        acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Actualizar' }],
+      });
+    }
   }
 
   return out;

@@ -4,6 +4,7 @@ import { estadoPartidas, equivalenteMensual, presupuestoMensual, ingresosDelMes,
 import { pagosProgramados, ingresoMensual, reciboSugerido } from '../js/core/nomina.js';
 import { crearIndice } from '../js/core/asientos.js';
 import { docVacio } from '../js/core/modelo.js';
+import { calcularAvisos } from '../js/core/avisos.js';
 
 const cerca = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
 
@@ -171,4 +172,36 @@ test('presupuesto mensual por grupo, persona y medio; los aportes no son esencia
   cerca(p.porMedio.gastos, p.egresos);
   const ruth = presupuestoMensual(ix, '2026-10', { personaId: 'ruth' });
   cerca(ruth.egresos, 6000 + 8400);
+});
+
+// ---------------------------------------------------------------- Avisos de ritmo
+
+test('avisa de una partida variable que va más rápido que el mes, y no de las que van al paso', () => {
+  const hoy = '2026-09-13'; // día 13 de 30: el mes va por el 43 %
+  const gasto = (id, monto, partidaId) => ({
+    id, tipo: 'gasto', fecha: '2026-09-10', monto, cuentaId: 'gastos', categoriaId: 'comida', partidaId, actualizado: '2026-09-10T12:00:00Z',
+  });
+  const conGasto = (partidas, movimientos) => {
+    const doc = docVacio();
+    doc.config = { ...doc.config, inicio: '2026-09' };
+    doc.partidas = partidas;
+    doc.movimientos = movimientos;
+    return crearIndice(doc, { hoy });
+  };
+  const ritmos = (ix) => calcularAvisos(ix, { hoy }).filter((a) => a.tipo === 'ritmo').map((a) => a.titulo);
+
+  const superr = partida('super', { forma: 'variable', monto: 10000 });
+  // L8,000 de L10,000 (80 %) cuando el mes va por el 43 %: se avisa.
+  assert.deepEqual(ritmos(conGasto([superr], [gasto('g1', 8000, 'super')])), ['super va más rápido que el mes']);
+  // L4,000 (40 %) va al paso del mes: no se avisa.
+  assert.deepEqual(ritmos(conGasto([superr], [gasto('g1', 4000, 'super')])), []);
+  // Una partida de monto fijo no se mide por ritmo: se paga de una.
+  const luz = partida('luz', { forma: 'fijo', monto: 10000 });
+  assert.deepEqual(ritmos(conGasto([luz], [gasto('g1', 8000, 'luz')])), []);
+  // Sin nada gastado tampoco hay ritmo que juzgar.
+  assert.deepEqual(ritmos(conGasto([superr], [])), []);
+  // El aviso es uno por partida y por mes: su id lo fija.
+  const ix = conGasto([superr], [gasto('g1', 8000, 'super'), gasto('g2', 500, 'super')]);
+  const ids = calcularAvisos(ix, { hoy }).filter((a) => a.tipo === 'ritmo').map((a) => a.id);
+  assert.deepEqual(ids, ['ritmo:super:principal:2026-09']);
 });

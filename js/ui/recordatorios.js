@@ -1,6 +1,8 @@
 // Recordatorios en Outlook: activarlos en este dispositivo, elegir qué y cuándo avisa, probar la
 // alarma y ver lo que se va a recordar en los próximos 60 días.
 import { store, aviso, nombrePersona, confirmar } from '../store.js';
+import { prefs } from '../tema.js';
+import { activarNotificaciones, apagarNotificaciones, alcanceNotificaciones, permisoNotificaciones } from '../notificaciones.js';
 import * as od from '../onedrive.js';
 import { AVISOS_RECORDATORIO, ALCANCES_RECORDATORIO, CALENDARIOS_RECORDATORIO, DIAS_RECORDATORIOS } from '../core/recordatorios.js';
 import { fechaCorta, diaDeSemana, DIAS_CORTOS } from '../core/util.js';
@@ -83,6 +85,19 @@ export const VistaRecordatorios = {
       <p v-else class="vacio" style="padding: 8px 0">Nada que recordar en los próximos {{ dias }} días.</p>
     </article>
 
+    <article class="tarjeta">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Avisos en este teléfono</h2>
+        <span class="chip" :class="tel.clase">{{ tel.texto }}</span>
+      </div>
+      <p class="nota chica" style="margin-top: 4px">Aparte de Outlook, este dispositivo puede mostrar una notificación con lo que vence. No necesita cuenta de Microsoft.</p>
+      <p class="nota" style="margin-top: 10px">{{ tel.explicacion }}</p>
+      <div class="botones">
+        <button v-if="!prefs.notificaciones" type="button" class="btn primario" :disabled="tel.alcance === 'no'" @click="activarTelefono">Activar en este teléfono</button>
+        <button v-else type="button" class="btn" @click="apagarTelefono">Apagar en este teléfono</button>
+      </div>
+    </article>
+
     <p class="nota chica">Si la alarma no suena en el celular: en la app de Outlook abre la lista de calendarios y marca "Gastos del hogar", y revisa que Outlook tenga permiso para notificaciones. Si aun así no suena, elige tu calendario principal.</p>
   </section>`,
   setup() {
@@ -119,14 +134,48 @@ export const VistaRecordatorios = {
         aviso(e.message, 'error', 8000);
       }
     };
+    // Avisos del propio teléfono: qué puede hacer este navegador y en qué estado está.
+    const tel = computed(() => {
+      const alcance = alcanceNotificaciones();
+      const permisoTel = permisoNotificaciones();
+      if (alcance === 'no') {
+        return { texto: 'No disponible', clase: '', alcance, explicacion: 'Este navegador no puede mostrar notificaciones. Usa los recordatorios de Outlook.' };
+      }
+      if (permisoTel === 'denied') {
+        return { texto: 'Permiso negado', clase: 'mal', alcance, explicacion: 'Bloqueaste las notificaciones para este sitio. Se vuelven a permitir desde los ajustes del navegador.' };
+      }
+      const comoAvisa = alcance === 'periodico'
+        ? 'Con la app instalada, el navegador revisa cada tanto y avisa aunque esté cerrada. Si el sistema no le da la ocasión, el aviso sale al abrirla.'
+        : 'Este navegador no puede revisar en segundo plano, así que el aviso sale al abrir la app. Para que suene sin abrirla, usa los recordatorios de Outlook.';
+      if (!prefs.notificaciones) return { texto: 'Apagados', clase: '', alcance, explicacion: comoAvisa };
+      return {
+        texto: permisoTel === 'granted' ? 'Activos' : 'Falta el permiso', clase: permisoTel === 'granted' ? 'ok' : 'aviso', alcance,
+        explicacion: permisoTel === 'granted' ? comoAvisa : 'Falta dar permiso de notificaciones en este dispositivo.',
+      };
+    });
+
     return {
-      store, st, persona, c, permiso, lista, estado, textoUltima, horaPrueba, diaCorto, fechaCorta, nombrePersona, dias: DIAS_RECORDATORIOS,
+      store, prefs, tel, st, persona, c, permiso, lista, estado, textoUltima, horaPrueba, diaCorto, fechaCorta, nombrePersona, dias: DIAS_RECORDATORIOS,
       alcances: ALCANCES_RECORDATORIO, avisos: AVISOS_RECORDATORIO, calendarios: CALENDARIOS_RECORDATORIO, trabajaEnEsteDispositivo,
       activar: () => intentar(activarRecordatorios),
       actualizar: () => intentar(() => actualizarRecordatorios({ forzar: true }), () => (store.recordatorios.error ? '' : 'Calendario al día.')),
       cambiar: (cambios) => intentar(() => cambiarRecordatorios(cambios)),
       probar: () => intentar(() => probarAlarma(10), (p) => `Listo: la alarma debe sonar a las ${hora.format(p.alarma)}.`),
       quitarPrueba: () => intentar(borrarPrueba, 'Evento de prueba borrado.'),
+      activarTelefono: async () => {
+        try {
+          const alcance = await activarNotificaciones();
+          aviso(alcance === 'periodico'
+            ? 'Listo: este teléfono avisará de lo que vence.'
+            : 'Listo, pero este navegador solo puede avisar al abrir la app.', 'ok', 8000);
+        } catch (e) {
+          aviso(e.message, 'error', 8000);
+        }
+      },
+      apagarTelefono: async () => {
+        await apagarNotificaciones();
+        aviso('Este teléfono ya no avisará.', 'info');
+      },
       apagar: async () => {
         if (!await confirmar('Se apagan los recordatorios y se borran sus eventos del calendario de Outlook.',
           { titulo: '¿Apagar los recordatorios?', aceptar: 'Apagar', peligro: true })) return;

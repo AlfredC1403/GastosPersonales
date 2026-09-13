@@ -1,14 +1,22 @@
 {
+  "id": "gastos-hogar",
   "name": "Gastos del hogar",
   "short_name": "Gastos",
   "description": "Gastos, préstamos y ahorros del hogar, guardados en OneDrive.",
   "lang": "es",
+  "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f5f4ef",
-  "theme_color": "#2563c9",
+  "background_color": "#F8FAFC",
+  "theme_color": "#F8FAFC",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Registrar un gasto", "short_name": "Registrar", "url": "./#/registrar", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] },
+    { "name": "El mes", "short_name": "Mes", "url": "./#/mes", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] },
+    { "name": "Avisos", "short_name": "Avisos", "url": "./#/avisos", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
   ]
 }

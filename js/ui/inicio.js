@@ -4,7 +4,7 @@ import {
 import { resumenTarjeta } from '../core/tarjetas.js';
 import { estadoMetas, SITUACIONES_META } from '../core/metas.js';
 import { tramoDeFecha } from '../core/quincena.js';
-import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox } from '../core/reportes.js';
+import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox, ritmoDelMes } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl, estadoDe } from '../core/prestamos.js';
 import { SIN_RESPONSABLE, coincidePersona } from '../core/filtro.js';
@@ -60,6 +60,7 @@ export const VistaInicio = {
       <p v-if="!r.ingresoEsperado && !r.ingresoDelMes" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>
       <p v-else-if="r.libre >= 0" class="hero-texto">De {{ fmt(r.ingresoDelMes) }} de ingresos quedan {{ fmt(r.libre) }} después del plan y de lo gastado fuera del plan.</p>
       <p v-else class="hero-texto">De {{ fmt(r.ingresoDelMes) }} de ingresos faltan {{ fmt(-r.libre) }} para cubrir el plan y lo gastado fuera del plan.</p>
+      <p v-if="textoRitmo" class="hero-texto" style="margin-top: 6px"><strong>{{ textoRitmo }}</strong></p>
       <p v-if="textoIngresos" class="nota chica" style="margin-top: 6px">{{ textoIngresos }}</p>
       <p v-if="sinResponsable" class="nota chica" style="margin-top: 6px">No incluye {{ fmt(sinResponsable) }} del hogar sin responsable.</p>
       <barra-segmentos :segmentos="flujo" style="margin-top: 14px"/>
@@ -287,6 +288,16 @@ export const VistaInicio = {
       if (!ingresoRecibido && !otrosIngresos) return 'Los ingresos son el neto de cada salario: lo que llega a la cuenta, ya sin deducciones.';
       return `Ya llegaron ${fmt(redondear(ingresoRecibido + otrosIngresos))} y faltan ${fmt(ingresoPorRecibir)} según el neto de cada salario.`;
     });
+    // A qué ritmo se puede gastar lo que queda libre: es el número con el que se decide hoy.
+    const textoRitmo = computed(() => {
+      const ritmo = ritmoDelMes(indice(), store.periodo, r.value.libre);
+      if (!ritmo || (!r.value.ingresoEsperado && !r.value.ingresoDelMes)) return '';
+      if (r.value.libre < 0) {
+        return `Faltan ${fmt(-r.value.libre)} y quedan ${ritmo.restantes} ${ritmo.restantes === 1 ? 'día' : 'días'} del mes.`;
+      }
+      const dias = `${ritmo.restantes} ${ritmo.restantes === 1 ? 'día' : 'días'}`;
+      return `${fmt(ritmo.librePorDia)} por día en los ${dias} que quedan.`;
+    });
     const plan = computed(() => r.value.plan.filter((it) => it.esperado > 0 || it.real > 0));
     const pct = computed(() => (r.value.comprometido ? Math.min(100, (r.value.pagado / r.value.comprometido) * 100) : 0));
     const avanceTexto = computed(() => {
@@ -458,7 +469,7 @@ export const VistaInicio = {
 
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
-      variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
+      textoRitmo, variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
       avisosHoy, totalAvisos, tramo, descontado, textoIngresos, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),

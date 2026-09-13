@@ -1,6 +1,6 @@
 # Gastos del hogar
 
-Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y recuerda los comercios frecuentes. Puede poner lo que vence en el calendario de Outlook de cada persona, con alarma y sin montos. También tiene metas de ahorro con el aporte sugerido por mes y por quincena, una sugerencia de cómo repartir los gastos según los ingresos, el resumen del año con el patrimonio, la comparación entre años (los años anteriores quedan en OneDrive con un resumen guardado), gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
+Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y recuerda los comercios frecuentes. Puede poner lo que vence en el calendario de Outlook de cada persona, con alarma y sin montos (el recordatorio enlaza directo al registro), y también avisar en el propio teléfono sin cuenta de Microsoft. También tiene metas de ahorro con el aporte sugerido por mes y por quincena, una sugerencia de cómo repartir los gastos según los ingresos (con lo que cada persona pagó de verdad y la transferencia que lo cuadra), el resumen del año con el patrimonio, la comparación entre años (los años anteriores quedan en OneDrive con un resumen guardado), gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
 
 Los datos se guardan en la carpeta `GastosHogar` de OneDrive (un archivo principal y uno por año, con respaldos) y en una copia en el navegador (IndexedDB). Varias personas pueden usar la misma carpeta, cada una con su cuenta de Microsoft, y cada registro guarda quién lo anotó y quién lo editó. Todas las pantallas se pueden filtrar por persona, y cada dispositivo puede pedir un PIN para abrir la app.
 
@@ -73,8 +73,9 @@ js/almacen.js     Guardado en el navegador (IndexedDB, o localStorage si no est�
 js/bloqueo.js     PIN del dispositivo (hash PBKDF2, intentos y espera)
 js/onedrive.js    Inicio de sesión con Microsoft, archivos de la carpeta y respaldos
 js/calendario.js  Calendario de Outlook: eventos de los recordatorios (js/recordatorios.js los mantiene al día)
+js/notificaciones.js  Avisos en el propio teléfono: deja la agenda en IndexedDB para que sw.js la lea
 js/version.js     Versión de la entrega: se muestra en el menú y nombra la caché de sw.js
-sw.js             Caché para abrir la app sin conexión
+sw.js             Caché para abrir la app sin conexión y los avisos del teléfono
 tests/            Pruebas de js/core, de la sincronización, del PIN y de OneDrive (datos ficticios de varios
                   años en tests/datos). importaciones.test.js revisa que los import de js/ existan
 ```

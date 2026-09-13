@@ -32,7 +32,7 @@ export function huellaDe(texto) {
 // alarma 16 horas antes (8:00 del día anterior); con 'mismo_dia_7', un evento de 7:00 a 7:15
 // con la alarma a esa hora (un evento de todo el día no puede avisar el mismo día por la mañana).
 export function eventoDeRecordatorio(r, { aviso = 'dia_antes_8', enlace = '' } = {}) {
-  const cuerpo = `Recordatorio de Gastos del hogar: ${r.detalle}.${enlace ? ` Regístralo en ${enlace}` : ''}`;
+  const cuerpo = `Recordatorio de Gastos del hogar: ${r.detalle}.${enlace ? ` Regístralo en ${enlace}${rutaDeRecordatorio(r)}` : ''}`;
   const comun = {
     subject: r.asunto, body: { contentType: 'text', content: cuerpo }, showAs: 'free', sensitivity: 'private', isReminderOn: true,
   };
@@ -109,4 +109,32 @@ export function planRecordatorios(deseados, existentes) {
   }
   for (const [clave, lista] of porClave) if (!vistas.has(clave)) borrar.push(...lista.map((x) => x.id));
   return { crear, actualizar, borrar };
+}
+
+// ---------------------------------------------------------------- Del recordatorio a la app
+
+// Ruta que abre directo lo que hay que registrar: '#/registrar/tipo/id/fecha'. Es lo que lleva el
+// enlace del evento, para que al tocar la alarma no haya que buscar otra vez qué era. Vacío si
+// falta algo: mejor el enlace a la app pelado que una dirección que no lleva a nada.
+export const rutaDeRecordatorio = (r) => (r?.tipo && r?.id && r?.fecha
+  ? `#/registrar/${encodeURIComponent(r.tipo)}/${encodeURIComponent(r.id)}/${r.fecha}`
+  : '');
+
+// El inverso de la clave que arma `recordatoriosDeseados`: qué fila del mes (ver resumenMes)
+// resuelve ese recordatorio. Devuelve null si el tipo no se reconoce (un enlace de otra versión).
+//   { que: 'item', periodo, clave }      → la fila con esa clave en itemsDelMes(periodo)
+//   { que: 'tarjeta', tarjetaId, corte } → el pago de ese corte de la tarjeta
+export function itemDeRecordatorio({ tipo, id, fecha } = {}) {
+  if (!tipo || !id || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ''))) return null;
+  const periodo = periodoDe(fecha);
+  if (tipo === 'partida') return { que: 'item', periodo, clave: id }; // el id ya es la clave de la partida
+  if (tipo === 'anual') return { que: 'item', periodo, clave: `${id}:pagar` };
+  if (tipo === 'prestamo') return { que: 'item', periodo, clave: `prestamo:${id}` };
+  if (tipo === 'tarjeta') {
+    // El id de un pago de tarjeta es 'cuentaId:corte', y el corte es una fecha.
+    const corte = id.slice(id.lastIndexOf(':') + 1);
+    const tarjetaId = id.slice(0, id.lastIndexOf(':'));
+    return tarjetaId && /^\d{4}-\d{2}-\d{2}$/.test(corte) ? { que: 'tarjeta', tarjetaId, corte } : null;
+  }
+  return null;
 }

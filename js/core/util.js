@@ -73,13 +73,14 @@ export function fechaCorta(fecha) {
   return `${d} ${MESES_CORTOS[m - 1]}`;
 }
 
-const diasEntre = (desde, hasta) => {
-  const f = (x) => Date.UTC(...x.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
+// Días entre dos fechas: diasDesde('2026-09-01', '2026-09-15') → 14. Negativo si `hasta` es antes.
+export const diasDesde = (desde, hasta) => {
+  const f = (x) => Date.UTC(...String(x).split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
   return Math.round((f(hasta) - f(desde)) / 86400000);
 };
 // "hoy", "mañana", "en 5 días", "hace 2 días"
 export function cuandoVence(limite, hoy) {
-  const n = diasEntre(hoy, limite);
+  const n = diasDesde(hoy, limite);
   if (n === 0) return 'hoy';
   if (n === 1) return 'mañana';
   if (n > 1) return `en ${n} días`;

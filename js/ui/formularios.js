@@ -11,6 +11,7 @@ import {
 } from '../store.js';
 import { partesDelMes, movimientoParaItem } from '../core/presupuesto.js';
 import { reciboSugerido, pagosParaRegistrar, estadoRecibo } from '../core/nomina.js';
+import { itemDeRecordatorio } from '../core/recordatorios.js';
 import { resumenMes } from '../core/reportes.js';
 import { hoy, nombrePeriodo, fechaCorta, sumarMeses, redondear } from '../core/util.js';
 import { hayValor, textoDePartida } from './formulario-base.js';
@@ -164,8 +165,6 @@ export const registrarRecibo = (it) => abrirModal(`Registrar: ${it.nombre}`, Rec
 export const completarDeducciones = (r) => abrirModal('Completar deducciones', ReciboForm, { inicial: r, soloPendientes: true });
 export const editarDeduccion = (ingresoId, deduccionId) => abrirModal(deduccionId ? 'Editar deducción' : 'Nueva deducción', DeduccionForm, { ingresoId, deduccionId });
 
-// "+ Quincena": el pago de salario sin registrar más cercano a hoy, con opción de elegir otro.
-
 // Cierra una partida del mes marcando su último pago ("Cierra la partida").
 export function cerrarPartidaDelMes(it, periodo, { avisar = true } = {}) {
   const ultimo = it.pagos[it.pagos.length - 1];
@@ -231,3 +230,33 @@ export const editarPersona = (p = {}) => abrirModal(p.id ? 'Editar persona' : 'N
 export const editarGrupo = (g = {}) => abrirModal(g.id ? 'Editar grupo' : 'Nuevo grupo', GrupoForm, { inicial: g });
 export const editarCategoria = (c = {}) => abrirModal(c.id ? 'Editar categoría' : 'Nueva categoría', CategoriaForm, { inicial: c });
 export const cambiarSoloEsteMes = (partida, periodo) => abrirModal(`${partida.nombre}: solo ${nombrePeriodo(periodo)}`, AjusteMesForm, { partidaId: partida.id, periodo });
+
+// ---------------------------------------------------------------- Registrar desde un enlace
+
+// Resuelve '#/registrar/tipo/id/fecha' (el enlace de un recordatorio de Outlook o un acceso
+// directo del icono) y abre lo que toca. Devuelve la ruta en la que conviene quedarse, o null si
+// el enlace no lleva a nada (una versión vieja, o algo que ya se registró y se borró).
+export function abrirRegistro([tipo, id, fecha] = []) {
+  if (!tipo) {
+    nuevoMovimiento();
+    return '#/inicio';
+  }
+  const destino = itemDeRecordatorio({ tipo, id, fecha });
+  if (!destino) {
+    aviso('Ese enlace ya no lleva a ningún registro. Revisa los avisos.', 'info', 6000);
+    return '#/avisos';
+  }
+  if (destino.que === 'tarjeta') {
+    pagarTarjeta(destino.tarjetaId, { corte: destino.corte });
+    return '#/tarjetas';
+  }
+  const it = itemsDelMes(destino.periodo).find((x) => x.clave === destino.clave);
+  if (!it) {
+    aviso('No encontré eso en el mes. Puede que ya se registrara.', 'info', 6000);
+    return `#/mes`;
+  }
+  // Ya registrado: en vez del formulario, su detalle del mes.
+  if (it.hecho) abrirDetalle(it, destino.periodo);
+  else marcarItem(it, destino.periodo);
+  return '#/mes';
+}

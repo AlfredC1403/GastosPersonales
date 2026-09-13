@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resumenMes, gastoDelMes, historial, seriesDeGrupos, saldosCuentas } from '../js/core/reportes.js';
+import { resumenMes, gastoDelMes, historial, seriesDeGrupos, saldosCuentas, ritmoDelMes, categoriasSobreSuPromedio } from '../js/core/reportes.js';
 import { presupuestoMensual } from '../js/core/presupuesto.js';
 import { deudaAl } from '../js/core/prestamos.js';
 import { crearIndice } from '../js/core/asientos.js';
@@ -141,4 +141,54 @@ test('saldos de cuentas con gastos, transferencias, ajustes, recibos y una cuent
   cerca(s.usd, 100 + 100 - 10);
   cerca(saldosCuentas(ix, '2026-09-03').gastos, 50000 - 1200.5 - 5000);
   cerca(gastoDelMes(ix, '2026-09').total, 1200.5 + 247);
+});
+
+// ---------------------------------------------------------------- Ritmo del mes
+
+test('el ritmo del mes solo existe en el mes en curso y reparte lo libre entre los días que faltan', () => {
+  const ix = crearIndice(docVacio(), { hoy: '2026-09-13' });
+  const r = ritmoDelMes(ix, '2026-09', 6000);
+  // Día 13 de 30: quedan 18 días contando hoy, y el mes va por el 43 %.
+  assert.deepEqual([r.dia, r.dias, r.restantes, r.librePorDia], [13, 30, 18, 333.33]);
+  cerca(r.fraccion, 13 / 30);
+  // El último día del mes todavía se puede gastar: no se divide entre cero.
+  const fin = ritmoDelMes(crearIndice(docVacio(), { hoy: '2026-09-30' }), '2026-09', 500);
+  assert.deepEqual([fin.restantes, fin.librePorDia], [1, 500]);
+  // Un mes pasado o futuro no tiene ritmo.
+  assert.equal(ritmoDelMes(ix, '2026-08', 6000), null);
+  assert.equal(ritmoDelMes(ix, '2026-10', 6000), null);
+});
+
+test('una categoría se señala solo con historia, peso y un exceso claro', () => {
+  const gasto = (id, fecha, monto, categoriaId) => ({
+    id, tipo: 'gasto', fecha, monto, cuentaId: 'gastos', categoriaId, actualizado: `${fecha}T12:00:00Z`,
+  });
+  const conMovimientos = (movimientos) => {
+    const doc = docVacio();
+    doc.config = { ...doc.config, inicio: '2026-06' };
+    doc.movimientos = movimientos;
+    return crearIndice(doc, { hoy: '2026-09-13' });
+  };
+  // Tres meses de historia a L1,000 y este mes L2,500: el exceso es claro.
+  const base = [
+    gasto('a', '2026-06-10', 1000, 'salud'), gasto('b', '2026-07-10', 1000, 'salud'), gasto('c', '2026-08-10', 1000, 'salud'),
+  ];
+  const alto = categoriasSobreSuPromedio(conMovimientos([...base, gasto('d', '2026-09-10', 2500, 'salud')]), '2026-09');
+  assert.deepEqual(alto.map((x) => [x.categoriaId, x.gasto, x.promedio, x.exceso]), [['salud', 2500, 1000, 1500]]);
+
+  // Justo en el factor 1.5 no se avisa (tiene que pasarlo).
+  assert.deepEqual(categoriasSobreSuPromedio(conMovimientos([...base, gasto('d', '2026-09-10', 1500, 'salud')]), '2026-09'), []);
+
+  // Sin al menos dos meses de historia no hay con qué comparar.
+  const pocaHistoria = [gasto('b', '2026-08-10', 1000, 'salud'), gasto('d', '2026-09-10', 5000, 'salud')];
+  assert.deepEqual(categoriasSobreSuPromedio(conMovimientos(pocaHistoria), '2026-09'), []);
+
+  // Una categoría pequeña no genera ruido, aunque se triplique (promedio bajo el mínimo).
+  const chica = [
+    gasto('a', '2026-06-10', 100, 'salud'), gasto('b', '2026-07-10', 100, 'salud'), gasto('c', '2026-08-10', 100, 'salud'),
+    gasto('d', '2026-09-10', 900, 'salud'),
+  ];
+  assert.deepEqual(categoriasSobreSuPromedio(conMovimientos(chica), '2026-09'), []);
+  // Bajando el mínimo sí aparece: el umbral es lo único que la frenaba.
+  assert.equal(categoriasSobreSuPromedio(conMovimientos(chica), '2026-09', { minimo: 50 }).length, 1);
 });

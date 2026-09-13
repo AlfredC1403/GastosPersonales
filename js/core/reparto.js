@@ -108,6 +108,29 @@ function itemsRegistrados(ix, periodos, o, grupos) {
   return [...porClave.values()].map((x) => ({ ...x, c: Math.round(x.c / periodos.length) })).filter((x) => x.c > 0);
 }
 
+// Lo que cada persona puso de su bolsillo en `periodo`, con el mismo alcance que el reparto. Cada
+// asiento ya trae quién pagó (personaDeMovimiento en asientos.js: quien registró el gasto o, si no
+// dice, el titular de la cuenta o la tarjeta), así que esto es la realidad, no el plan.
+function pagadoPorPersona(ix, periodo, o, grupos) {
+  const out = new Map();
+  for (const x of itemsRegistrados(ix, [periodo], o, grupos)) {
+    if (!x.responsableId) continue; // gasto sin dueño: no se le carga a nadie
+    out.set(x.responsableId, (out.get(x.responsableId) || 0) + x.c);
+  }
+  return out;
+}
+
+// La transferencia que cuadra lo que cada persona puso de verdad contra lo que le tocaba. Va aparte
+// de las sugerencias de mover partidas, que cambian el plan del mes siguiente: esto se paga ahora.
+export function liquidacion(filas) {
+  if (filas.length < 2) return null;
+  const orden = [...filas].sort((a, b) => b.diferenciaReal - a.diferenciaReal);
+  const de = orden[0];
+  const a = orden[orden.length - 1];
+  if (de.diferenciaReal <= TOLERANCIA || a.diferenciaReal >= -TOLERANCIA) return null;
+  return { de: a.id, a: de.id, monto: deCentavos(Math.min(de.diferenciaReal, -a.diferenciaReal)) };
+}
+
 // Hasta 3 opciones de pasar 1 o 2 partidas de quien paga de más a quien paga de menos: las que
 // dejan la diferencia más cerca de cero. Además, la transferencia mensual que la iguala.
 export function sugerirCambios(filas, partidas) {
@@ -164,20 +187,34 @@ export function calcularReparto(ix, periodo, opciones = {}) {
   const asignado = items.filter(esDeAlguien).reduce((s, x) => s + x.c, 0);
   const sinResponsable = items.filter((x) => !esDeAlguien(x)).reduce((s, x) => s + x.c, 0);
 
+  // Lo pagado de verdad en el mes que se ve, siempre (la fuente elegida solo cambia lo que le toca).
+  const pagado = pagadoPorPersona(ix, periodo, o, grupos);
   const filas = personas.map((p) => {
     const f = fraccion.get(p.id);
     const leToca = Math.round(asignado * f);
     const pagaHoy = items.filter((x) => x.responsableId === p.id).reduce((s, x) => s + x.c, 0);
-    return { id: p.id, nombre: p.nombre, ingreso: ingresos.porPersona.get(p.id) || 0, fraccion: f, leToca, pagaHoy, diferencia: pagaHoy - leToca, parteSinResponsable: Math.round(sinResponsable * f) };
+    const pagadoReal = pagado.get(p.id) || 0;
+    return {
+      id: p.id, nombre: p.nombre, ingreso: ingresos.porPersona.get(p.id) || 0, fraccion: f, leToca,
+      pagaHoy, diferencia: pagaHoy - leToca,
+      pagadoReal, diferenciaReal: pagadoReal - leToca,
+      parteSinResponsable: Math.round(sinResponsable * f),
+    };
   });
   // Las sugerencias mueven partidas del presupuesto (lo que se puede reasignar).
   const partidas = o.fuente === 'presupuesto' ? items.filter((x) => x.tipo === 'partida') : itemsDelPresupuesto(ix, periodo, o, grupos).filter((x) => x.tipo === 'partida');
   const sugerencias = sugerirCambios(filas, partidas);
 
-  const lempiras = (x) => ({ ...x, ingreso: deCentavos(x.ingreso), pct: Math.round(x.fraccion * 1000) / 10, leToca: deCentavos(x.leToca), pagaHoy: deCentavos(x.pagaHoy), diferencia: deCentavos(x.diferencia), parteSinResponsable: deCentavos(x.parteSinResponsable) });
+  const lempiras = (x) => ({
+    ...x, ingreso: deCentavos(x.ingreso), pct: Math.round(x.fraccion * 1000) / 10, leToca: deCentavos(x.leToca),
+    pagaHoy: deCentavos(x.pagaHoy), diferencia: deCentavos(x.diferencia),
+    pagadoReal: deCentavos(x.pagadoReal), diferenciaReal: deCentavos(x.diferenciaReal),
+    parteSinResponsable: deCentavos(x.parteSinResponsable),
+  });
   return {
     opciones: o, periodo, periodos, avisos, estimados: ingresos.estimados, grupos: [...grupos],
     personas: filas.map(lempiras), asignado: deCentavos(asignado), sinResponsable: deCentavos(sinResponsable), total: deCentavos(asignado + sinResponsable),
     items: items.map((x) => ({ ...x, monto: deCentavos(x.c) })).sort((a, b) => b.c - a.c), sugerencias,
+    liquidacion: liquidacion(filas), pagadoReal: deCentavos([...pagado.values()].reduce((s, x) => s + x, 0)),
   };
 }

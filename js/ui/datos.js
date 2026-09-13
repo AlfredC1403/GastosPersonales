@@ -2,7 +2,7 @@ import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
   respaldarAhora, listarRespaldos, anioCargado, confirmar,
 } from '../store.js';
-import { hoy } from '../core/util.js';
+import { hoy, fechaCorta, diasDesde } from '../core/util.js';
 import { esPristino } from '../core/modelo.js';
 import { claveDeNombre, PRINCIPAL } from '../core/anios.js';
 import * as od from '../onedrive.js';
@@ -111,7 +111,7 @@ export const VistaDatos = {
       </div>
       <label class="campo" style="margin-top: 10px"><span>Tasa de referencia del dólar (lempiras por US$)</span>
         <input :value="store.doc.config.tasaReferencia" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65" @change="guardarTasa($event.target.value)"></label>
-      <p class="nota chica" style="margin-top: 4px">Se usa para estimar en lempiras las cuentas y los gastos en dólares que no tienen su propia tasa.</p>
+      <p class="nota chica" style="margin-top: 4px">Se usa para estimar en lempiras las cuentas y los gastos en dólares que no tienen su propia tasa. {{ textoTasa }}</p>
     </article>
 
     <article class="tarjeta">
@@ -181,9 +181,21 @@ export const VistaDatos = {
       lector.readAsText(archivo);
     }
 
+    // Desde cuándo es la tasa anotada: una de hace meses ya no sirve para estimar.
+    const textoTasa = computed(() => {
+      const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = store.doc.config;
+      if (!tasa) return '';
+      if (!desde) return 'No se sabe de cuándo es: vuelve a anotarla.';
+      const dias = diasDesde(desde, store.hoy);
+      if (dias <= 0) return 'Anotada hoy.';
+      return `Anotada el ${fechaCorta(desde)}${dias > 35 ? ` (hace ${dias} días: conviene revisarla)` : ''}.`;
+    });
+
     return {
-      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos,
-      guardarTasa: (v) => guardarConfig({ tasaReferencia: Number(v) > 0 ? Number(v) : null }),
+      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos, textoTasa,
+      guardarTasa: (v) => guardarConfig(Number(v) > 0
+        ? { tasaReferencia: Number(v), tasaReferenciaDesde: store.hoy }
+        : { tasaReferencia: null, tasaReferenciaDesde: '' }),
       respaldar: () => ejecutar(async () => {
         const nombre = await respaldarAhora();
         aviso('Respaldo guardado: respaldos/' + nombre, 'ok', 6000);

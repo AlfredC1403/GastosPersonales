@@ -8,6 +8,7 @@ const CLAVES = {
   ordenMes: 'gastos.ordenMes', repartoInicio: 'gastos.repartoInicio', vistaPresupuesto: 'gastos.vistaPresupuesto', agruparMovimientos: 'gastos.agruparMovimientos',
   corteAnual: 'gastos.corteAnual', gastoAnual: 'gastos.gastoAnual',
   avisos: 'gastos.avisos',
+  notificaciones: 'gastos.notificaciones', ultimoAvisoTelefono: 'gastos.ultimoAvisoTelefono',
 };
 const MAX_AVISOS_OCULTOS = 300;
 // Valores posibles de cada vista; el primero es el que se usa si no hay nada guardado.
@@ -53,6 +54,8 @@ export const prefs = reactive({
   persona: leer(CLAVES.persona), // id de persona o null (todo el hogar)
   menuContraido: leer(CLAVES.menu) === '1',
   avisosOcultos: leerAvisos(), // { [id]: 'siempre' | 'AAAA-MM-DD' }
+  notificaciones: leer(CLAVES.notificaciones) === '1', // avisos en este teléfono (ver js/notificaciones.js)
+  ultimoAvisoTelefono: leer(CLAVES.ultimoAvisoTelefono) || '', // día del último aviso al abrir
   ...Object.fromEntries(Object.entries(VISTAS).map(([clave, valores]) => [clave, valores.includes(leer(CLAVES[clave])) ? leer(CLAVES[clave]) : valores[0]])),
 });
 
@@ -77,6 +80,16 @@ export function definirTema(valor) {
 }
 
 export const alternarTema = () => definirTema(esOscuro() ? 'claro' : 'oscuro');
+
+// Avisos en este teléfono: si están puestos y el día del último aviso mostrado.
+export function definirNotificaciones(activo, dia = null) {
+  prefs.notificaciones = !!activo;
+  escribir(CLAVES.notificaciones, activo ? '1' : null);
+  if (dia !== null) {
+    prefs.ultimoAvisoTelefono = dia;
+    escribir(CLAVES.ultimoAvisoTelefono, dia || null);
+  }
+}
 
 export function definirPendientes(modo) {
   prefs.pendientes = modo;

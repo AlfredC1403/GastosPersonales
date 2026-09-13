@@ -68,6 +68,9 @@ export const categoriasBase = () => CATEGORIAS_BASE.map(([id, nombre, grupoId, t
 
 export const configBase = () => ({
   moneda: 'L', monedaExt: 'USD', simboloExt: 'US$', inicio: periodoActual(), tasaReferencia: null,
+  // Día en que se anotó la tasa: una tasa vieja distorsiona en silencio todo lo que está en
+  // dólares y no se ha pagado todavía, así que la app avisa cuando se pasa de un mes.
+  tasaReferenciaDesde: '',
   asistente: { completados: [] }, actualizado: '',
 });
 

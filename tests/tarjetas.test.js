@@ -223,3 +223,35 @@ test('avisos de la tarjeta: vence pronto, vencida y cargo anual del mes siguient
   avisos = calcularAvisos(indice([], '2026-09-15'), { hoy: '2026-09-15' });
   assert.ok(avisos.some((a) => a.id === 'cargo:visa:membresia:2026-10-20'));
 });
+
+// ---------------------------------------------------------------- Tasa de referencia
+
+test('avisa de la tasa vieja solo cuando el hogar tiene algo en dólares', () => {
+  const hoy = '2026-09-13';
+  const base = (config) => {
+    const doc = docVacio();
+    doc.config = { ...doc.config, ...config };
+    return doc;
+  };
+  const avisosDe = (doc) => calcularAvisos(crearIndice(doc, { hoy }), { hoy }).filter((a) => a.id.startsWith('tasa-'));
+
+  // Sin nada en dólares no se dice nada, por vieja que esté la tasa.
+  assert.deepEqual(avisosDe(base({ tasaReferencia: 24, tasaReferenciaDesde: '2020-01-01' })), []);
+
+  // Con una cuenta en dólares sí.
+  const conUSD = (config) => {
+    const doc = base(config);
+    doc.cuentas.push({ id: 'ahorroUSD', nombre: 'Ahorro US$', tipo: 'ahorro', moneda: 'USD', saldoInicial: 100, actualizado: 't' });
+    return doc;
+  };
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2020-01-01' })).map((a) => a.id), [`tasa-vieja:2026-09`]);
+  // Una tasa sin fecha (la que venía de una versión anterior) también se pide revisar.
+  assert.match(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '' }))[0].texto, /no se sabe de cuándo es/);
+  // Y si no hay tasa, el aviso es otro.
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: null })).map((a) => a.id), [`tasa-falta:2026-09`]);
+  // Recién anotada: nada que avisar.
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-09-01' })), []);
+  // En el límite: 35 días pasa, 36 avisa.
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-09' })), []);
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-08' })).map((a) => a.id), [`tasa-vieja:2026-09`]);
+});

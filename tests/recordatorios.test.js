@@ -5,6 +5,7 @@ import { calcularAvisos } from '../js/core/avisos.js';
 import { crearIndice } from '../js/core/asientos.js';
 import {
   recordatoriosDeseados, eventoDeRecordatorio, planRecordatorios, huellaDe, huellaDeRecordatorios, PROPIEDAD_RECORDATORIO,
+  itemDeRecordatorio, rutaDeRecordatorio,
 } from '../js/core/recordatorios.js';
 
 const T = (fecha) => `${fecha}T12:00:00Z`;
@@ -71,11 +72,12 @@ test('lo que vence en 60 días y sigue pendiente, sin montos; lo pagado con tarj
 });
 
 test('evento de todo el día con alarma el día anterior a las 8:00, o de 7:00 a 7:15 el mismo día', () => {
-  const r = { clave: 'gh1|partida|luz:principal|2026-10-20', fecha: '2026-10-20', asunto: 'Pagar: Luz', detalle: 'pagar Luz' };
+  const r = { clave: 'gh1|partida|luz:principal|2026-10-20', tipo: 'partida', id: 'luz:principal', fecha: '2026-10-20', asunto: 'Pagar: Luz', detalle: 'pagar Luz' };
   const { evento, huella } = eventoDeRecordatorio(r, { enlace: 'https://ejemplo.github.io/app/' });
   assert.deepEqual([evento.isAllDay, evento.start.dateTime, evento.end.dateTime, evento.reminderMinutesBeforeStart, evento.showAs, evento.sensitivity], [true, '2026-10-20T00:00:00', '2026-10-21T00:00:00', 960, 'free', 'private']);
   assert.deepEqual(evento.singleValueExtendedProperties, [{ id: PROPIEDAD_RECORDATORIO, value: `gh1|partida|luz:principal|2026-10-20#${huella}` }]);
-  assert.ok(evento.body.content.endsWith('Regístralo en https://ejemplo.github.io/app/'));
+  // El enlace lleva a la partida concreta, no a la raíz de la app.
+  assert.ok(evento.body.content.endsWith('Regístralo en https://ejemplo.github.io/app/#/registrar/partida/luz%3Aprincipal/2026-10-20'));
   const temprano = eventoDeRecordatorio(r, { aviso: 'mismo_dia_7' });
   assert.deepEqual([temprano.evento.isAllDay, temprano.evento.start.dateTime, temprano.evento.end.dateTime, temprano.evento.reminderMinutesBeforeStart], [false, '2026-10-20T07:00:00', '2026-10-20T07:15:00', 0]);
   assert.notEqual(temprano.huella, huella);
@@ -109,4 +111,65 @@ test('si los recordatorios fallan en este dispositivo, hay un aviso para hoy', (
   const a = lista.find((x) => x.tipo === 'recordatorios');
   assert.deepEqual([a.id, a.cuando, a.texto, a.acciones[0].ruta], ['recordatorios:error:2026-09-15', 'hoy', 'Outlook respondió 500.', '#/recordatorios']);
   assert.ok(!calcularAvisos(hogar(), { hoy: '2026-09-15', recordatorios: { error: '' } }).some((x) => x.tipo === 'recordatorios'));
+});
+
+// ---------------------------------------------------------------- Del recordatorio a la app
+
+test('cada tipo de recordatorio sabe a qué fila del mes lleva', () => {
+  // El id de una partida ya es su clave en el resumen del mes.
+  assert.deepEqual(itemDeRecordatorio({ tipo: 'partida', id: 'super:principal', fecha: '2026-09-15' }),
+    { que: 'item', periodo: '2026-09', clave: 'super:principal' });
+  // Un pago anual es la parte 'pagar' de su partida.
+  assert.deepEqual(itemDeRecordatorio({ tipo: 'anual', id: 'matricula', fecha: '2026-09-01' }),
+    { que: 'item', periodo: '2026-09', clave: 'matricula:pagar' });
+  assert.deepEqual(itemDeRecordatorio({ tipo: 'prestamo', id: 'p1', fecha: '2026-09-05' }),
+    { que: 'item', periodo: '2026-09', clave: 'prestamo:p1' });
+  // En una tarjeta el id trae la cuenta y el corte; la fecha del recordatorio es el límite.
+  assert.deepEqual(itemDeRecordatorio({ tipo: 'tarjeta', id: 'bac:2026-08-28', fecha: '2026-09-17' }),
+    { que: 'tarjeta', tarjetaId: 'bac', corte: '2026-08-28' });
+  // Un id de cuenta con dos puntos no rompe el corte.
+  assert.deepEqual(itemDeRecordatorio({ tipo: 'tarjeta', id: 'bac:oro:2026-08-28', fecha: '2026-09-17' }),
+    { que: 'tarjeta', tarjetaId: 'bac:oro', corte: '2026-08-28' });
+});
+
+test('un enlace que no se entiende no lleva a ninguna parte', () => {
+  // Un tipo de otra versión de la app, o datos incompletos: null, y la app avisa en vez de romperse.
+  assert.equal(itemDeRecordatorio({ tipo: 'otro', id: 'x', fecha: '2026-09-01' }), null);
+  assert.equal(itemDeRecordatorio({ tipo: 'partida', id: 'x', fecha: 'mañana' }), null);
+  assert.equal(itemDeRecordatorio({ tipo: 'partida', fecha: '2026-09-01' }), null);
+  assert.equal(itemDeRecordatorio({ tipo: 'tarjeta', id: 'bac', fecha: '2026-09-17' }), null);
+  assert.equal(itemDeRecordatorio(), null);
+});
+
+test('el evento del calendario enlaza a lo concreto, no a la raíz de la app', () => {
+  const r = { clave: 'gh1|partida|super:principal|2026-09-15', tipo: 'partida', id: 'super:principal', fecha: '2026-09-15', asunto: 'Pagar: Súper', detalle: 'pagar Súper' };
+  const { evento } = eventoDeRecordatorio(r, { enlace: 'https://ejemplo.com/gastos/' });
+  assert.match(evento.body.content, /https:\/\/ejemplo\.com\/gastos\/#\/registrar\/partida\/super%3Aprincipal\/2026-09-15/);
+  // Esa dirección es exactamente la que arma rutaDeRecordatorio, y se puede volver a leer.
+  assert.deepEqual(itemDeRecordatorio(r), itemDeRecordatorio({
+    tipo: decodeURIComponent(rutaDeRecordatorio(r).split('/')[2]),
+    id: decodeURIComponent(rutaDeRecordatorio(r).split('/')[3]),
+    fecha: rutaDeRecordatorio(r).split('/')[4],
+  }));
+  // Sin enlace (no se sabe la dirección) el cuerpo no queda con una ruta suelta.
+  assert.ok(!eventoDeRecordatorio(r, { enlace: '' }).evento.body.content.includes('#/registrar'));
+});
+
+// ---------------------------------------------------------------- Agenda para el teléfono
+
+test('la agenda del teléfono sale del mismo cálculo que los recordatorios, con su ruta', () => {
+  // Lo que guarda js/notificaciones.js para que sw.js avise: fecha, texto y a dónde ir.
+  const lista = recordatoriosDeseados(hogar(), { hoy: '2026-09-15', personaId: 'moises', alcance: 'hogar', dias: 10 });
+  const agenda = lista.map((r) => ({ fecha: r.fecha, asunto: r.asunto, ruta: rutaDeRecordatorio(r) }));
+  assert.ok(agenda.length > 0, 'debería haber algo que recordar');
+  for (const x of agenda) {
+    assert.match(x.fecha, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(x.asunto.length > 0);
+    // Cada entrada lleva a un registro concreto, y esa ruta se puede volver a leer.
+    assert.match(x.ruta, /^#\/registrar\//);
+    const [, , tipo, id, fecha] = x.ruta.split('/');
+    assert.ok(itemDeRecordatorio({ tipo: decodeURIComponent(tipo), id: decodeURIComponent(id), fecha }));
+  }
+  // Todo dentro de la ventana pedida.
+  assert.ok(agenda.every((x) => x.fecha >= '2026-09-15' && x.fecha <= '2026-09-25'));
 });

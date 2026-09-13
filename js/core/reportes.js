@@ -1,6 +1,6 @@
 // Reportes: resumen del mes, gasto por grupo, categoría, medio o persona, historial y saldos.
 import { vivo } from './modelo.js';
-import { sumarMeses, periodoDe, fechaEnMes, aCentavos, deCentavos, redondear } from './util.js';
+import { sumarMeses, periodoDe, fechaEnMes, ultimoDia, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
 import { estadoPartidas, ingresosDelMes, partidasDelMes, usoDelPlan } from './presupuesto.js';
 import { cuotasDelMes, deudaAl, costoDePrestamos } from './prestamos.js';
@@ -121,6 +121,39 @@ export function resumenMes(ix, periodo, filtro) {
 }
 
 // Gasto de los últimos `n` meses hasta `hasta`, por grupo.
+// Por dónde va el mes y cuánto queda libre por día. Solo tiene sentido en el mes en curso: en uno
+// pasado el mes ya terminó, y en uno futuro no ha empezado. `libre` viene de resumenMes.
+export function ritmoDelMes(ix, periodo, libre) {
+  const actual = periodoDe(ix.hoy);
+  if (periodo !== actual) return null;
+  const dias = ultimoDia(periodo);
+  const dia = Number(ix.hoy.slice(8));
+  const restantes = dias - dia + 1; // hoy cuenta: todavía se puede gastar
+  return {
+    dia, dias, restantes,
+    fraccion: dia / dias, // qué parte del mes ya pasó
+    librePorDia: restantes > 0 ? redondear(libre / restantes) : 0,
+  };
+}
+
+// Categorías que este mes van muy por encima de lo normal, comparando con el promedio de los
+// `meses` anteriores completos. Solo las que tienen historia y peso suficiente, para no avisar de
+// una farmacia de L50. Devuelve [{ categoriaId, gasto, promedio, exceso }], de mayor a menor exceso.
+export function categoriasSobreSuPromedio(ix, periodo, { meses = 3, factor = 1.5, minimo = 500 } = {}) {
+  const previos = Array.from({ length: meses }, (_, i) => sumarMeses(periodo, -(meses - i)));
+  const conDatos = previos.map((p) => gastoDelMes(ix, p)).filter((g) => g.total > 0);
+  if (conDatos.length < 2) return []; // sin al menos dos meses de historia no hay "lo normal"
+  const actual = gastoDelMes(ix, periodo).porCategoria;
+  const out = [];
+  for (const [categoriaId, gasto] of Object.entries(actual)) {
+    const suma = conDatos.reduce((t, g) => t + (g.porCategoria[categoriaId] || 0), 0);
+    const promedio = redondear(suma / conDatos.length);
+    if (promedio < minimo || gasto <= promedio * factor) continue;
+    out.push({ categoriaId, gasto, promedio, exceso: redondear(gasto - promedio) });
+  }
+  return out.sort((a, b) => b.exceso - a.exceso);
+}
+
 export function historial(ix, hasta, n = 6, filtro) {
   return Array.from({ length: n }, (_, i) => {
     const periodo = sumarMeses(hasta, i - n + 1);
