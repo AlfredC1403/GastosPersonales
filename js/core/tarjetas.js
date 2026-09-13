@@ -260,11 +260,40 @@ export function estadoCiclo(ix, cuenta, corte) {
   };
 }
 
+// Límite de la tarjeta: el banco da uno solo y lo muestra en las dos monedas. El de lempiras sale
+// del de dólares con la tasa del día en que se dio, y no cambia; esa tasa (lempiras ÷ dólares) solo
+// sirve para el límite. { L, USD, tasa } en unidades (null lo que no hay); null sin límite.
+export function limiteDeTarjeta(cuenta) {
+  const L = Number(cuenta?.tarjeta?.limite?.L) || 0;
+  const USD = Number(cuenta?.tarjeta?.limite?.USD) || 0;
+  if (!(L > 0) && !(USD > 0)) return null;
+  return { L: L > 0 ? L : null, USD: USD > 0 ? USD : null, tasa: L > 0 && USD > 0 ? L / USD : null };
+}
+
+// Lo disponible: el límite menos lo que se debe y el capital de las cuotas por cobrar de un
+// intrafinanciamiento (`uso`, centavos por moneda). Lo que se debe en una moneda ocupa el mismo
+// límite en la otra, con la tasa del límite. Si el límite está en una sola moneda, lo de la otra se
+// pasa con `tasaRespaldo` (la última tasa de pago o la de referencia; sin tasa, no se cuenta).
+export function disponibleDe(limite, uso, tasaRespaldo = 0) {
+  if (!limite) return { disponible: { L: null, USD: null }, usoPct: null };
+  const pct = (usado, total) => Math.max(0, Math.min(100, Math.round((usado / total) * 100)));
+  if (limite.L !== null) {
+    const tasa = limite.tasa || tasaRespaldo;
+    const usadoL = uso.L + (tasa ? Math.round(uso.USD * tasa) : 0);
+    const libreL = aCentavos(limite.L) - usadoL;
+    return {
+      disponible: { L: deCentavos(libreL), USD: limite.tasa ? deCentavos(Math.round(libreL / limite.tasa)) : null },
+      usoPct: pct(usadoL, aCentavos(limite.L)),
+    };
+  }
+  const usadoUSD = uso.USD + (tasaRespaldo ? Math.round(uso.L / tasaRespaldo) : 0);
+  return { disponible: { L: null, USD: deCentavos(aCentavos(limite.USD) - usadoUSD) }, usoPct: pct(usadoUSD, aCentavos(limite.USD)) };
+}
+
 // Resumen de una tarjeta hoy: deuda, disponible y el estado del último corte. El capital de las
 // cuotas que faltan de un intrafinanciamiento baja el disponible (`porCobrar`); el de un
 // extrafinanciamiento está fuera del límite (`extraPorCobrar`).
 export function resumenTarjeta(ix, cuenta) {
-  const t = cuenta.tarjeta || {};
   const info = ix.tarjetas.get(cuenta.id);
   const eventos = ix.eventosTarjeta.get(cuenta.id) || [];
   const deuda = { ...inicialDe(ix, cuenta) };
@@ -275,11 +304,12 @@ export function resumenTarjeta(ix, cuenta) {
     else if (e.tipo === 'cuota') (e.intra ? porCobrar : extraPorCobrar)[e.moneda] += e.capital ?? e.delta;
   }
   const tasa = info?.ultimaTasa || Number(ix.config.tasaReferencia) || 0;
-  const disponible = (moneda) => (Number(t.limite?.[moneda]) > 0 ? deCentavos(aCentavos(t.limite[moneda]) - deuda[moneda] - porCobrar[moneda]) : null);
+  const limite = limiteDeTarjeta(cuenta);
+  const { disponible, usoPct } = disponibleDe(limite, { L: deuda.L + porCobrar.L, USD: deuda.USD + porCobrar.USD }, tasa);
   const corteAbierto = corteDe(cuenta, ix.hoy || info?.saldoFecha || fechaSaldoDe(cuenta));
   return {
     deuda: enUnidades(deuda), deudaEnL: deCentavos(deuda.L + Math.round(deuda.USD * tasa)), tasa,
-    porCobrar: enUnidades(porCobrar), extraPorCobrar: enUnidades(extraPorCobrar), disponible: { L: disponible('L'), USD: disponible('USD') },
+    porCobrar: enUnidades(porCobrar), extraPorCobrar: enUnidades(extraPorCobrar), limite, disponible, usoPct,
     corteAbierto, abierto: estadoCiclo(ix, cuenta, corteAbierto), ultimo: estadoCiclo(ix, cuenta, corteAnterior(cuenta, corteAbierto)),
   };
 }

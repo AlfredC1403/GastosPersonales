@@ -165,6 +165,25 @@ test('intrafinanciamiento a tasa cero con comisión: la compra usa el límite y 
   assert.ok(mensual.every((q) => q.c === 102500 && q.comision === 2500));
 });
 
+test('el límite es uno solo en las dos monedas: lo que se debe en una ocupa también el de la otra', () => {
+  // Límite de US$2,000 dado cuando la tasa era 26.50: L53,000.
+  const tarjeta = visa({ limite: { L: 53000, USD: 2000 }, cargos: [] });
+  const movs = [compra('super', '2026-09-05', 10000), compra('hotel', '2026-09-06', 100, { moneda: 'USD' })];
+  let r = resumenTarjeta(indice(movs, '2026-09-10', { tarjeta }), tarjeta);
+  assert.equal(r.limite.tasa, 26.5);
+  // Ocupan L10,000 + US$100 × 26.50 = L12,650: quedan L40,350, que son US$1,522.64.
+  assert.deepEqual([r.disponible, r.usoPct], [{ L: 40350, USD: 1522.64 }, 24]);
+  // La tasa del límite no cambia con la de los pagos.
+  r = resumenTarjeta(indice([...movs, pago('p', '2026-09-08', 0, 50, 27.1)], '2026-09-10', { tarjeta }), tarjeta);
+  assert.deepEqual(r.disponible, { L: 40350 + 50 * 26.5, USD: 1572.64 });
+
+  // Con el límite solo en lempiras, los dólares se pasan con la tasa de referencia (o la última de pago).
+  const soloL = visa({ limite: { L: 50000, USD: null }, cargos: [] });
+  const config = { ...docVacio().config, inicio: '2026-09', tasaReferencia: 25 };
+  r = resumenTarjeta(indice(movs, '2026-09-10', { tarjeta: soloL, doc: { config } }), soloL);
+  assert.deepEqual([r.limite.tasa, r.disponible], [null, { L: 50000 - 10000 - 2500, USD: null }]);
+});
+
 test('la membresía anual se cobra en el corte de su mes', () => {
   assert.equal(gastoDelMes(indice([], '2026-10-15'), '2026-10').total, 0);
   const ix = indice([], '2026-10-25');

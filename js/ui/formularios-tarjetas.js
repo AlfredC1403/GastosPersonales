@@ -13,6 +13,8 @@ const diaValido = (v) => Number(v) >= 1 && Number(v) <= 31;
 const montoOpcional = (v) => (hayValor(v) && Number(v) > 0 ? redondear(Number(v)) : null);
 // "L1,300.00 y US$100.00", sin la moneda que está en cero.
 export const dosMonedas = (o, { cero = 'nada' } = {}) => [o.L ? fmtMoneda(o.L, 'L') : '', o.USD ? fmtMoneda(o.USD, 'USD') : ''].filter(Boolean).join(' y ') || cero;
+// Tasa con hasta 4 decimales: 26.8829, 26.5.
+export const formatoTasa = (tasa) => (tasa ? String(Number(Number(tasa).toFixed(4))) : '');
 
 // ---------------------------------------------------------------- Tarjeta
 
@@ -40,6 +42,7 @@ export const TarjetaForm = {
       <label class="campo"><span>Límite en lempiras</span><input v-model.number="t.limite.L" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Opcional"></label>
       <label class="campo"><span>Límite en dólares</span><input v-model.number="t.limite.USD" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Opcional"></label>
     </div>
+    <p v-if="textoLimite" class="nota chica" style="margin-top: -6px">{{ textoLimite }}</p>
     <label class="campo"><span>Se paga desde</span>
       <select v-model="t.cuentaPagoId"><option v-for="x in listaCuentas" :key="x.id" :value="x.id">{{ x.nombre }}</option></select></label>
 
@@ -96,6 +99,16 @@ export const TarjetaForm = {
       const corte = corteDelMes(cuenta, periodoDe(store.hoy));
       return `Lo que se compre hasta el ${fechaCorta(corte)} se paga a más tardar el ${fechaCorta(limiteDe(cuenta, corte))}.`;
     });
+    // El límite es uno solo: con las dos monedas, la tasa del límite es lempiras ÷ dólares.
+    const textoLimite = computed(() => {
+      const L = Number(t.limite.L) || 0;
+      const USD = Number(t.limite.USD) || 0;
+      if (L > 0 && USD > 0) {
+        return `Es un solo límite visto en las dos monedas, con la tasa del día en que lo dio el banco: ${formatoTasa(L / USD)} lempiras por dólar. Lo que se debe en una moneda también ocupa el límite en la otra.`;
+      }
+      if (L > 0 || USD > 0) return 'Si el banco muestra el límite en lempiras y en dólares, escribe los dos: es el mismo límite, y la app saca la tasa con que se dio.';
+      return '';
+    });
     function alternarMes(x, n) {
       if (x.periodicidad === 'anual') x.meses = [n];
       else x.meses = x.meses.includes(n) ? x.meses.filter((m) => m !== n) : [...x.meses, n].sort((a, b) => a - b);
@@ -137,7 +150,7 @@ export const TarjetaForm = {
     }
 
     return {
-      c, t, textoCiclo, alternarMes, agregarCargo, enviar, nombreMes, tiposCargo: TIPOS_CARGO, periodicidades: PERIODICIDADES,
+      c, t, textoCiclo, textoLimite, alternarMes, agregarCargo, enviar, nombreMes, tiposCargo: TIPOS_CARGO, periodicidades: PERIODICIDADES,
       listaPersonas: computed(personas), listaCuentas: computed(cuentasDinero), ...f,
     };
   },

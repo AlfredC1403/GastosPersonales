@@ -6,7 +6,7 @@ import { resumenTarjeta, estadoCiclo, corteDe, corteSiguiente, corteAnterior, fe
 import { fechaCorta, nombrePeriodo, nombreMes, periodoDe, sumarDias, sumarMeses, aCentavos, deCentavos } from '../core/util.js';
 import { Icono } from './componentes.js';
 import { nuevoMovimiento, editarMovimiento } from './formularios.js';
-import { editarTarjeta, pagarTarjeta, dosMonedas } from './formularios-tarjetas.js';
+import { editarTarjeta, pagarTarjeta, dosMonedas, formatoTasa } from './formularios-tarjetas.js';
 
 const { ref, computed, watch } = Vue;
 
@@ -31,6 +31,10 @@ export function cuandoVence(limite, hoy) {
   return n === -1 ? 'ayer' : `hace ${-n} días`;
 }
 
+// Lo disponible: el mismo límite visto en las dos monedas ("L40,350.00 o US$1,522.64").
+const textoLibre = (r) => [r.disponible.L !== null ? fmtMoneda(r.disponible.L, 'L') : '', r.disponible.USD !== null ? fmtMoneda(r.disponible.USD, 'USD') : '']
+  .filter(Boolean).join(' o ');
+
 // Lo que hay que mostrar de una tarjeta: su deuda y el pago que toca (o el corte abierto).
 function datosTarjeta(ix, c, hoy) {
   const r = resumenTarjeta(ix, c);
@@ -43,10 +47,8 @@ function datosTarjeta(ix, c, hoy) {
   else if (e.situacion === 'pagado') pago = `Corte del ${fechaCorta(e.corte)} pagado${e.tarde ? ' (tarde)' : ''}.`;
   else if (e.situacion === 'vencido') pago = `Faltan ${dosMonedas(e.pendiente)} del corte del ${fechaCorta(e.corte)}: venció ${cuandoVence(e.limite, hoy)}.`;
   else pago = `${e.situacion === 'parcial' ? 'Faltan' : 'Pago de contado:'} ${dosMonedas(e.pendiente)}, vence ${cuandoVence(e.limite, hoy)} (${fechaCorta(e.limite)}).`;
-  const limiteL = Number(t.limite?.L) || 0;
-  const usado = limiteL ? Math.max(0, Math.min(100, Math.round(((limiteL - (r.disponible.L ?? limiteL)) / limiteL) * 100))) : null;
   return {
-    c, r, e, vigente, pago, usado, situacion: SITUACION[e.situacion], debe: r.deuda.L > 0 || r.deuda.USD > 0,
+    c, r, e, vigente, pago, usado: r.usoPct, situacion: SITUACION[e.situacion], debe: r.deuda.L > 0 || r.deuda.USD > 0,
     usaDolares: r.deuda.USD !== 0 || Number(t.limite?.USD) > 0 || Number(t.saldoInicial?.USD) > 0,
     detalle: [t.banco, t.ultimos4 ? `•••• ${t.ultimos4}` : '', `corte el ${t.diaCorte >= 31 ? 'último día' : t.diaCorte}`, `pago hasta el ${t.diaPago}`].filter(Boolean).join(' · '),
   };
@@ -106,10 +108,8 @@ export const VistaTarjetas = {
       return partes.join(' ');
     });
     const textoDisponible = (x) => {
-      const d = x.r.disponible;
       const partes = [];
-      if (d.L !== null) partes.push(`Disponible ${fmtMoneda(d.L, 'L')}`);
-      if (d.USD !== null) partes.push(`${partes.length ? '' : 'Disponible '}${fmtMoneda(d.USD, 'USD')}`);
+      if (textoLibre(x.r)) partes.push(`Disponible ${textoLibre(x.r)}`);
       if (x.r.porCobrar.L) partes.push(`${fmtMoneda(x.r.porCobrar.L, 'L')} en cuotas por cobrar`);
       if (x.r.extraPorCobrar.L) partes.push(`${fmtMoneda(x.r.extraPorCobrar.L, 'L')} de extrafinanciamiento`);
       return partes.join(' · ');
@@ -275,8 +275,11 @@ export const VistaTarjeta = {
       const r = datos.value.r;
       const partes = [];
       if (r.deuda.USD && r.tasa) partes.push(`≈ ${fmt(r.deudaEnL)} en total, con la última tasa (${r.tasa})`);
-      if (r.disponible.L !== null) partes.push(`disponible ${fmtMoneda(r.disponible.L, 'L')}${r.disponible.USD !== null ? ` y ${fmtMoneda(r.disponible.USD, 'USD')}` : ''}`);
-      else if (r.disponible.USD !== null) partes.push(`disponible ${fmtMoneda(r.disponible.USD, 'USD')}`);
+      if (textoLibre(r)) {
+        const l = r.limite;
+        const deLimite = l.L !== null && l.USD !== null ? ` de un límite de ${fmtMoneda(l.L, 'L')} o ${fmtMoneda(l.USD, 'USD')} (tasa del límite ${formatoTasa(l.tasa)})` : '';
+        partes.push(`disponible ${textoLibre(r)}${deLimite}`);
+      }
       if (r.porCobrar.L) partes.push(`${fmtMoneda(r.porCobrar.L, 'L')} en cuotas por cobrar (dentro del límite)`);
       if (r.extraPorCobrar.L) partes.push(`${fmtMoneda(r.extraPorCobrar.L, 'L')} de extrafinanciamiento por cobrar (fuera del límite)`);
       const texto = partes.join(' · ');
