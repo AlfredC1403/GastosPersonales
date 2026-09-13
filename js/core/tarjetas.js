@@ -3,7 +3,7 @@
 // Una tarjeta es una cuenta con `tipo: 'tarjeta'` y su configuración en `cuenta.tarjeta`.
 // Su saldo es lo que se debe, en lempiras y en dólares por separado.
 import { vivo } from './modelo.js';
-import { periodoDe, mesDe, sumarMeses, sumarDias, fechaEnMes, aCentavos, deCentavos } from './util.js';
+import { periodoDe, mesDe, sumarMeses, sumarDias, fechaEnMes, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
 import { asignarTasas } from './divisas.js';
 
@@ -69,9 +69,27 @@ function tasaDeCuota(monto, cuota, n) {
 export function comisionDeCuotas(q, total) {
   const x = q?.comision;
   const valor = Number(x?.valor) || 0;
-  if (!(valor > 0)) return { c: 0, mensual: false };
-  return { c: x.unidad === 'monto' ? aCentavos(valor) : Math.round((total * valor) / 100), mensual: x.cobro === 'mensual' };
+  if (!(valor > 0)) return { c: 0, mensual: false, comoGasto: false };
+  return {
+    c: x.unidad === 'monto' ? aCentavos(valor) : Math.round((total * valor) / 100),
+    mensual: x.cobro === 'mensual',
+    // Con `comoGasto` la comisión no viaja en ninguna cuota: se registra en la fecha del
+    // financiamiento (ver comisionInmediata), que es cuando el banco la cobra de verdad.
+    comoGasto: !!x.comoGasto,
+  };
 }
+
+// La comisión cuando se registra como gasto del mes en vez de viajar en la cuota:
+// { c, fecha, periodo } o null. Es deuda de la tarjeta y gasto en la fecha del financiamiento.
+export function comisionInmediata(cuenta, m) {
+  const comision = comisionDeCuotas(m.cuotas, aCentavos(m.monto));
+  if (!comision.c || !comision.comoGasto) return null;
+  return { c: comision.c, fecha: m.fecha, periodo: periodoDe(m.fecha) };
+}
+
+// Por qué cuota va un financiamiento: 1 si empieza desde el principio. Las anteriores no se
+// registran (ya se pagaron antes de usar la app), pero la amortización se calcula completa.
+export const desdeCuotaDe = (q) => Math.max(1, Math.round(Number(q?.desdeCuota) || 1));
 
 // Cuotas de una compra a cuotas: [{ k, n, fecha, periodo, capital, interes, comision, c, intra }]
 // en centavos (c = capital + intereses + comisión). La primera se cobra en el corte de la compra
@@ -98,19 +116,22 @@ export function cuotasDeCompra(cuenta, m) {
     let capital = r ? Math.min(saldo, Math.max(0, cuota - interes)) : base;
     if (i === n - 1) capital = saldo;
     saldo -= capital;
-    const com = comision.c && (comision.mensual || i === 0) ? comision.c : 0;
+    const com = comision.c && !comision.comoGasto && (comision.mensual || i === 0) ? comision.c : 0;
     const fecha = corteDelMes(cuenta, sumarMeses(periodoDe(primero), i));
     return { k: i + 1, n, fecha, periodo: periodoDe(fecha), capital, interes, comision: com, c: capital + interes + com, intra };
   });
+  // Un financiamiento que ya venía empezado: las cuotas anteriores no generan nada.
+  const desde = desdeCuotaDe(q);
+  if (desde > 1) lista = lista.filter((x) => x.k >= desde);
   if (q.canceladaEl) {
     const quedan = lista.filter((x) => x.fecha > q.canceladaEl);
     if (quedan.length) {
       lista = lista.filter((x) => x.fecha <= q.canceladaEl);
       const capital = quedan.reduce((a, x) => a + x.capital, 0);
       // La comisión única se cobra aunque se cancele antes de la primera cuota.
-      const com = comision.c && !comision.mensual && !lista.length ? comision.c : 0;
+      const com = comision.c && !comision.comoGasto && !comision.mensual && !lista.length && desde === 1 ? comision.c : 0;
       lista.push({
-        k: lista.length + 1, n, fecha: q.canceladaEl, periodo: periodoDe(q.canceladaEl), capital, interes: 0, comision: com, c: capital + com, intra, cancelacion: true,
+        k: (lista[lista.length - 1]?.k || desde - 1) + 1, n, fecha: q.canceladaEl, periodo: periodoDe(q.canceladaEl), capital, interes: 0, comision: com, c: capital + com, intra, cancelacion: true,
       });
     }
   }
@@ -357,4 +378,86 @@ export function pagosDeTarjetas(ix, desde, hasta, filtro) {
     }
   }
   return items;
+}
+
+// ---------------------------------------------------------------- Financiamientos
+
+// Estado de cada financiamiento de las tarjetas (intrafinanciamientos y extrafinanciamientos), en
+// lempiras. Es lo que se ve en la pantalla Financiamientos y en el estado de cuenta de cada tarjeta.
+// `situacion`: 'por-empezar' (ninguna cuota cobrada todavía), 'en-curso', 'cancelado' o 'terminado'.
+export function financiamientos(ix, { hoy = ix.hoy, cuentaId = null } = {}) {
+  const out = [];
+  for (const info of ix.tarjetas.values()) {
+    if (cuentaId && info.cuenta.id !== cuentaId) continue;
+    for (const [id, lista] of info.cuotas) {
+      const m = ix.movimientos.get(id);
+      if (!m || !lista.length) continue;
+      const q = m.cuotas || {};
+      const desde = desdeCuotaDe(q);
+      const cobradas = lista.filter((x) => x.fecha <= hoy);
+      const faltan = lista.filter((x) => x.fecha > hoy);
+      const cancelado = lista.some((x) => x.cancelacion && x.fecha <= hoy);
+      const total = aCentavos(m.monto);
+      const comision = comisionDeCuotas(q, total);
+      const suma = (xs, campo) => xs.reduce((a, x) => a + x[campo], 0);
+      out.push({
+        id,
+        movimiento: m,
+        cuenta: info.cuenta,
+        tipo: q.tipo === 'extra' ? 'extra' : 'intra',
+        nombre: m.nota || ix.comercios.get(m.comercioId)?.nombre || ix.categorias.get(m.categoriaId)?.nombre || 'Financiamiento',
+        fecha: m.fecha,
+        total: deCentavos(total),
+        n: lista[0].n,
+        desde, // 1 si empezó en la app; mayor si ya venía empezado
+        // La cuota que sigue y cuántas quedan. `k` es el número real, no la posición en la lista.
+        siguiente: faltan[0] || null,
+        cuotaActual: faltan[0]?.k || null,
+        cobradas: cobradas.length,
+        registradas: lista.length, // las que la app registra (las de antes de `desde` no cuentan)
+        faltan: faltan.length,
+        cancelado,
+        // Uno que ya venía empezado (desde > 1) está en curso aunque la app no le haya visto
+        // cobrar ninguna cuota todavía.
+        situacion: cancelado ? 'cancelado' : !faltan.length ? 'terminado' : cobradas.length || desde > 1 ? 'en-curso' : 'por-empezar',
+        cuotaMonto: deCentavos((faltan[0] || lista[lista.length - 1]).c),
+        capitalPendiente: deCentavos(suma(faltan, 'capital')),
+        capitalPagado: deCentavos(suma(cobradas, 'capital')),
+        interesPendiente: deCentavos(suma(faltan, 'interes')),
+        interesPagado: deCentavos(suma(cobradas, 'interes')),
+        pendiente: deCentavos(suma(faltan, 'c')),
+        // La comisión, esté en la cuota o registrada como gasto del mes.
+        comision: deCentavos(comision.c),
+        comisionComoGasto: comision.comoGasto,
+        comisionMensual: comision.mensual,
+        termina: lista[lista.length - 1].periodo,
+        cuotas: lista,
+      });
+    }
+  }
+  // Primero lo que sigue vivo, y dentro de eso lo que se cobra antes.
+  const orden = { 'por-empezar': 0, 'en-curso': 0, cancelado: 1, terminado: 2 };
+  return out.sort((a, b) => orden[a.situacion] - orden[b.situacion]
+    || (a.siguiente?.fecha || a.termina).localeCompare(b.siguiente?.fecha || b.termina)
+    || a.nombre.localeCompare(b.nombre));
+}
+
+// Según la fecha del financiamiento y el corte de la tarjeta, qué cuota sería la siguiente hoy.
+// Sirve para avisar cuando el número de cuota que se escribió no cuadra con las fechas: si alguien
+// dice que va por la 8 pero la 7 todavía no se ha cobrado, algo está mal en la fecha o en el número.
+export function cuotaSiguienteHoy(cuenta, m, hoy) {
+  const completo = cuotasDeCompra(cuenta, { ...m, cuotas: { ...(m.cuotas || {}), desdeCuota: 1, canceladaEl: null } });
+  return completo.find((x) => x.fecha > hoy)?.k || null; // null = ya pasaron todas
+}
+
+// Lo que las tarjetas tienen comprometido en cuotas que aún no se cobran, por tipo.
+export function comprometidoEnCuotas(ix, opciones = {}) {
+  const t = { intra: 0, extra: 0, total: 0, vigentes: 0 };
+  for (const f of financiamientos(ix, opciones)) {
+    if (f.situacion === 'terminado' || f.situacion === 'cancelado') continue;
+    t[f.tipo] += f.pendiente;
+    t.total += f.pendiente;
+    t.vigentes += 1;
+  }
+  return { intra: redondear(t.intra), extra: redondear(t.extra), total: redondear(t.total), vigentes: t.vigentes };
 }

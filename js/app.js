@@ -60,6 +60,7 @@ const VISTAS = [
   { id: 'tarjetas', nombre: 'Tarjetas', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjetas') },
   // #/tarjeta/<id>/<corte>: el estado de cuenta de una tarjeta; en el menú se marca Tarjetas.
   { id: 'tarjeta', nombre: 'Tarjeta', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjeta'), conParametros: true, menu: 'tarjetas', titulo: ([id]) => buscar('cuentas', id)?.nombre },
+  { id: 'financiamientos', nombre: 'Financiamientos', componente: aDemanda(() => import('./ui/financiamientos.js'), 'VistaFinanciamientos') },
   { id: 'prestamos', nombre: 'Préstamos', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPrestamos') },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: aDemanda(() => import('./ui/presupuesto.js'), 'VistaPresupuesto') },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPlanDeudas') },

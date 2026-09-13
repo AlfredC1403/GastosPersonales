@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { asignarTasas } from '../js/core/divisas.js';
-import { corteDe, limiteDe, cuotasDeCompra, estadoCiclo, resumenTarjeta } from '../js/core/tarjetas.js';
+import { corteDe, limiteDe, cuotasDeCompra, estadoCiclo, resumenTarjeta, comisionInmediata, financiamientos, comprometidoEnCuotas, cuotaSiguienteHoy } from '../js/core/tarjetas.js';
 import { crearIndice } from '../js/core/asientos.js';
 import { gastoDelMes, saldosCuentas, resumenMes } from '../js/core/reportes.js';
 import { tramosDePago } from '../js/core/quincena.js';
@@ -9,6 +9,7 @@ import { calcularAvisos } from '../js/core/avisos.js';
 import { docVacio } from '../js/core/modelo.js';
 
 const T = (fecha) => `${fecha}T12:00:00Z`;
+const cerca = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
 const visa = (datos = {}) => ({
   id: 'visa', nombre: 'Visa', tipo: 'tarjeta', moneda: 'L', titularId: 'moises', saldoInicial: 0, creado: T('2026-08-01'),
   tarjeta: {
@@ -254,4 +255,132 @@ test('avisa de la tasa vieja solo cuando el hogar tiene algo en dólares', () =>
   // En el límite: 35 días pasa, 36 avisa.
   assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-09' })), []);
   assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-08' })).map((a) => a.id), [`tasa-vieja:2026-09`]);
+});
+
+// ---------------------------------------------------------------- Financiamientos
+
+const financiamiento = (id, fecha, monto, cuotas) => compra(id, fecha, monto, { cuotas: { n: 6, tipo: 'intra', tasaAnual: 0, cuotaBanco: null, primerCorte: null, canceladaEl: null, comision: { valor: 0, unidad: 'porcentaje', cobro: 'unica' }, ...cuotas } });
+
+test('la comisión marcada como gasto del mes sale de las cuotas y cae en la fecha del financiamiento', () => {
+  const q = { comision: { valor: 2, unidad: 'porcentaje', cobro: 'unica' } };
+  const t = visa();
+  // Sin marcar: los L240 de comisión viajan en la primera cuota, como hasta ahora.
+  const dentro = cuotasDeCompra(t, { monto: 12000, fecha: '2026-09-08', cuotas: { n: 6, ...q } });
+  assert.deepEqual([dentro[0].comision, dentro[1].comision], [24000, 0]);
+  assert.equal(comisionInmediata(t, { monto: 12000, fecha: '2026-09-08', cuotas: { n: 6, ...q } }), null);
+
+  // Marcada: ninguna cuota la lleva, y se cobra el día de la compra.
+  const conGasto = { n: 6, comision: { ...q.comision, comoGasto: true } };
+  const fuera = cuotasDeCompra(t, { monto: 12000, fecha: '2026-09-08', cuotas: conGasto });
+  assert.deepEqual(fuera.map((x) => x.comision), [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(comisionInmediata(t, { monto: 12000, fecha: '2026-09-08', cuotas: conGasto }),
+    { c: 24000, fecha: '2026-09-08', periodo: '2026-09' });
+  // El capital no cambia: la comisión no es parte de lo financiado.
+  assert.deepEqual(dentro.map((x) => x.capital), fuera.map((x) => x.capital));
+});
+
+test('la comisión como gasto es gasto y deuda en su mes, no en el de la primera cuota', () => {
+  // Corte el 20: la compra del 8 de septiembre tiene su primera cuota el 20 de septiembre.
+  const m = financiamiento('f1', '2026-09-08', 12000, { comision: { valor: 500, unidad: 'monto', cobro: 'unica', comoGasto: true } });
+  const ix = indice([m], '2026-09-30');
+  const cargos = (periodo) => (ix.porPeriodo.get(periodo) || []).filter((a) => a.clase === 'gasto' && a.categoriaId === 'cargos-tarjeta');
+  assert.deepEqual(cargos('2026-09').map((a) => [a.nombre, a.c]), [['Comisión de financiamiento', 50000]]);
+  // Y suma a la deuda de la tarjeta ese mismo día.
+  const eventos = (ix.eventosTarjeta.get('visa') || []).filter((e) => e.tipo === 'comision');
+  assert.deepEqual(eventos.map((e) => [e.fecha, e.delta]), [['2026-09-08', 50000]]);
+});
+
+test('un financiamiento ya empezado solo registra las cuotas que faltan', () => {
+  const t = visa();
+  const base = { monto: 12000, fecha: '2026-03-08', cuotas: { n: 12, tasaAnual: 24 } };
+  const completo = cuotasDeCompra(t, base);
+  assert.equal(completo.length, 12);
+
+  // Vamos por la cuota 5: las cuatro primeras no se registran.
+  const empezado = cuotasDeCompra(t, { ...base, cuotas: { ...base.cuotas, desdeCuota: 5 } });
+  assert.equal(empezado.length, 8);
+  // Conservan su número real y su fecha: la 5 sigue siendo la 5 de 12.
+  assert.deepEqual([empezado[0].k, empezado[0].n, empezado[0].fecha], [5, 12, completo[4].fecha]);
+  // Y su interés es el que toca en ese punto de la amortización, no el de la primera cuota.
+  assert.deepEqual(empezado.map((x) => x.interes), completo.slice(4).map((x) => x.interes));
+  assert.ok(empezado[0].interes < completo[0].interes, 'el interés baja conforme avanza el saldo');
+  // El capital que falta es el de las cuotas que quedan.
+  assert.equal(empezado.reduce((a, x) => a + x.capital, 0), completo.slice(4).reduce((a, x) => a + x.capital, 0));
+});
+
+test('en un financiamiento ya empezado la comisión única no se vuelve a cobrar', () => {
+  const t = visa();
+  const cuotas = { n: 12, tasaAnual: 24, desdeCuota: 5, comision: { valor: 2, unidad: 'porcentaje', cobro: 'unica' } };
+  // La comisión iba en la cuota 1, que ya no se registra.
+  assert.deepEqual(cuotasDeCompra(t, { monto: 12000, fecha: '2026-03-08', cuotas }).map((x) => x.comision), Array(8).fill(0));
+  // Una comisión mensual sí sigue cobrándose en las que faltan.
+  const mensual = cuotasDeCompra(t, { monto: 12000, fecha: '2026-03-08', cuotas: { ...cuotas, comision: { valor: 100, unidad: 'monto', cobro: 'mensual' } } });
+  assert.deepEqual(mensual.map((x) => x.comision), Array(8).fill(10000));
+});
+
+test('un financiamiento ya empezado no mete en la deuda las cuotas viejas', () => {
+  const m = financiamiento('f2', '2026-03-08', 12000, { n: 12, tasaAnual: 0, desdeCuota: 10 });
+  const ix = indice([m], '2026-09-30');
+  // Solo las cuotas 10, 11 y 12 existen, y todas caen después del saldo inicial de la tarjeta.
+  const cuotas = ix.tarjetas.get('visa').cuotas.get('f2');
+  assert.deepEqual(cuotas.map((x) => x.k), [10, 11, 12]);
+  // Nada del financiamiento aparece antes del mes en que va la cuota 10.
+  const gastos = [...ix.porPeriodo.keys()].filter((p) => (ix.porPeriodo.get(p) || []).some((a) => a.origen === 'f2')).sort();
+  assert.deepEqual(gastos, ['2026-12', '2027-01', '2027-02']);
+});
+
+test('financiamientos(): estado de cada uno, en curso, por empezar y terminado', () => {
+  const movs = [
+    // Intra recién firmado: corte el 20, así que la primera cuota es el 20 de septiembre.
+    financiamiento('nuevo', '2026-09-08', 12000, { n: 6, tasaAnual: 18 }),
+    // Extra que ya venía por la cuota 8 de 12.
+    financiamiento('viejo', '2026-03-08', 24000, { n: 12, tipo: 'extra', tasaAnual: 24, desdeCuota: 8 }),
+    // Uno que ya terminó.
+    financiamiento('listo', '2026-01-10', 6000, { n: 3, tasaAnual: 0 }),
+  ];
+  const ix = indice(movs, '2026-09-13');
+  const porId = Object.fromEntries(financiamientos(ix).map((f) => [f.id, f]));
+
+  assert.deepEqual([porId.nuevo.situacion, porId.nuevo.tipo, porId.nuevo.cuotaActual, porId.nuevo.faltan], ['por-empezar', 'intra', 1, 6]);
+  // El que venía empezado está en curso aunque la app no le haya visto cobrar ninguna cuota.
+  assert.deepEqual([porId.viejo.situacion, porId.viejo.tipo, porId.viejo.cuotaActual, porId.viejo.desde], ['en-curso', 'extra', 8, 8]);
+  assert.equal(porId.viejo.faltan, 5); // cuotas 8 a 12
+  assert.deepEqual([porId.listo.situacion, porId.listo.faltan, porId.listo.pendiente], ['terminado', 0, 0]);
+
+  // El orden pone lo vivo primero, por fecha de cobro, y lo terminado al final.
+  assert.deepEqual(financiamientos(ix).map((f) => f.id), ['nuevo', 'viejo', 'listo']);
+  // Y el total comprometido separa intra de extra, sin contar lo terminado.
+  const t = comprometidoEnCuotas(ix);
+  cerca(t.total, porId.nuevo.pendiente + porId.viejo.pendiente);
+  cerca(t.intra, porId.nuevo.pendiente);
+  cerca(t.extra, porId.viejo.pendiente);
+  assert.equal(t.vigentes, 2);
+});
+
+test('financiamientos(): se puede pedir solo los de una tarjeta', () => {
+  const otra = { ...visa(), id: 'otra', nombre: 'Otra' };
+  const movs = [
+    financiamiento('a', '2026-09-08', 12000, { n: 6 }),
+    { ...financiamiento('b', '2026-09-08', 8000, { n: 4 }), cuentaId: 'otra' },
+  ];
+  const doc = docVacio();
+  doc.config = { ...doc.config, inicio: '2026-09' };
+  doc.cuentas = [...doc.cuentas, visa(), otra];
+  doc.movimientos = movs;
+  const ix = crearIndice(doc, { hoy: '2026-09-13' });
+  assert.deepEqual(financiamientos(ix).map((f) => f.id).sort(), ['a', 'b']);
+  assert.deepEqual(financiamientos(ix, { cuentaId: 'otra' }).map((f) => f.id), ['b']);
+});
+
+test('cuotaSiguienteHoy(): qué cuota tocaría hoy según la fecha y el corte', () => {
+  const t = visa(); // corte el 20
+  const m = { monto: 24000, fecha: '2026-03-08', cuotas: { n: 12, tasaAnual: 24 } };
+  // Compra del 8 de marzo, corte el 20: cuota 1 el 20 de marzo, cuota 7 el 20 de septiembre.
+  assert.equal(cuotaSiguienteHoy(t, m, '2026-03-01'), 1);
+  assert.equal(cuotaSiguienteHoy(t, m, '2026-09-13'), 7);
+  assert.equal(cuotaSiguienteHoy(t, m, '2026-09-20'), 8); // la del día ya se cobró
+  // Cuando ya pasaron todas, no hay siguiente.
+  assert.equal(cuotaSiguienteHoy(t, m, '2028-01-01'), null);
+  // No le afecta el desdeCuota que se haya escrito: mira el plan completo.
+  assert.equal(cuotaSiguienteHoy(t, { ...m, cuotas: { ...m.cuotas, desdeCuota: 9 } }, '2026-09-13'), 7);
 });

@@ -1,6 +1,7 @@
 // Piezas comunes de los formularios de edición: pie con Guardar y Eliminar, texto de quién
 // registró, opciones de categoría y el guardado con Deshacer.
 import { guardar, borrar, aviso, confirmar, buscar, indice, fmt } from '../store.js';
+import { nombrePeriodo } from '../core/util.js';
 import { estadoPartidas } from '../core/presupuesto.js';
 import { redondear } from '../core/util.js';
 
@@ -105,4 +106,37 @@ export function textoDePartida(partidaId, parte, periodo) {
   if (it.estado === 'excedido') return `${it.nombre}: ${fmt(it.real - it.esperado)} más de lo previsto.`;
   if (it.sobrante > 0) return `${it.nombre} cerrada. Sobran ${fmt(it.sobrante)}${it.acumula ? ' para el mes siguiente' : ''}.`;
   return `${it.nombre} completa.`;
+}
+
+// ---------------------------------------------------------------- Financiamientos de tarjeta
+
+// Resumen en una frase del plan de cuotas, para ver antes de guardar en qué se está metiendo.
+// `lista` sale de cuotasDeCompra y viene en centavos; `q` son las opciones del financiamiento.
+export function textoDeCuotas(lista, q = {}) {
+  if (!lista?.length) return '';
+  const primera = lista[0];
+  const ultima = lista[lista.length - 1];
+  const tipica = lista[1] || primera;
+  const suma = (campo) => lista.reduce((a, x) => a + x[campo], 0);
+  const rango = `${nombrePeriodo(primera.periodo, true)}–${nombrePeriodo(ultima.periodo, true)}`;
+  const residuo = lista.length > 2 && ultima.c !== tipica.c ? ` (la última, ${fmt(ultima.c / 100)})` : '';
+  const costos = [];
+  if (suma('interes')) costos.push(`intereses ${fmt(suma('interes') / 100)}`);
+  if (suma('comision')) costos.push(`comisión ${fmt(suma('comision') / 100)}${q.comision?.cobro === 'mensual' ? '' : ' (con la primera cuota)'}`);
+  const limite = q.tipo === 'extra' ? 'No usa el límite de la tarjeta.' : `Usa ${fmt(suma('capital') / 100)} del límite.`;
+  const empezado = primera.k > 1 ? `Desde la cuota ${primera.k} de ${primera.n}: ` : '';
+  return `${empezado}${fmt(tipica.c / 100)} × ${lista.length}${residuo}, ${rango}. ${costos.length ? `En total: ${costos.join(' y ')}.` : 'Sin intereses ni comisión.'} ${limite}`;
+}
+
+// Lo que hay que revisar antes de guardar un financiamiento. Devuelve el motivo o '' si está bien.
+export function revisarFinanciamiento({ monto, fecha, q }) {
+  const n = Number(q.n);
+  if (!Number.isInteger(n) || n < 2 || n > 60) return 'Escribe el número de cuotas (de 2 a 60).';
+  if (hayValor(q.tasaAnual) && !(Number(q.tasaAnual) >= 0)) return 'Revisa la tasa anual.';
+  if (Number(q.cuotaBanco) > 0 && Number(q.cuotaBanco) * n < Number(monto)) return 'Con esa cuota no se paga: revisa la cuota o el número de cuotas.';
+  if (hayValor(q.comision?.valor) && !(Number(q.comision.valor) >= 0 && (q.comision.unidad === 'monto' || Number(q.comision.valor) <= 100))) return 'Revisa la comisión.';
+  if (q.canceladaEl && q.canceladaEl < fecha) return 'La cancelación no puede ser antes del financiamiento.';
+  const desde = Number(q.desdeCuota) || 1;
+  if (!Number.isInteger(desde) || desde < 1 || desde > n) return `¿Por qué cuota va? Tiene que ser entre 1 y ${n}.`;
+  return '';
 }

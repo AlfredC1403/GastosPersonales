@@ -22,6 +22,7 @@ export const GRUPOS_MENU = [
   { nombre: 'Dinero', items: [
     { id: 'cuentas', nombre: 'Cuentas', icono: 'banco', valor: 'cuentas' },
     { id: 'tarjetas', nombre: 'Tarjetas', icono: 'tarjeta', valor: 'tarjetas' },
+    { id: 'financiamientos', nombre: 'Financiamientos', icono: 'reloj', valor: 'financiamientos' },
     { id: 'prestamos', nombre: 'Préstamos', icono: 'tendencia', valor: 'deuda' },
   ] },
   { nombre: 'Planificar', items: [

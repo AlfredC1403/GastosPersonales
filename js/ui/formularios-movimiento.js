@@ -11,7 +11,7 @@ import { saldosCuentas } from '../core/reportes.js';
 import { parteDe } from '../core/asientos.js';
 import { corteDe, corteSiguiente, cuotasDeCompra, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
 import { hoy, periodoDe, nombrePeriodo, fechaCorta, sumarMeses, redondear, slug } from '../core/util.js';
-import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida } from './formulario-base.js';
+import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida, textoDeCuotas, revisarFinanciamiento } from './formulario-base.js';
 import { pagarTarjeta } from './formularios-tarjetas.js';
 import { nuevaQuincena } from './formularios-nomina.js';
 
@@ -107,6 +107,14 @@ export const MovimientoForm = {
           <label class="campo"><span>Se cobra</span>
             <select v-model="q.comision.cobro"><option value="unica">Una vez</option><option value="mensual">En cada cuota</option></select></label>
         </div>
+        <label v-if="q.comision.valor > 0" class="casilla"><input v-model="q.comision.comoGasto" type="checkbox">
+          Registrar la comisión como gasto de {{ nombrePeriodo(periodoMov) }}</label>
+        <p v-if="q.comision.valor > 0" class="nota chica" style="margin-top: -4px">{{ q.comision.comoGasto
+          ? 'Se anota ya, en la fecha del financiamiento, y suma a la deuda de la tarjeta.'
+          : 'Viaja en la cuota: no se anota nada hasta que la tarjeta haga corte.' }}</p>
+        <label class="campo"><span>¿Ya venía empezado? Por qué cuota va</span>
+          <input v-model.number="q.desdeCuota" type="number" inputmode="numeric" min="1" :max="q.n || 60" placeholder="1 = desde el principio"></label>
+        <p v-if="q.desdeCuota > 1" class="nota chica" style="margin-top: -4px">Las cuotas anteriores no se registran: se dan por pagadas antes de usar la app.</p>
         <label v-if="existe" class="campo"><span>Si se canceló antes, ¿cuándo? (opcional)</span><input v-model="q.canceladaEl" type="date"></label>
         <p v-if="vistaCuotas" class="nota">{{ vistaCuotas }}</p>
       </div>
@@ -283,8 +291,9 @@ export const MovimientoForm = {
     // Compra a cuotas: solo con tarjeta y en lempiras.
     const puedeCuotas = computed(() => m.tipo === 'gasto' && origenEsTarjeta.value && monedaOrigen.value === 'L' && !esCuota.value && !m.parte);
     const aCuotas = ref(!!original.cuotas);
-    const q = reactive({ n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, ...(original.cuotas || {}) });
-    q.comision = { valor: null, unidad: 'porcentaje', cobro: 'unica', ...(original.cuotas?.comision || {}) };
+    const q = reactive({ n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, desdeCuota: 1, ...(original.cuotas || {}) });
+    q.desdeCuota = Number(q.desdeCuota) || 1;
+    q.comision = { valor: null, unidad: 'porcentaje', cobro: 'unica', comoGasto: false, ...(original.cuotas?.comision || {}) };
     const cortesPosibles = computed(() => {
       const cuenta = buscar('cuentas', m.cuentaId);
       if (!cuenta?.tarjeta || !m.fecha) return [{ valor: null, texto: 'En el corte de la compra' }];
@@ -301,21 +310,7 @@ export const MovimientoForm = {
       return cuotasDeCompra(cuenta, { monto: m.monto, fecha: m.fecha, cuotas: { ...q, n } });
     });
     // "L1,000.00 × 12, sep 2026–ago 2027. En total: comisión L360.00 (con la primera cuota). Usa L12,000.00 del límite."
-    const vistaCuotas = computed(() => {
-      const lista = cuotasPrevias.value;
-      if (!lista.length) return '';
-      const primera = lista[0];
-      const ultima = lista[lista.length - 1];
-      const tipica = lista[1] || primera;
-      const suma = (campo) => lista.reduce((a, x) => a + x[campo], 0);
-      const rango = `${nombrePeriodo(primera.periodo, true)}–${nombrePeriodo(ultima.periodo, true)}`;
-      const residuo = lista.length > 2 && ultima.c !== tipica.c ? ` (la última, ${fmt(ultima.c / 100)})` : '';
-      const costos = [];
-      if (suma('interes')) costos.push(`intereses ${fmt(suma('interes') / 100)}`);
-      if (suma('comision')) costos.push(`comisión ${fmt(suma('comision') / 100)}${q.comision.cobro === 'mensual' ? '' : ' (con la primera cuota)'}`);
-      const limite = q.tipo === 'extra' ? 'No usa el límite de la tarjeta.' : `Usa ${fmt(suma('capital') / 100)} del límite.`;
-      return `${fmt(tipica.c / 100)} × ${lista.length}${residuo}, ${rango}. ${costos.length ? `En total: ${costos.join(' y ')}.` : 'Sin intereses ni comisión.'} ${limite}`;
-    });
+    const vistaCuotas = computed(() => textoDeCuotas(cuotasPrevias.value, q));
 
     const saldos = computed(() => saldosCuentas(indice()));
     const saldoSinEste = computed(() => {
@@ -356,12 +351,8 @@ export const MovimientoForm = {
       if (r.tipo === 'abono' && !r.prestamoId) return (f.error.value = 'Elige el préstamo.');
       const conCuotas = puedeCuotas.value && aCuotas.value;
       if (conCuotas) {
-        const n = Number(q.n);
-        if (!Number.isInteger(n) || n < 2 || n > 60) return (f.error.value = 'Escribe el número de cuotas (de 2 a 60).');
-        if (hayValor(q.tasaAnual) && !(Number(q.tasaAnual) >= 0)) return (f.error.value = 'Revisa la tasa anual.');
-        if (Number(q.cuotaBanco) > 0 && Number(q.cuotaBanco) * n < Number(r.monto)) return (f.error.value = 'Con esa cuota no se paga la compra: revisa la cuota o el número de cuotas.');
-        if (hayValor(q.comision.valor) && !(Number(q.comision.valor) >= 0 && (q.comision.unidad === 'monto' || Number(q.comision.valor) <= 100))) return (f.error.value = 'Revisa la comisión.');
-        if (q.canceladaEl && q.canceladaEl < r.fecha) return (f.error.value = 'La cancelación no puede ser antes de la compra.');
+        const motivo = revisarFinanciamiento({ monto: r.monto, fecha: r.fecha, q });
+        if (motivo) return (f.error.value = motivo);
       }
 
       r.monto = redondear(Number(r.monto));
@@ -381,8 +372,12 @@ export const MovimientoForm = {
         ? {
           n: Number(q.n), tipo: q.tipo, tasaAnual: Number(q.tasaAnual) > 0 ? Number(q.tasaAnual) : null,
           cuotaBanco: Number(q.cuotaBanco) > 0 ? redondear(Number(q.cuotaBanco)) : null, primerCorte: q.primerCorte || null, canceladaEl: q.canceladaEl || null,
+          desdeCuota: Number(q.desdeCuota) > 1 ? Math.round(Number(q.desdeCuota)) : 1,
           comision: Number(q.comision.valor) > 0
-            ? { valor: q.comision.unidad === 'monto' ? redondear(Number(q.comision.valor)) : Number(q.comision.valor), unidad: q.comision.unidad, cobro: q.comision.cobro }
+            ? {
+              valor: q.comision.unidad === 'monto' ? redondear(Number(q.comision.valor)) : Number(q.comision.valor),
+              unidad: q.comision.unidad, cobro: q.comision.cobro, comoGasto: !!q.comision.comoGasto,
+            }
             : null,
         }
         : null;
@@ -403,7 +398,7 @@ export const MovimientoForm = {
     }
 
     return {
-      m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
+      m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, periodoMov, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
       listaMetas, esRetiroDeMeta,
       montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
       usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, puedeCuotas, aCuotas, q, cortesPosibles, vistaCuotas, tiposFinanciamiento: TIPOS_FINANCIAMIENTO,

@@ -5,7 +5,7 @@ import { vivo, COLECCIONES_ANIO } from './modelo.js';
 import { anioDeRegistro, anioPorDefectoDe } from './anios.js';
 import { periodoDe, aCentavos, deCentavos } from './util.js';
 import { personaDeMovimiento } from './filtro.js';
-import { prepararTarjetas, posteriorAlSaldo } from './tarjetas.js';
+import { prepararTarjetas, posteriorAlSaldo, comisionInmediata } from './tarjetas.js';
 
 export const SIN_GRUPO = 'sin-grupo';
 
@@ -60,6 +60,18 @@ export function expandir(doc, ix) {
         medioId: m.cuentaId, prestamoId: m.prestamoId || null, comercioId: m.comercioId || null, ...extra,
       });
       if (tarjeta && m.cuotas) {
+        // Comisión marcada como gasto del mes: se cobra en la fecha del financiamiento, no con la
+        // primera cuota. Es deuda de la tarjeta, porque es el banco quien la carga ahí.
+        const comision = comisionInmediata(tarjeta.cuenta, m);
+        if (comision) {
+          const enComision = { fecha: comision.fecha, periodo: comision.periodo };
+          deuda(tarjeta, comision.c, 'L', 'comision', enComision);
+          anotar({
+            ...base, ...enComision, clase: 'gasto', c: comision.c, estimado: false, categoriaId: 'cargos-tarjeta',
+            grupoId: ix.grupoDe('cargos-tarjeta'), partidaId: null, parte: null, medioId: m.cuentaId, prestamoId: null,
+            comercioId: null, nombre: 'Comisión de financiamiento',
+          });
+        }
         // Compra a cuotas: cada cuota es deuda y gasto en el ciclo en que se cobra. El capital va a
         // la categoría de la compra; los intereses y la comisión, a los cargos de tarjeta.
         for (const q of tarjeta.cuotas.get(m.id) || []) {

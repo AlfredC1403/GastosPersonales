@@ -6,6 +6,7 @@ import { resumenTarjeta, estadoCiclo, corteDe, corteSiguiente, corteAnterior, fe
 import { fechaCorta, nombrePeriodo, nombreMes, periodoDe, sumarDias, sumarMeses, aCentavos, deCentavos, cuandoVence } from '../core/util.js';
 import { Icono, dosMonedas } from './componentes.js';
 import { nuevoMovimiento, editarMovimiento } from './formularios.js';
+import { editarFinanciamiento } from './formularios-financiamientos.js';
 import { editarTarjeta, pagarTarjeta, formatoTasa } from './formularios-tarjetas.js';
 
 const { ref, computed, watch } = Vue;
@@ -198,9 +199,9 @@ export const VistaTarjeta = {
     </article>
 
     <article v-if="cuotasVigentes.length" class="tarjeta">
-      <div class="tarjeta-cab pegada"><h2>Compras a cuotas</h2></div>
+      <div class="tarjeta-cab centro pegada"><h2>Financiamientos</h2><a class="btn-link" href="#/financiamientos">Ver todos</a></div>
       <ul class="lista">
-        <li v-for="x in cuotasVigentes" :key="x.id" class="fila clic" @click="editarMovimiento(x.m)">
+        <li v-for="x in cuotasVigentes" :key="x.id" class="fila clic" @click="editarFinanciamiento(x.m)">
           <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub">{{ x.sub }}</span></div>
           <div class="derecha"><div class="monto">{{ fmt(x.queda) }}</div><div class="dif tenue">por cobrar</div></div>
         </li>
@@ -366,7 +367,7 @@ export const VistaTarjeta = {
 
     return {
       cuenta, datos, fechaSaldo, e, hayAnterior, haySiguiente, mover, situacion, textoHoy, compras, pagos, despues, cuotasVigentes, cargos, puedePagar, pagar, comprar,
-      fmt, fmtMoneda, fechaCorta, fechaLarga, dosMonedas, nombrePersona, editarTarjeta, editarMovimiento,
+      fmt, fmtMoneda, fechaCorta, fechaLarga, dosMonedas, nombrePersona, editarTarjeta, editarMovimiento, editarFinanciamiento,
     };
   },
 };

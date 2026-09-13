@@ -6,16 +6,18 @@ import { coincidePersona, personaDeMovimiento } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { colorGrupo } from '../core/reportes.js';
 import { TIPOS_MOVIMIENTO, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
+import { TIPOS_FINANCIAMIENTO, comisionInmediata } from '../core/tarjetas.js';
 import { estadoRecibo } from '../core/nomina.js';
 import { nombrePeriodo, hoy, periodoDe, fechaCorta, nombreMes, DIAS_CORTOS } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { Icono, descargar } from './componentes.js';
 import { editarMovimiento, editarRecibo } from './formularios.js';
+import { editarFinanciamiento } from './formularios-financiamientos.js';
 
 const { reactive, ref, computed } = Vue;
 
-const TIPOS = { ...TIPOS_MOVIMIENTO, recibo: 'Salario o pago recibido', cuota: 'Cuota de una compra a cuotas', cargo: 'Cargo de tarjeta' };
-const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abono: 'A', ajuste: '±', pago_tarjeta: 'P', cuota: 'C', cargo: 'C' };
+const TIPOS = { ...TIPOS_MOVIMIENTO, recibo: 'Salario o pago recibido', cuota: 'Cuota de un financiamiento', cargo: 'Cargo de tarjeta', financiamiento: 'Financiamiento de tarjeta' };
+const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abono: 'A', ajuste: '±', pago_tarjeta: 'P', cuota: 'C', cargo: 'C', financiamiento: 'F' };
 // Lo que cuenta como gasto en los totales (con el chip "Gastos").
 const ES_GASTO = ['gasto', 'cuota', 'cargo'];
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'short', timeStyle: 'short' });
@@ -115,8 +117,32 @@ export const VistaMovimientos = {
         };
         const t = ix.tarjetas.get(m.cuentaId);
         if (m.tipo === 'gasto' && m.cuotas && t) {
-          // Compra a cuotas: una fila por cuota, en el mes en que se cobra.
-          for (const q of t.cuotas.get(m.id) || []) {
+          // El financiamiento no mueve dinero el día que se firma: lo que se cobra son sus cuotas.
+          // Aun así se muestra en su mes, porque si no, quien lo acaba de registrar no lo ve en
+          // ninguna parte (su primera cuota puede caer el mes siguiente). No cuenta en los totales.
+          const lista = t.cuotas.get(m.id) || [];
+          const primera = lista[0];
+          // Comisión registrada como gasto del mes: es un cargo de la tarjeta ese día, y cuenta en
+          // los totales del mes. Sin esta fila estaría en los totales pero no en la lista.
+          const comision = comisionInmediata(t.cuenta, m);
+          if (comision) {
+            out.push({
+              ...base, id: `${m.id}:comision`, tipo: 'cargo', fecha: comision.fecha, periodo: comision.periodo,
+              monto: comision.c / 100, enL: comision.c / 100, moneda: 'L',
+              categoriaId: 'cargos-tarjeta', grupoId: ix.grupoDe('cargos-tarjeta'), partidaId: null,
+              titulo: `Comisión · ${base.titulo}`, abrir: () => editarFinanciamiento(m),
+            });
+          }
+          if (primera) {
+            out.push({
+              ...base, id: `${m.id}:financiamiento`, tipo: 'financiamiento', monto: 0, enL: 0, moneda: 'L',
+              titulo: `${base.titulo} · ${TIPOS_FINANCIAMIENTO[m.cuotas?.tipo === 'extra' ? 'extra' : 'intra'].toLowerCase()}`,
+              financiado: Number(m.monto) || 0, cuotasN: primera.n, primeraCuota: primera,
+              abrir: () => editarFinanciamiento(m),
+            });
+          }
+          // Una fila por cuota, en el mes en que se cobra.
+          for (const q of lista) {
             if (ix.previos?.has(m.id) && q.periodo < ix.apertura.mes) continue;
             out.push({
               ...base, id: `${m.id}:${q.k}`, tipo: 'cuota', fecha: q.fecha, periodo: q.periodo, monto: q.c / 100, moneda: 'L', enL: q.c / 100,
@@ -174,6 +200,10 @@ export const VistaMovimientos = {
         partes.push(`compra del ${fechaCorta(x.compra)}`);
         if (x.interes || x.comision) partes.push(`incluye ${[x.interes ? `intereses ${fmt(x.interes)}` : '', x.comision ? `comisión ${fmt(x.comision)}` : ''].filter(Boolean).join(' y ')}`);
       }
+      if (x.tipo === 'financiamiento') {
+        partes.push(`${fmt(x.financiado)} a ${x.cuotasN} cuotas`);
+        partes.push(`primera cuota el ${fechaCorta(x.primeraCuota.fecha)}`);
+      }
       if (x.tipo === 'pago_tarjeta') {
         const m = x.registro;
         const pagado = [Number(m.pagoL) ? fmtMoneda(m.pagoL, 'L') : '', Number(m.pagoUSD) ? `${fmtMoneda(m.pagoUSD, 'USD')}${m.tasa ? ' a ' + m.tasa : ''}` : ''].filter(Boolean).join(' + ');
@@ -206,7 +236,10 @@ export const VistaMovimientos = {
         .map((x) => {
           const s = signo(x);
           const textoLempiras = x.moneda === 'USD' && x.enL ? `${x.estimado ? '≈ ' : ''}${fmt(x.enL)}${x.estimado && ix.esTarjeta(x.cuentaId) ? ' al pagar' : ''}` : '';
-          return { ...x, signo: s, quien: quienDe(x), subtitulo: subtitulo(x), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
+          const textoMonto = x.tipo === 'financiamiento'
+            ? fmt(x.financiado) // lo financiado, no un movimiento del mes
+            : (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda);
+          return { ...x, signo: s, quien: quienDe(x), subtitulo: subtitulo(x), textoMonto, textoLempiras: x.tipo === 'financiamiento' ? 'no se cobra hoy' : textoLempiras };
         });
     });
 
