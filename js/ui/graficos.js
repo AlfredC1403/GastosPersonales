@@ -148,3 +148,49 @@ export const LineaPlan = {
     return { lienzo, indice, x, lineaSin, lineaCon, area, anios, mover, info };
   },
 };
+
+// Dos series por mes en un solo eje: B (el año de comparación) en gris y A en el color de acento.
+// `meses`: [{ etiqueta, largo, A, B }] con null en los meses que no entran en la comparación.
+export const ColumnasComparadas = {
+  props: {
+    meses: { type: Array, required: true },
+    nombreA: { type: String, required: true },
+    nombreB: { type: String, required: true },
+    formatear: { type: Function, required: true },
+  },
+  template: `
+  <div>
+    <svg class="grafico" viewBox="0 0 336 150" preserveAspectRatio="none" style="height: 150px"
+         role="img" :aria-label="'Gasto por mes, ' + nombreA + ' y ' + nombreB" @mouseleave="elegido = null">
+      <line v-for="y in [12, 51, 90, 129]" :key="y" x1="0" x2="336" :y1="y" :y2="y" stroke="var(--linea)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <g v-for="c in columnas" :key="c.i" class="clic" @click="elegir(c.i)" @mouseenter="elegido = c.i">
+        <rect :x="c.xSlot" y="0" :width="slot" height="150" fill="transparent"/>
+        <rect v-if="c.hB" :x="c.xB" :y="130 - c.hB" :width="ancho" :height="c.hB" fill="var(--tinta3)" :opacity="elegido === null || elegido === c.i ? 0.7 : 0.25"/>
+        <rect v-if="c.hA" :x="c.xA" :y="130 - c.hA" :width="ancho" :height="c.hA" fill="var(--acento)" :opacity="elegido === null || elegido === c.i ? 1 : 0.4"/>
+      </g>
+    </svg>
+    <div class="eje-meses" :style="{ gridTemplateColumns: 'repeat(' + meses.length + ', 1fr)' }">
+      <div v-for="(m, i) in meses" :key="i" class="clic" :class="{ activo: elegido === i }" @click="elegir(i)"><div class="mes">{{ m.etiqueta }}</div></div>
+    </div>
+    <p class="grafico-info">{{ info }}</p>
+  </div>`,
+  setup(props) {
+    const elegido = ref(null);
+    const slot = computed(() => 336 / Math.max(1, props.meses.length));
+    const ancho = computed(() => Math.min(14, slot.value * 0.34));
+    const maximo = computed(() => Math.max(1, ...props.meses.flatMap((m) => [m.A || 0, m.B || 0])));
+    const alto = (v) => (v ? Math.max(1.5, (v / maximo.value) * 118) : 0);
+    const columnas = computed(() => props.meses.map((m, i) => {
+      const centro = slot.value * i + slot.value / 2;
+      return { i, xSlot: slot.value * i, xB: centro - ancho.value - 1, xA: centro + 1, hA: alto(m.A), hB: alto(m.B) };
+    }));
+    const info = computed(() => {
+      if (elegido.value === null) return 'Toca un mes para ver los dos años.';
+      const m = props.meses[elegido.value];
+      const valor = (v) => (v === null || v === undefined ? 'no entra' : props.formatear(v));
+      return `${m.largo}: ${props.nombreA} ${valor(m.A)} · ${props.nombreB} ${valor(m.B)}`;
+    });
+    const elegir = (i) => { elegido.value = elegido.value === i ? null : i; };
+    return { elegido, slot, ancho, columnas, info, elegir };
+  },
+};

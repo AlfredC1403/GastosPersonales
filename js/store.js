@@ -36,6 +36,7 @@ export const store = reactive({
   hoy: hoy(),
   yo: leerTexto(CLAVES.yo),
   periodo: periodoActual(),
+  anio: periodoActual().slice(0, 4), // año que se ve en el resumen anual
   usuario: null, // cuenta de Microsoft conectada: { nombre, email }
   // archivos: { [clave]: { itemId, eTag, esquema } }; pendientes: claves con cambios por subir
   sync: { estado: 'local', mensaje: '', codigo: '', ultima: null, ubicacion: null, archivos: {}, pendientes: [] },

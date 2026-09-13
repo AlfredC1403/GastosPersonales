@@ -4,6 +4,7 @@ import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { resumenTarjeta } from '../core/tarjetas.js';
+import { estadoMetas } from '../core/metas.js';
 import { VERSION } from '../version.js';
 import { Icono } from './componentes.js';
 
@@ -25,6 +26,12 @@ export const GRUPOS_MENU = [
   { nombre: 'Planificar', items: [
     { id: 'presupuesto', nombre: 'Presupuesto', icono: 'pastel', valor: 'presupuesto' },
     { id: 'plan-deudas', nombre: 'Plan de deudas', icono: 'objetivo' },
+    { id: 'metas', nombre: 'Metas', icono: 'bandera', valor: 'metas' },
+    { id: 'reparto', nombre: 'Reparto de gastos', icono: 'balanza' },
+  ] },
+  { nombre: 'Reportes', items: [
+    { id: 'resumen', nombre: 'Resumen anual', icono: 'barras' },
+    { id: 'comparar', nombre: 'Comparar años', icono: 'comparar' },
   ] },
   { nombre: 'Configuración', items: [
     { id: 'configurar', nombre: 'Revisar configuración', icono: 'check' },
@@ -103,6 +110,11 @@ export const MenuLateral = {
         cuentas: lista.length ? fmtEntero(lista.reduce((a, c) => a + enLempirasAprox(ix, c.id, saldos[c.id] || 0), 0)) : '',
         deuda: deuda ? fmtEntero(deuda) : '',
         tarjetas: deTarjetas > 0 ? fmtEntero(deTarjetas) : '',
+        metas: (() => {
+          const lista = estadoMetas(ix, f);
+          const objetivo = lista.reduce((a, e) => a + e.objetivo, 0);
+          return objetivo ? `${Math.round((lista.reduce((a, e) => a + Math.min(e.ahorrado, e.objetivo), 0) / objetivo) * 100)}%` : '';
+        })(),
         presupuesto: `${fmtEntero(presupuestoMensual(ix, store.periodo, f).egresos)}/mes`,
         avisos: avisos().length ? String(avisos().length) : '',
       };

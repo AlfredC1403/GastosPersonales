@@ -271,6 +271,24 @@ export function resumenTarjeta(ix, cuenta) {
   };
 }
 
+// Lo que se debe en las tarjetas al final de `fecha`, en centavos de lempira: el saldo en cada
+// moneda (los dólares, con la última tasa) y el capital de las cuotas que faltan de las compras
+// hechas hasta esa fecha. Antes del saldo con que empezó una tarjeta, no se cuenta.
+export function deudaTarjetasAl(ix, fecha, filtro) {
+  let total = 0;
+  for (const { cuenta, saldoFecha, ultimaTasa } of ix.tarjetas.values()) {
+    if (!coincidePersona(cuenta.titularId || null, filtro) || fecha < saldoFecha) continue;
+    const t = cuenta.tarjeta || {};
+    const deuda = { L: aCentavos(t.saldoInicial?.L), USD: aCentavos(t.saldoInicial?.USD) };
+    for (const e of ix.eventosTarjeta.get(cuenta.id) || []) {
+      if (e.fecha <= fecha) deuda[e.moneda] += e.delta;
+      else if (e.tipo === 'cuota' && (ix.movimientos.get(e.origen)?.fecha || '9999') <= fecha) deuda.L += e.capital ?? e.delta;
+    }
+    total += deuda.L + Math.round(deuda.USD * (ultimaTasa || Number(ix.config.tasaReferencia) || 0));
+  }
+  return total;
+}
+
 const ESTADO_ITEM = { abierto: 'pendiente', pendiente: 'pendiente', parcial: 'parcial', vencido: 'pendiente', pagado: 'completo' };
 
 // Pagos de tarjeta con fecha límite entre `desde` y `hasta`, como items del plan (para los

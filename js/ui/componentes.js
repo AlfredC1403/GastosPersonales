@@ -39,6 +39,10 @@ const TRAZOS = {
   billete: 'M3 7h18v10H3zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6.5 10v.01M17.5 14v.01',
   tarjeta: 'M3 6h18v12H3zM3 10h18M7 14.5h4',
   tienda: 'M4 9l1.5-5h13L20 9M4 9h16M5 9v11h14V9M10 20v-5h4v5',
+  bandera: 'M5 21V4M5 4h12l-2.5 4 2.5 4H5',
+  balanza: 'M12 3v18M7 21h10M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z',
+  barras: 'M5 20v-9M10 20V5M15 20v-6M20 20V9M3 20h18',
+  comparar: 'M4 20v-7M8 20V8M14 20v-5M18 20V6M2 20h20',
 };
 
 export const Icono = {

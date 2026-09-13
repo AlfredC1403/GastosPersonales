@@ -23,6 +23,10 @@ import { VistaAvisos } from './ui/avisos.js';
 import { VistaSalarios } from './ui/salarios.js';
 import { VistaTarjetas, VistaTarjeta } from './ui/tarjetas.js';
 import { VistaComercios } from './ui/comercios.js';
+import { VistaMetas } from './ui/metas.js';
+import { VistaReparto } from './ui/reparto.js';
+import { VistaResumen } from './ui/resumen.js';
+import { VistaComparar } from './ui/comparar.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
 
@@ -39,6 +43,11 @@ const VISTAS = [
   { id: 'prestamos', nombre: 'Préstamos', componente: VistaPrestamos },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: VistaPresupuesto },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: VistaPlanDeudas },
+  { id: 'metas', nombre: 'Metas', componente: VistaMetas },
+  { id: 'reparto', nombre: 'Reparto de gastos', componente: VistaReparto },
+  { id: 'resumen', nombre: 'Resumen anual', componente: VistaResumen, porAnio: true },
+  // #/comparar/<año>/<año>
+  { id: 'comparar', nombre: 'Comparar años', componente: VistaComparar, conParametros: true },
   { id: 'personas', nombre: 'Personas', componente: VistaPersonas },
   { id: 'categorias', nombre: 'Categorías y grupos', componente: VistaCategorias },
   { id: 'comercios', nombre: 'Comercios', componente: VistaComercios },
@@ -91,6 +100,15 @@ const App = {
           </div>
           <button type="button" class="btn-icono" aria-label="Mes siguiente" @click="mover(1)"><icono n="der" :t="20"/></button>
           <button v-if="store.periodo !== actual" type="button" class="btn-hoy" @click="store.periodo = actual">Hoy</button>
+        </template>
+        <template v-else-if="vista.porAnio">
+          <button type="button" class="btn-icono" aria-label="Año anterior" @click="moverAnio(-1)"><icono n="izq" :t="20"/></button>
+          <div class="cab-titulos">
+            <span class="cab-titulo">{{ store.anio }}</span>
+            <span class="cab-sub">{{ vista.nombre.toLowerCase() }}</span>
+          </div>
+          <button type="button" class="btn-icono" aria-label="Año siguiente" :disabled="store.anio >= anioActual" @click="moverAnio(1)"><icono n="der" :t="20"/></button>
+          <button v-if="store.anio !== anioActual" type="button" class="btn-hoy" @click="store.anio = anioActual">Este año</button>
         </template>
         <span v-else class="cab-titulo">{{ tituloVista }}</span>
         <span class="cab-espacio"></span>
@@ -244,6 +262,8 @@ const App = {
       listaPersonas, cuentaAvisos, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
       actualizar: () => location.reload(),
       mover: (n) => { store.periodo = sumarMeses(store.periodo, n); },
+      anioActual: actual.slice(0, 4),
+      moverAnio: (n) => { store.anio = String(Math.min(Number(actual.slice(0, 4)), Number(store.anio) + n)); },
       nuevo: () => nuevoMovimiento({ fecha: store.periodo === actual ? undefined : `${store.periodo}-01` }),
     };
   },

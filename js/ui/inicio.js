@@ -2,6 +2,7 @@ import {
   store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentasDinero, tarjetas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro, avisos,
 } from '../store.js';
 import { resumenTarjeta } from '../core/tarjetas.js';
+import { estadoMetas, SITUACIONES_META } from '../core/metas.js';
 import { tramoDeFecha } from '../core/quincena.js';
 import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
@@ -222,6 +223,23 @@ export const VistaInicio = {
       </ul>
     </article>
 
+    <article v-if="metas.length" class="tarjeta">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Metas</h2>
+        <a class="btn-link" href="#/metas">Ver metas</a>
+      </div>
+      <ul class="lista" style="margin-top: 8px">
+        <li v-for="e in metas" :key="e.meta.id" class="fila">
+          <a class="fila-info enlace-fila" href="#/metas">
+            <span style="font-size: 0.93rem">{{ e.meta.nombre }}</span>
+            <div class="progreso fino acento"><div :style="{ width: e.pct + '%' }"></div></div>
+            <span class="fila-sub" :class="{ 'texto-aviso': e.situacion === 'atrasada' }" style="margin-top: 4px">{{ subMeta(e) }}</span>
+          </a>
+          <span class="monto">{{ fmtEntero(e.ahorrado) }}</span>
+        </li>
+      </ul>
+    </article>
+
     <article class="tarjeta">
       <div class="tarjeta-cab centro pegada">
         <h2>Cuentas</h2>
@@ -417,6 +435,13 @@ export const VistaInicio = {
     const avisosHoy = computed(() => avisosVisibles.value.filter((a) => a.cuando === 'hoy').slice(0, 3));
     const tramo = computed(() => (store.periodo === periodoDe(store.hoy) ? tramoDeFecha(ix.value, store.hoy, filtro()) : null));
     const descontado = computed(() => Object.entries(r.value.descontado.porConcepto).sort((a, b) => b[1] - a[1]).map(([nombre, valor]) => ({ nombre, valor })));
+    const metas = computed(() => estadoMetas(ix.value, filtro()).slice(0, 4));
+    const subMeta = (e) => {
+      const partes = [`${e.pct}% de ${fmtEntero(e.objetivo)}`];
+      if (e.aporteMensual && e.situacion !== 'lograda') partes.push(`${fmt(e.aporteMensual)} al mes`);
+      if (e.situacion !== 'sin-fecha' && e.situacion !== 'al-dia') partes.push(SITUACIONES_META[e.situacion].texto.toLowerCase());
+      return partes.join(' · ');
+    };
     const pasosPendientes = computed(() => {
       const hechos = store.doc.config.asistente?.completados || [];
       return PASOS_ASISTENTE.filter((p) => !hechos.includes(p.id)).length;
@@ -425,7 +450,7 @@ export const VistaInicio = {
 
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
-      variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
+      variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
       avisosHoy, totalAvisos, tramo, descontado, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),

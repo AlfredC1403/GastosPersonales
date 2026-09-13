@@ -5,6 +5,7 @@ import { periodoDe, sumarMeses, sumarDias, fechaEnMes, ultimoDia, fechaCorta, no
 import { resumenMes } from './reportes.js';
 import { pagosSinRegistrar, estadoRecibo, netoEsperadoDe } from './nomina.js';
 import { resumenTarjeta, proximoCobro, fechaSaldoDe } from './tarjetas.js';
+import { estadoMetas } from './metas.js';
 
 export const CUANDO = { hoy: 'Hoy', semana: 'Esta semana', revisar: 'Para revisar' };
 
@@ -147,6 +148,17 @@ export function calcularAvisos(ix, { hoy, sync = null } = {}) {
         acciones: [{ tipo: 'ruta', ruta: `#/tarjeta/${cuenta.id}`, texto: 'Ver tarjeta' }],
       });
     }
+  }
+
+  // Metas atrasadas frente a un ritmo parejo (una vez por mes).
+  for (const e of estadoMetas(ix)) {
+    if (e.situacion !== 'atrasada') continue;
+    agregar({
+      id: `meta-atrasada:${e.meta.id}:${actual}`, cuando: 'revisar', tipo: 'meta', personaId: e.meta.responsableId || null,
+      titulo: `${e.meta.nombre} va atrasada`,
+      texto: `Lleva ${L(e.ahorrado)} de ${L(e.objetivo)}. Para llegar en ${nombrePeriodo(e.fin)} hacen falta ${L(e.aporteMensual)} al mes.`,
+      acciones: [{ tipo: 'ruta', ruta: '#/metas', texto: 'Ver metas' }],
+    });
   }
 
   // Configuración incompleta.

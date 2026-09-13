@@ -1,6 +1,6 @@
 # Gastos del hogar
 
-Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente, recuerda los comercios frecuentes y tiene gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
+Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y recuerda los comercios frecuentes. También tiene metas de ahorro con el aporte sugerido por mes y por quincena, una sugerencia de cómo repartir los gastos según los ingresos, el resumen del año con el patrimonio, la comparación entre años, gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
 
 Los datos se guardan en la carpeta `GastosHogar` de OneDrive (un archivo principal y uno por año, con respaldos) y en una copia en el navegador (IndexedDB). Varias personas pueden usar la misma carpeta, cada una con su cuenta de Microsoft, y cada registro guarda quién lo anotó y quién lo editó. Todas las pantallas se pueden filtrar por persona, y cada dispositivo puede pedir un PIN para abrir la app.
 
@@ -57,7 +57,8 @@ index.html        Página, política de seguridad, fuentes y carga de Vue
 css/app.css       Estilos y variables de color (modo claro y oscuro)
 js/core/          Cálculos sin interfaz: modelo y migración de los datos, archivos por año, asientos,
                   partidas, nómina y deducciones, plan por quincena, avisos, préstamos y bola de nieve,
-                  tarjetas (cortes, cuotas, cargos) y dólares, reportes y filtro por persona
+                  tarjetas (cortes, cuotas, cargos) y dólares, metas, reparto de gastos, reportes
+                  (resumen anual, patrimonio y comparación de años) y filtro por persona
 js/ui/            Vistas, menú lateral, formularios (los de tarjetas en formularios-tarjetas.js),
                   comercios, asistente de configuración y gráficos SVG
 js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla, avisos ocultos)

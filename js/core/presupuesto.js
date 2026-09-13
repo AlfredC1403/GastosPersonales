@@ -267,7 +267,10 @@ export function movimientoParaItem(it, periodo, { hoy, monto, cierra = false } =
   const p = it.partida;
   const vinculo = { partidaId: p.id, ...(it.parte ? { parte: it.parte } : {}) };
   if (p.tipo === 'aporte' || it.parte === 'apartar') {
-    return { ...base, ...vinculo, tipo: 'transferencia', cuentaId: p.medioPagoId || 'gastos', cuentaDestinoId: p.cuentaDestinoId || (p.tipo === 'aporte' ? 'ahorro' : 'reservas') };
+    return {
+      ...base, ...vinculo, tipo: 'transferencia', cuentaId: p.medioPagoId || 'gastos', cuentaDestinoId: p.cuentaDestinoId || (p.tipo === 'aporte' ? 'ahorro' : 'reservas'),
+      ...(p.tipo === 'aporte' && p.metaId ? { metaId: p.metaId } : {}),
+    };
   }
   if (it.parte === 'pagar') {
     return { ...base, ...vinculo, tipo: 'gasto', cuentaId: p.cuentaDestinoId || 'reservas', categoriaId: p.categoriaId || 'otros' };

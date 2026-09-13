@@ -141,6 +141,19 @@ export function deudaAl(ix, periodo, filtro) {
   return redondear(total);
 }
 
+// Intereses y seguros pagados en los préstamos entre los meses `desde` y `hasta` (incluidos).
+export function costoDePrestamos(ix, desde, hasta, filtro) {
+  let intereses = 0;
+  let seguros = 0;
+  for (const p of ix.doc.prestamos || []) {
+    if (!vivo(p) || !coincidePersona(p.responsableId, filtro)) continue;
+    intereses += estadoDe(ix, p, hasta).interesPagado - estadoDe(ix, p, sumarMeses(desde, -1)).interesPagado;
+    const meses = new Set(pagosDe(ix, p.id).filter((x) => x.tipo === 'cuota' && x.periodo >= desde && x.periodo <= hasta && x.periodo > p.saldoPeriodo).map((x) => x.periodo));
+    seguros += meses.size * seguroDe(p);
+  }
+  return { intereses: redondear(intereses), seguros: redondear(seguros) };
+}
+
 // Cuotas de préstamos que tocan en `periodo`, con lo pagado (pendiente, parcial, completo).
 // Una cuota que se descuenta por planilla lleva `planilla` y se paga con los recibos del salario.
 export function cuotasDelMes(ix, periodo, filtro) {
