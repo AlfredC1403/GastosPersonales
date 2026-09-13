@@ -9,11 +9,11 @@ import { TIPOS_MOVIMIENTO } from '../core/modelo.js';
 import { partidaActivaEn } from '../core/presupuesto.js';
 import { saldosCuentas } from '../core/reportes.js';
 import { parteDe } from '../core/asientos.js';
-import { corteDe, corteSiguiente, cuotasDeCompra, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
 import { hoy, periodoDe, nombrePeriodo, fechaCorta, sumarMeses, redondear, slug } from '../core/util.js';
-import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida, textoDeCuotas, revisarFinanciamiento } from './formulario-base.js';
+import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida } from './formulario-base.js';
 import { pagarTarjeta } from './formularios-tarjetas.js';
 import { nuevaQuincena } from './formularios-nomina.js';
+import { nuevoFinanciamiento } from './formularios-financiamientos.js';
 
 const { reactive, ref, computed, watch, nextTick } = Vue;
 
@@ -42,7 +42,7 @@ export const MovimientoForm = {
 
     <template v-if="m.tipo !== 'ajuste'">
       <div class="fila-campos">
-        <label class="campo"><span>{{ aCuotas ? 'Monto total de la compra' : 'Monto' }}{{ monedaOrigen === 'USD' ? ' (' + simboloDe('USD') + ')' : '' }}</span>
+        <label class="campo"><span>Monto{{ monedaOrigen === 'USD' ? ' (' + simboloDe('USD') + ')' : '' }}</span>
           <input ref="campoMonto" v-model.number="m.monto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
         <div v-if="origenEsTarjeta" class="campo" style="flex: 0 1 140px">
           <span>Moneda</span>
@@ -84,41 +84,9 @@ export const MovimientoForm = {
     <label v-else-if="(m.tipo === 'gasto' || m.tipo === 'ingreso') && monedaOrigen === 'USD'" class="campo"><span>Tasa de cambio de ese día (opcional)</span>
       <input v-model.number="m.tasa" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65"></label>
 
-    <template v-if="puedeCuotas">
-      <label class="casilla"><input v-model="aCuotas" type="checkbox"> Compra a cuotas</label>
-      <div v-if="aCuotas" class="caja-cuotas">
-        <div class="segmentos" role="group" aria-label="Tipo de financiamiento">
-          <button v-for="(n, k) in tiposFinanciamiento" :key="k" type="button" :class="{ activo: q.tipo === k }" :aria-pressed="q.tipo === k" @click="q.tipo = k">{{ n }}</button>
-        </div>
-        <p class="nota chica" style="margin-top: -4px">{{ q.tipo === 'extra' ? 'Crédito aparte, fuera del límite: no baja el disponible de la tarjeta.' : 'Dentro del límite: la compra completa baja el disponible, que se libera con cada cuota.' }}</p>
-        <div class="fila-campos">
-          <label class="campo"><span>Cuotas</span><input v-model.number="q.n" type="number" inputmode="numeric" min="2" max="60"></label>
-          <label class="campo"><span>Primera cuota</span>
-            <select v-model="q.primerCorte"><option v-for="c in cortesPosibles" :key="c.valor || 'compra'" :value="c.valor">{{ c.texto }}</option></select></label>
-        </div>
-        <div class="fila-campos">
-          <label class="campo"><span>Tasa anual (%)</span><input v-model.number="q.tasaAnual" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0 = tasa cero"></label>
-          <label class="campo"><span>Cuota del banco (opcional)</span><input v-model.number="q.cuotaBanco" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Sin la comisión"></label>
-        </div>
-        <div class="fila-campos">
-          <label class="campo"><span>Comisión</span><input v-model.number="q.comision.valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0 si no cobran"></label>
-          <label class="campo" style="flex: 0 1 96px"><span>En</span>
-            <select v-model="q.comision.unidad" aria-label="La comisión es"><option value="porcentaje">%</option><option value="monto">{{ simboloDe('L') }}</option></select></label>
-          <label class="campo"><span>Se cobra</span>
-            <select v-model="q.comision.cobro"><option value="unica">Una vez</option><option value="mensual">En cada cuota</option></select></label>
-        </div>
-        <label v-if="q.comision.valor > 0" class="casilla"><input v-model="q.comision.comoGasto" type="checkbox">
-          Registrar la comisión como gasto de {{ nombrePeriodo(periodoMov) }}</label>
-        <p v-if="q.comision.valor > 0" class="nota chica" style="margin-top: -4px">{{ q.comision.comoGasto
-          ? 'Se anota ya, en la fecha del financiamiento, y suma a la deuda de la tarjeta.'
-          : 'Viaja en la cuota: no se anota nada hasta que la tarjeta haga corte.' }}</p>
-        <label class="campo"><span>¿Ya venía empezado? Por qué cuota va</span>
-          <input v-model.number="q.desdeCuota" type="number" inputmode="numeric" min="1" :max="q.n || 60" placeholder="1 = desde el principio"></label>
-        <p v-if="q.desdeCuota > 1" class="nota chica" style="margin-top: -4px">Las cuotas anteriores no se registran: se dan por pagadas antes de usar la app.</p>
-        <label v-if="existe" class="campo"><span>Si se canceló antes, ¿cuándo? (opcional)</span><input v-model="q.canceladaEl" type="date"></label>
-        <p v-if="vistaCuotas" class="nota">{{ vistaCuotas }}</p>
-      </div>
-    </template>
+    <p v-if="esTarjetaConCuotas" class="nota chica">¿Es a cuotas? Se registra en
+      <a href="#/financiamientos">Financiamientos</a>, donde queda con su plan y se puede seguir.
+      <button type="button" class="btn-link" @click="pasarAFinanciamiento">Registrarlo ahí</button></p>
 
     <label v-if="m.tipo === 'abono'" class="campo"><span>Préstamo</span>
       <select v-model="m.prestamoId"><option :value="null" disabled>Elige…</option>
@@ -136,7 +104,7 @@ export const MovimientoForm = {
       <select v-model="m.metaId"><option :value="null">Ninguna</option>
         <option v-for="x in listaMetas" :key="x.id" :value="x.id">{{ x.nombre }}</option></select></label>
 
-    <label v-if="enPartida && !aCuotas && monedaOrigen === 'L' && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
+    <label v-if="enPartida && monedaOrigen === 'L' && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
       <input v-model="m.cierra" type="checkbox"> Cierra la partida: sobran {{ fmt(estado.quedaSinEste - m.monto) }}{{ estado.acumula ? ' para el mes siguiente' : '' }}
     </label>
 
@@ -288,29 +256,13 @@ export const MovimientoForm = {
       aplicarComercio();
     }
 
-    // Compra a cuotas: solo con tarjeta y en lempiras.
-    const puedeCuotas = computed(() => m.tipo === 'gasto' && origenEsTarjeta.value && monedaOrigen.value === 'L' && !esCuota.value && !m.parte);
-    const aCuotas = ref(!!original.cuotas);
-    const q = reactive({ n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, desdeCuota: 1, ...(original.cuotas || {}) });
-    q.desdeCuota = Number(q.desdeCuota) || 1;
-    q.comision = { valor: null, unidad: 'porcentaje', cobro: 'unica', comoGasto: false, ...(original.cuotas?.comision || {}) };
-    const cortesPosibles = computed(() => {
-      const cuenta = buscar('cuentas', m.cuentaId);
-      if (!cuenta?.tarjeta || !m.fecha) return [{ valor: null, texto: 'En el corte de la compra' }];
-      const primero = corteDe(cuenta, m.fecha);
-      const siguiente = corteSiguiente(cuenta, primero);
-      const lista = [{ valor: null, texto: `Corte del ${fechaCorta(primero)}` }, { valor: siguiente, texto: `Corte del ${fechaCorta(siguiente)}` }];
-      if (q.primerCorte && ![null, siguiente].includes(q.primerCorte)) lista.push({ valor: q.primerCorte, texto: `Corte del ${fechaCorta(corteDe(cuenta, q.primerCorte))}` });
-      return lista;
-    });
-    const cuotasPrevias = computed(() => {
-      const cuenta = buscar('cuentas', m.cuentaId);
-      const n = Math.round(Number(q.n));
-      if (!aCuotas.value || !cuenta?.tarjeta || !(Number(m.monto) > 0) || !(n >= 2) || !m.fecha) return [];
-      return cuotasDeCompra(cuenta, { monto: m.monto, fecha: m.fecha, cuotas: { ...q, n } });
-    });
-    // "L1,000.00 × 12, sep 2026–ago 2027. En total: comisión L360.00 (con la primera cuota). Usa L12,000.00 del límite."
-    const vistaCuotas = computed(() => textoDeCuotas(cuotasPrevias.value, q));
+    // Los financiamientos (compras a cuotas, intra y extra) tienen su propia pantalla y su
+    // formulario: aquí solo se ofrece el paso, con lo que ya se haya escrito.
+    const esTarjetaConCuotas = computed(() => m.tipo === 'gasto' && origenEsTarjeta.value && monedaOrigen.value === 'L' && !esCuota.value && !m.parte);
+    function pasarAFinanciamiento() {
+      const { cuentaId, monto, fecha, categoriaId, nota, personaId } = m;
+      nuevoFinanciamiento({ cuentaId, monto: Number(monto) > 0 ? monto : null, fecha, categoriaId, nota, personaId });
+    }
 
     const saldos = computed(() => saldosCuentas(indice()));
     const saldoSinEste = computed(() => {
@@ -349,11 +301,6 @@ export const MovimientoForm = {
       if (r.tipo === 'transferencia' && (!r.cuentaDestinoId || r.cuentaDestinoId === r.cuentaId)) return (f.error.value = 'Elige una cuenta de destino distinta.');
       if (r.tipo === 'transferencia' && monedasDistintas.value && !(Number(r.montoDestino) > 0)) return (f.error.value = `Escribe cuánto llega en ${simboloDe(monedaDestino.value)}.`);
       if (r.tipo === 'abono' && !r.prestamoId) return (f.error.value = 'Elige el préstamo.');
-      const conCuotas = puedeCuotas.value && aCuotas.value;
-      if (conCuotas) {
-        const motivo = revisarFinanciamiento({ monto: r.monto, fecha: r.fecha, q });
-        if (motivo) return (f.error.value = motivo);
-      }
 
       r.monto = redondear(Number(r.monto));
       r.moneda = monedaOrigen.value;
@@ -366,33 +313,20 @@ export const MovimientoForm = {
       if (r.tipo !== 'transferencia') r.metaId = original.tipo === r.tipo ? original.metaId || null : null;
       if (!(r.tipo === 'gasto' || r.tipo === 'transferencia')) r.partidaId = null;
       if (!r.partidaId) r.parte = null;
-      r.cierra = enPartida.value && !conCuotas && r.moneda === 'L' && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
+      r.cierra = enPartida.value && r.moneda === 'L' && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
       if (r.tipo === 'ajuste') r.personaId = null;
-      r.cuotas = conCuotas
-        ? {
-          n: Number(q.n), tipo: q.tipo, tasaAnual: Number(q.tasaAnual) > 0 ? Number(q.tasaAnual) : null,
-          cuotaBanco: Number(q.cuotaBanco) > 0 ? redondear(Number(q.cuotaBanco)) : null, primerCorte: q.primerCorte || null, canceladaEl: q.canceladaEl || null,
-          desdeCuota: Number(q.desdeCuota) > 1 ? Math.round(Number(q.desdeCuota)) : 1,
-          comision: Number(q.comision.valor) > 0
-            ? {
-              valor: q.comision.unidad === 'monto' ? redondear(Number(q.comision.valor)) : Number(q.comision.valor),
-              unidad: q.comision.unidad, cobro: q.comision.cobro, comoGasto: !!q.comision.comoGasto,
-            }
-            : null,
-        }
-        : null;
+      // Un financiamiento no se edita aquí (editarMovimiento lo manda a su formulario), pero si
+      // llegara un registro con cuotas, se conservan tal cual en vez de deshacerlo.
+      r.cuotas = original.cuotas || null;
       r.comercioId = usaComercio.value ? comercioDe(r) : null;
 
-      const textoCuotas = conCuotas ? ` ${Number(q.n)} cuotas.` : '';
       const mensaje = r.partidaId
-        ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'}${textoCuotas} ${textoDePartida(g.partidaId, parteDe(g), conCuotas ? periodoDe(cuotasPrevias.value[0]?.fecha || g.fecha) : g.periodo)}`
-        : conCuotas ? `${f.existe ? 'Cambios guardados.' : 'Guardado.'}${textoCuotas}` : undefined;
+        ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'} ${textoDePartida(g.partidaId, parteDe(g), g.periodo)}`
+        : undefined;
       f.terminar(r, { deshacer: true, cerrar: !otro, mensaje });
       if (otro) {
         Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null, comercioId: null });
         comercioTexto.value = '';
-        aCuotas.value = false;
-        Object.assign(q, { tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, comision: { valor: null, unidad: 'porcentaje', cobro: 'unica' } });
         nextTick(() => campoMonto.value?.focus());
       }
     }
@@ -401,7 +335,7 @@ export const MovimientoForm = {
       m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, periodoMov, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
       listaMetas, esRetiroDeMeta,
       montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
-      usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, puedeCuotas, aCuotas, q, cortesPosibles, vistaCuotas, tiposFinanciamiento: TIPOS_FINANCIAMIENTO,
+      usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, esTarjetaConCuotas, pasarAFinanciamiento,
       saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
       fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
       listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),

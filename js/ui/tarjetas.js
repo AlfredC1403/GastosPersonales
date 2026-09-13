@@ -6,7 +6,7 @@ import { resumenTarjeta, estadoCiclo, corteDe, corteSiguiente, corteAnterior, fe
 import { fechaCorta, nombrePeriodo, nombreMes, periodoDe, sumarDias, sumarMeses, aCentavos, deCentavos, cuandoVence } from '../core/util.js';
 import { Icono, dosMonedas } from './componentes.js';
 import { nuevoMovimiento, editarMovimiento } from './formularios.js';
-import { editarFinanciamiento } from './formularios-financiamientos.js';
+import { nuevoFinanciamiento, editarFinanciamiento } from './formularios-financiamientos.js';
 import { editarTarjeta, pagarTarjeta, formatoTasa } from './formularios-tarjetas.js';
 
 const { ref, computed, watch } = Vue;
@@ -74,6 +74,7 @@ export const VistaTarjetas = {
         <button v-if="x.debe" type="button" class="btn primario" @click="pagarTarjeta(x.c.id, x.vigente ? { corte: x.e.corte } : {})">Pagar</button>
         <a class="btn" :href="'#/tarjeta/' + x.c.id">Estado de cuenta</a>
         <button type="button" class="btn" @click="comprar(x.c)">Registrar compra</button>
+        <button type="button" class="btn" @click="financiar(x.c)">Financiamiento</button>
         <button type="button" class="btn" @click="editarTarjeta(x.c)">Editar</button>
       </div>
     </article>
@@ -105,6 +106,7 @@ export const VistaTarjetas = {
     return {
       lista, totalEnL, hayDolares, textoTotal, textoDisponible, fmt, fmtMoneda, nombrePersona, personaFiltro, editarTarjeta, pagarTarjeta,
       comprar: (c) => nuevoMovimiento({ tipo: 'gasto', cuentaId: c.id, personaId: c.titularId || store.yo }),
+      financiar: (c) => nuevoFinanciamiento({ cuentaId: c.id, personaId: c.titularId || store.yo }),
     };
   },
 };
@@ -162,6 +164,7 @@ export const VistaTarjeta = {
       <div class="botones">
         <button v-if="puedePagar" type="button" class="btn primario" @click="pagar">Pagar</button>
         <button type="button" class="btn" @click="comprar">Registrar compra</button>
+        <button type="button" class="btn" @click="financiar(cuenta)">Financiamiento</button>
         <button type="button" class="btn" @click="editarTarjeta(cuenta)">Editar tarjeta</button>
       </div>
     </article>
@@ -363,10 +366,11 @@ export const VistaTarjeta = {
     const puedePagar = computed(() => datos.value.debe);
     const pagar = () => pagarTarjeta(cuenta.value.id, e.value.situacion !== 'abierto' && !e.value.antesDelSaldo ? { corte: e.value.corte } : {});
     const comprar = () => nuevoMovimiento({ tipo: 'gasto', cuentaId: cuenta.value.id, personaId: cuenta.value.titularId || store.yo });
+    const financiar = (c) => nuevoFinanciamiento({ cuentaId: c.id, personaId: c.titularId || store.yo });
     const fechaLarga = (f) => `${Number(f.slice(8, 10))} de ${nombreMes(Number(f.slice(5, 7)))}${f.slice(0, 4) !== store.hoy.slice(0, 4) ? ` de ${f.slice(0, 4)}` : ''}`;
 
     return {
-      cuenta, datos, fechaSaldo, e, hayAnterior, haySiguiente, mover, situacion, textoHoy, compras, pagos, despues, cuotasVigentes, cargos, puedePagar, pagar, comprar,
+      cuenta, datos, fechaSaldo, e, hayAnterior, haySiguiente, mover, situacion, textoHoy, compras, pagos, despues, cuotasVigentes, cargos, puedePagar, pagar, comprar, financiar,
       fmt, fmtMoneda, fechaCorta, fechaLarga, dosMonedas, nombrePersona, editarTarjeta, editarMovimiento, editarFinanciamiento,
     };
   },

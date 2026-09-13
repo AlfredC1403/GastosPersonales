@@ -64,6 +64,8 @@ js/ui/            Vistas, menú lateral, comercios, asistente de configuración 
                   Los formularios están repartidos por tema: formularios.js (los atajos que abre el
                   resto de la app y el detalle del mes), -movimiento, -partidas, -nomina, -catalogos,
                   -tarjetas y -financiamientos; formulario-base.js tiene las piezas comunes.
+                  Los financiamientos de tarjeta se registran y editan solo desde su módulo:
+                  editarMovimiento manda ahí cualquier registro que tenga cuotas.
                   Salvo Inicio, Mes y Movimientos, cada vista se carga al entrar en ella
                   (js/app.js) y el resto se precarga cuando el navegador está ocioso
 js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla, avisos ocultos)

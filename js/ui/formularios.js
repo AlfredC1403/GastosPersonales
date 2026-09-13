@@ -20,6 +20,7 @@ import { PartidaForm, AjusteMesForm } from './formularios-partidas.js';
 import { IngresoForm, ReciboForm, DeduccionForm } from './formularios-nomina.js';
 import { PrestamoForm, CuentaForm, PersonaForm, GrupoForm, CategoriaForm } from './formularios-catalogos.js';
 import { editarTarjeta, pagarTarjeta, editarPagoTarjeta } from './formularios-tarjetas.js';
+import { editarFinanciamiento } from './formularios-financiamientos.js';
 
 const { computed } = Vue;
 
@@ -29,6 +30,7 @@ export { MovimientoForm } from './formularios-movimiento.js';
 export { PartidaForm, AjusteMesForm } from './formularios-partidas.js';
 export { IngresoForm, ReciboForm, DeduccionForm, nuevaQuincena } from './formularios-nomina.js';
 export { PrestamoForm, CuentaForm, PersonaForm, GrupoForm, CategoriaForm } from './formularios-catalogos.js';
+export { FinanciamientoForm, nuevoFinanciamiento, editarFinanciamiento } from './formularios-financiamientos.js';
 
 // ---------------------------------------------------------------- Detalle de una partida, cuota o ingreso en un mes
 
@@ -159,7 +161,13 @@ export function itemsDelMes(periodo) {
 
 export const nuevoMovimiento = (base = {}) =>
   abrirModal(base.tipo === 'ajuste' ? 'Ajustar saldo' : base.tipo === 'abono' ? 'Abono a capital' : 'Nuevo movimiento', MovimientoForm, { inicial: base });
-export const editarMovimiento = (m) => (m.tipo === 'pago_tarjeta' ? editarPagoTarjeta(m) : abrirModal('Editar movimiento', MovimientoForm, { inicial: m }));
+// Un financiamiento y un pago de tarjeta tienen su propio formulario: da igual desde dónde se
+// toque el registro, siempre se abre el que sabe editarlo sin perder nada.
+export const editarMovimiento = (m) => {
+  if (m.tipo === 'pago_tarjeta') return editarPagoTarjeta(m);
+  if (m.cuotas) return editarFinanciamiento(m);
+  return abrirModal('Editar movimiento', MovimientoForm, { inicial: m });
+};
 export const editarRecibo = (r) => abrirModal('Pago recibido', ReciboForm, { inicial: r });
 export const registrarRecibo = (it) => abrirModal(`Registrar: ${it.nombre}`, ReciboForm, { inicial: reciboSugerido(indice(), it.ingreso, it.pago, { hoy: store.hoy }) });
 export const completarDeducciones = (r) => abrirModal('Completar deducciones', ReciboForm, { inicial: r, soloPendientes: true });
