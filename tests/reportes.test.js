@@ -10,8 +10,8 @@ import { docVacio } from '../js/core/modelo.js';
 const cerca = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
 
 const partida = (id, datos) => ({ id, nombre: id, tipo: 'gasto', forma: 'fijo', meses: [], medioPagoId: 'gastos', activo: true, creado: '2026-09-01T00:00:00Z', ...datos });
-const carro = { id: 'carro', nombre: 'Carro', tasa: 16.5, cuota: 10132.46, saldo: 168000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-04-02', responsableId: 'ruth', cuentaId: 'gastos', categoriaId: 'prestamos' };
-const casa = { id: 'casa', nombre: 'Casa', tasa: 9, cuota: 14916.23, saldo: 1679956.53, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2055-01-07', responsableId: 'moises', cuentaId: 'gastos', categoriaId: 'prestamos' };
+const carro = { id: 'carro', nombre: 'Carro', tasa: 15, cuota: 8400, saldo: 150000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-06-02', responsableId: 'ruth', cuentaId: 'gastos', categoriaId: 'prestamos' };
+const casa = { id: 'casa', nombre: 'Casa', tasa: 8.5, cuota: 13000, saldo: 1500000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2054-06-07', responsableId: 'moises', cuentaId: 'gastos', categoriaId: 'prestamos' };
 
 function hogar() {
   const doc = docVacio();
@@ -21,7 +21,7 @@ function hogar() {
   doc.prestamos = [carro, casa];
   doc.partidas = [
     partida('luz', { forma: 'variable', monto: 5000, categoriaId: 'servicios', responsableId: 'ruth' }),
-    partida('internet', { monto: 1199, categoriaId: 'comunicaciones', responsableId: 'moises' }),
+    partida('internet', { monto: 1250, categoriaId: 'comunicaciones', responsableId: 'moises' }),
     partida('super', { forma: 'abonos', monto: 6000, categoriaId: 'comida', responsableId: 'ruth' }),
     partida('ahorro', { tipo: 'aporte', monto: 3000, categoriaId: 'ahorro', responsableId: null, cuentaDestinoId: 'ahorro' }),
   ];
@@ -34,7 +34,7 @@ function hogar() {
     g('m3', '2026-10-05', 300, { categoriaId: 'otros' }),
     g('m4', '2026-10-06', 5100, { categoriaId: 'servicios', partidaId: 'luz', personaId: 'moises' }),
     g('m5', '2026-10-07', 2000, { categoriaId: 'comida', partidaId: 'super', personaId: 'ruth' }),
-    g('m6', '2026-10-02', 10132.46, { categoriaId: 'prestamos', prestamoId: 'carro', personaId: 'ruth' }),
+    g('m6', '2026-10-02', 8400, { categoriaId: 'prestamos', prestamoId: 'carro', personaId: 'ruth' }),
     { id: 't1', tipo: 'transferencia', periodo: '2026-10', fecha: '2026-10-16', monto: 3000, cuentaId: 'gastos', cuentaDestinoId: 'ahorro', partidaId: 'ahorro' },
   ];
   return crearIndice(doc, { hoy: '2026-10-20' });
@@ -43,16 +43,16 @@ function hogar() {
 test('resumen del mes: plan, pagado, pendiente, fuera del plan y libre', () => {
   const ix = hogar();
   const r = resumenMes(ix, '2026-10');
-  // plan: carro 10,132.46 + casa 14,916.23 + luz 5,100 (se pasó) + internet 1,199 + súper 6,000 + ahorro 3,000
-  cerca(r.comprometido, 10132.46 + 14916.23 + 5100 + 1199 + 6000 + 3000);
-  cerca(r.pagado, 10132.46 + 5100 + 2000 + 3000);
-  cerca(r.pendiente, 14916.23 + 1199 + 4000);
+  // plan: carro 8,400 + casa 13,000 + luz 5,100 (se pasó) + internet 1,250 + súper 6,000 + ahorro 3,000
+  cerca(r.comprometido, 8400 + 13000 + 5100 + 1250 + 6000 + 3000);
+  cerca(r.pagado, 8400 + 5100 + 2000 + 3000);
+  cerca(r.pendiente, 13000 + 1250 + 4000);
   cerca(r.fueraDelPlan, 700 + 450 + 300);
   cerca(r.ingresoEsperado, 38000);
   cerca(r.ingresoReal, 18800);
   cerca(r.ahorro, 3000);
   cerca(r.libre, 38000 - r.comprometido - r.fueraDelPlan);
-  cerca(r.gastoReal, 700 + 450 + 300 + 5100 + 2000 + 10132.46);
+  cerca(r.gastoReal, 700 + 450 + 300 + 5100 + 2000 + 8400);
   assert.deepEqual(r.pendientes.map((it) => it.nombre), ['Casa', 'internet', 'super']);
 });
 
@@ -61,7 +61,7 @@ test('gasto por grupo y gráfico con los cinco primeros grupos y "Otros grupos"'
   const g = gastoDelMes(ix, '2026-10');
   cerca(g.porGrupo.casa, 5100);
   cerca(g.porGrupo.comida, 2000);
-  cerca(g.porGrupo.deudas, 10132.46);
+  cerca(g.porGrupo.deudas, 8400);
   cerca(g.porGrupo.personal, 1000);
   cerca(g.porGrupo.salud, 450);
   cerca(g.porMedio['banco-ruth'], 450);
@@ -87,9 +87,9 @@ test('filtro por persona: Moises + Ruth + sin responsable suman lo del hogar', (
     cerca(partes.reduce((a, r) => a + r[campo], 0), total[campo]);
   }
   const [moises, ruth, sin] = partes;
-  cerca(ruth.comprometido, 10132.46 + 5100 + 6000); // carro + luz + súper, aunque la luz la pagó Moises
-  cerca(ruth.pagado, 10132.46 + 5100 + 2000);
-  cerca(ruth.gastoReal, 450 + 2000 + 10132.46);
+  cerca(ruth.comprometido, 8400 + 5100 + 6000); // carro + luz + súper, aunque la luz la pagó Moises
+  cerca(ruth.pagado, 8400 + 5100 + 2000);
+  cerca(ruth.gastoReal, 450 + 2000 + 8400);
   cerca(moises.gastoReal, 700 + 5100);
   cerca(sin.comprometido, 3000);
   cerca(sin.fueraDelPlan, 300);

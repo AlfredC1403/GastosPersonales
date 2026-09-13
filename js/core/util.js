@@ -90,7 +90,7 @@ export function dinero(n, { simbolo = 'L', decimales = true } = {}) {
   return `${v < 0 ? '-' : ''}${simbolo}${(decimales ? fmt2 : fmt0).format(Math.abs(v))}`;
 }
 
-// 12500 → "L12.5k", 1680000 → "L1.68M"
+// 12500 → "L12.5k", 1250000 → "L1.25M"
 export function dineroCorto(n, simbolo = 'L') {
   const v = Math.abs(n || 0);
   const s = n < 0 ? '-' : '';

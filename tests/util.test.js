@@ -5,9 +5,9 @@ import { sumarMeses, mesesEntre, dinero, dineroCorto, duracion, fechaEnMes, ulti
 test('periodos y formato', () => {
   assert.equal(sumarMeses('2026-09', 4), '2027-01');
   assert.equal(sumarMeses('2026-01', -1), '2025-12');
-  assert.equal(mesesEntre('2026-09', '2055-01'), 340);
+  assert.equal(mesesEntre('2026-09', '2054-06'), 333);
   assert.equal(dinero(-1234.5), '-L1,234.50');
-  assert.equal(dineroCorto(1679956.53), 'L1.68M');
+  assert.equal(dineroCorto(1234567), 'L1.23M');
   assert.equal(duracion(15), '1 año y 3 meses');
   assert.equal(duracion(11), '11 meses');
 });

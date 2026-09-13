@@ -69,27 +69,27 @@ test('el exceso no se arrastra', () => {
 });
 
 test('cambiar solo este mes y omitir un mes', () => {
-  const partidas = [partida('ninera', { monto: 5000, categoriaId: 'ninos' })];
+  const partidas = [partida('colegio', { monto: 4500, categoriaId: 'educacion' })];
   const ajustesPartida = [
-    { id: 'ninera:2026-10', partidaId: 'ninera', periodo: '2026-10', monto: 2500 },
-    { id: 'ninera:2026-11', partidaId: 'ninera', periodo: '2026-11', omitir: true },
+    { id: 'colegio:2026-10', partidaId: 'colegio', periodo: '2026-10', monto: 2500 },
+    { id: 'colegio:2026-11', partidaId: 'colegio', periodo: '2026-11', omitir: true },
   ];
   const ix = indice({ partidas, ajustesPartida });
-  assert.equal(item(ix, '2026-10', 'ninera').esperado, 2500);
-  const nov = item(ix, '2026-11', 'ninera');
+  assert.equal(item(ix, '2026-10', 'colegio').esperado, 2500);
+  const nov = item(ix, '2026-11', 'colegio');
   assert.equal(nov.estado, 'omitida');
   assert.ok(nov.hecho);
   assert.equal(nov.queda, 0);
-  assert.equal(item(ix, '2026-12', 'ninera').esperado, 5000);
+  assert.equal(item(ix, '2026-12', 'colegio').esperado, 4500);
 });
 
 test('pago anual: se aparta cada mes y se paga en su mes', () => {
-  const tasa = partida('tasa', { tipo: 'anual', monto: 391.5, montoAnual: 4698, mesPago: 12, categoriaId: 'transporte', cuentaDestinoId: 'reservas' });
+  const tasa = partida('tasa', { tipo: 'anual', monto: 400, montoAnual: 4800, mesPago: 12, categoriaId: 'transporte', cuentaDestinoId: 'reservas' });
   const ix = indice({ partidas: [tasa] });
   assert.deepEqual(estadoPartidas(ix, '2026-10').map((it) => it.nombre), ['Apartar para tasa']);
   const dic = estadoPartidas(ix, '2026-12');
   assert.deepEqual(dic.map((it) => it.nombre), ['Apartar para tasa', 'Pagar tasa']);
-  assert.equal(dic[1].esperado, 4698);
+  assert.equal(dic[1].esperado, 4800);
   assert.equal(dic[1].medioId, 'reservas');
 
   const apartar = movimientoParaItem(dic[0], '2026-12', { hoy: '2026-10-15' });
@@ -99,11 +99,11 @@ test('pago anual: se aparta cada mes y se paga en su mes', () => {
 });
 
 test('una partida de 10 meses no aparece en noviembre y cuenta 10/12 en el presupuesto', () => {
-  const seguro = partida('seguro', { monto: 1098.75, meses: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], categoriaId: 'transporte' });
+  const seguro = partida('seguro', { monto: 1200, meses: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], categoriaId: 'transporte' });
   const ix = indice({ partidas: [seguro] });
   assert.ok(item(ix, '2026-10', 'seguro'));
   assert.equal(item(ix, '2026-11', 'seguro'), undefined);
-  cerca(equivalenteMensual(seguro), 915.63);
+  cerca(equivalenteMensual(seguro), 1000);
 });
 
 test('registrar desde una partida: gasto con su vínculo, aporte como transferencia', () => {
@@ -154,21 +154,21 @@ test('presupuesto mensual por grupo, persona y medio; los aportes no son esencia
   const ix = indice({
     partidas: [
       partida('super', { monto: 6000, medioPagoId: 'gastos' }),
-      partida('internet', { monto: 1199, categoriaId: 'comunicaciones', responsableId: 'moises' }),
+      partida('internet', { monto: 1250, categoriaId: 'comunicaciones', responsableId: 'moises' }),
       partida('ahorro', { tipo: 'aporte', monto: 3000, categoriaId: 'ahorro', responsableId: null, cuentaDestinoId: 'ahorro' }),
       partida('vieja', { monto: 999, activo: false }),
     ],
-    prestamos: [{ id: 'carro', nombre: 'Carro', tasa: 16.5, cuota: 10132.46, saldo: 168000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-04-02', responsableId: 'ruth', cuentaId: 'gastos', categoriaId: 'prestamos' }],
+    prestamos: [{ id: 'carro', nombre: 'Carro', tasa: 15, cuota: 8400, saldo: 150000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-06-02', responsableId: 'ruth', cuentaId: 'gastos', categoriaId: 'prestamos' }],
     ingresos: [{ id: 'sal', nombre: 'Salario', personaId: 'ruth', frecuencia: 'mensual', diasPago: [31], netoEsperado: 30000, decimo13: true, decimo14: true, activo: true }],
   });
   const p = presupuestoMensual(ix, '2026-10');
   cerca(p.ingresos, 35000);
-  cerca(p.egresos, 6000 + 1199 + 3000 + 10132.46);
-  cerca(p.esenciales, 6000 + 1199 + 10132.46);
-  cerca(p.porGrupo.deudas, 10132.46);
-  cerca(p.porGrupo.casa, 1199);
+  cerca(p.egresos, 6000 + 1250 + 3000 + 8400);
+  cerca(p.esenciales, 6000 + 1250 + 8400);
+  cerca(p.porGrupo.deudas, 8400);
+  cerca(p.porGrupo.casa, 1250);
   cerca(p.porPersona.sin, 3000);
   cerca(p.porMedio.gastos, p.egresos);
   const ruth = presupuestoMensual(ix, '2026-10', { personaId: 'ruth' });
-  cerca(ruth.egresos, 6000 + 10132.46);
+  cerca(ruth.egresos, 6000 + 8400);
 });

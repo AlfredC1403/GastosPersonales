@@ -48,15 +48,15 @@ function docV1() {
     plantilla('agua', 'fijo', { monto: 350, categoriaId: 'servicios' }),
     plantilla('comida', 'fijo_variable', { monto: 6000, categoriaId: 'comida' }),
     plantilla('ahorro', 'aporte', { monto: 3000, cuentaDestinoId: 'ahorro' }),
-    plantilla('tasa', 'provision', { monto: 391.5, montoAnual: 4698, mesPago: 12, cuentaDestinoId: 'reservas', categoriaId: 'transporte' }),
+    plantilla('tasa', 'provision', { monto: 400, montoAnual: 4800, mesPago: 12, cuentaDestinoId: 'reservas', categoriaId: 'transporte' }),
   ];
-  d.prestamos = [{ id: 'carro', nombre: 'Carro', tasa: 16.5, cuota: 10132.46, saldo: 168000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-04-02', ...sello() }];
+  d.prestamos = [{ id: 'carro', nombre: 'Carro', tasa: 15, cuota: 8400, saldo: 150000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-06-02', ...sello() }];
   d.movimientos = [
     { id: 'm-sal', tipo: 'ingreso', fecha: '2026-09-30', periodo: '2026-09', cuentaId: 'gastos', monto: 30000, categoriaId: 'salario', personaId: 'ruth', plantillaId: 'salario-ruth', parte: 'principal', nota: '', ...sello() },
     { id: 'm-d14', tipo: 'ingreso', fecha: '2026-06-20', periodo: '2026-06', cuentaId: 'gastos', monto: 30000, categoriaId: 'salario', personaId: 'ruth', plantillaId: 'salario-ruth', parte: 'decimo14', nota: '', ...sello() },
     { id: 'm-comida', tipo: 'gasto', fecha: '2026-09-12', periodo: '2026-09', cuentaId: 'gastos', monto: 2000, categoriaId: 'comida', personaId: 'ruth', plantillaId: 'comida', parte: 'principal', nota: '', ...sello() },
-    { id: 'm-apartar', tipo: 'transferencia', fecha: '2026-09-12', periodo: '2026-09', cuentaId: 'gastos', cuentaDestinoId: 'reservas', monto: 391.5, plantillaId: 'tasa', parte: 'apartar', nota: '', ...sello() },
-    { id: 'm-carro', tipo: 'gasto', fecha: '2026-09-02', periodo: '2026-09', cuentaId: 'gastos', monto: 10132.46, categoriaId: 'prestamos', prestamoId: 'carro', nota: '', ...sello() },
+    { id: 'm-apartar', tipo: 'transferencia', fecha: '2026-09-12', periodo: '2026-09', cuentaId: 'gastos', cuentaDestinoId: 'reservas', monto: 400, plantillaId: 'tasa', parte: 'apartar', nota: '', ...sello() },
+    { id: 'm-carro', tipo: 'gasto', fecha: '2026-09-02', periodo: '2026-09', cuentaId: 'gastos', monto: 8400, categoriaId: 'prestamos', prestamoId: 'carro', nota: '', ...sello() },
     { id: 'm-ropa', tipo: 'gasto', fecha: '2026-09-05', periodo: '2026-09', cuentaId: 'gastos', monto: 800, categoriaId: 'ropa', nota: '', ...sello() },
   ];
   return d;
@@ -90,7 +90,7 @@ test('plantillas a partidas e ingresos; movimientos de salario a recibos', () =>
   assert.deepEqual([partidas.agua.tipo, partidas.agua.forma], ['gasto', 'fijo']);
   assert.deepEqual([partidas.comida.tipo, partidas.comida.forma], ['gasto', 'variable']);
   assert.deepEqual([partidas.ahorro.tipo, partidas.ahorro.categoriaId, partidas.ahorro.cuentaDestinoId], ['aporte', 'ahorro', 'ahorro']);
-  assert.deepEqual([partidas.tasa.tipo, partidas.tasa.montoAnual, partidas.tasa.mesPago, partidas.tasa.medioPagoId], ['anual', 4698, 12, 'gastos']);
+  assert.deepEqual([partidas.tasa.tipo, partidas.tasa.montoAnual, partidas.tasa.mesPago, partidas.tasa.medioPagoId], ['anual', 4800, 12, 'gastos']);
   assert.equal(partidas.agua.actualizado, T0); // la migración no cambia la fecha de edición
 
   assert.equal(d.ingresos.length, 1);

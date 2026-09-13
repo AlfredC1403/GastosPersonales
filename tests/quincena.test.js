@@ -21,11 +21,11 @@ function hogar(hoy = '2026-09-20', extra = {}) {
     salario('sal-ruth', 'ruth', 14250),
     salario('sal-moises', 'moises', 15000, [{ id: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', aplicaEn: 'ambas' }]),
   ];
-  doc.prestamos = [prestamo('carro', 10132.46, '2028-04-02'), prestamo('casa', 14916.23, '2055-01-07', { responsableId: 'moises' }), prestamo('rap', 1665.54, '2029-04-02', { responsableId: 'moises' })];
+  doc.prestamos = [prestamo('carro', 8400, '2028-06-02'), prestamo('casa', 13000, '2054-06-07', { responsableId: 'moises' }), prestamo('rap', 1500.05, '2029-06-02', { responsableId: 'moises' })];
   doc.partidas = [
     partida('super', { forma: 'abonos', monto: 6000, categoriaId: 'comida' }),
-    partida('internet', { monto: 1199, dia: 20, responsableId: 'moises' }),
-    partida('ninera', { monto: 5000, sePagaCon: 'q1', categoriaId: 'ninos' }),
+    partida('internet', { monto: 1250, dia: 20, responsableId: 'moises' }),
+    partida('colegio', { monto: 4500, sePagaCon: 'q1', categoriaId: 'educacion' }),
   ];
   doc.movimientos = [{ id: 'ropa', tipo: 'gasto', fecha: '2026-09-20', periodo: '2026-09', cuentaId: 'gastos', monto: 800, categoriaId: 'ropa', personaId: 'ruth' }];
   Object.assign(doc, extra);
@@ -44,13 +44,13 @@ test('los tramos van de un día de pago al día antes del siguiente, aunque cruc
 test('la cuota del día 7 cae en el tramo del pago anterior; la partida sin día se reparte y la de "primer pago" va en el del 15', () => {
   const [, del15, del30] = tramosDePago(hogar(), '2026-09');
   assert.deepEqual(itemsDe(del15), [
-    ['internet:principal', '2026-09', '2026-09-20', 1199],
-    ['ninera:principal', '2026-09', null, 5000],
+    ['internet:principal', '2026-09', '2026-09-20', 1250],
+    ['colegio:principal', '2026-09', null, 4500],
     ['super:principal', '2026-09', null, 3000],
   ]);
   assert.deepEqual(itemsDe(del30), [
-    ['prestamo:carro', '2026-10', '2026-10-02', 10132.46],
-    ['prestamo:casa', '2026-10', '2026-10-07', 14916.23],
+    ['prestamo:carro', '2026-10', '2026-10-02', 8400],
+    ['prestamo:casa', '2026-10', '2026-10-07', 13000],
     ['super:principal', '2026-09', null, 3000],
   ]);
   // El préstamo por planilla no sale de la cuenta: no aparece en ningún tramo.
@@ -59,12 +59,12 @@ test('la cuota del día 7 cae en el tramo del pago anterior; la partida sin día
 
 test('el disponible del tramo descuenta el plan y lo gastado fuera del plan en esas fechas', () => {
   const [, del15] = tramosDePago(hogar(), '2026-09');
-  assert.equal(del15.sale, 1199 + 5000 + 3000);
+  assert.equal(del15.sale, 1250 + 4500 + 3000);
   assert.equal(del15.fueraDelPlan, 800);
-  assert.equal(del15.disponible, 29250 - (1199 + 5000 + 3000) - 800);
+  assert.equal(del15.disponible, 29250 - (1250 + 4500 + 3000) - 800);
   const soloRuth = tramosDePago(hogar(), '2026-09', { personaId: 'ruth' })[1];
   assert.equal(soloRuth.entra, 14250);
-  assert.equal(soloRuth.sale, 5000 + 3000);
+  assert.equal(soloRuth.sale, 4500 + 3000);
 });
 
 test('sin salarios con monto no hay tramos', () => {
@@ -76,13 +76,13 @@ test('avisos: pago sin registrar, deducciones pendientes, vencidas, por vencer, 
   const ix = hogar(hoy, {
     partidas: [
       partida('super', { forma: 'abonos', monto: 6000, categoriaId: 'comida' }),
-      partida('internet', { monto: 1199, dia: 10, responsableId: 'moises' }),
+      partida('internet', { monto: 1250, dia: 10, responsableId: 'moises' }),
       partida('luz', { forma: 'variable', monto: 1800, dia: 22 }),
-      partida('tasa', { tipo: 'anual', monto: 391.5, montoAnual: 4698, mesPago: 11, cuentaDestinoId: 'reservas' }),
+      partida('tasa', { tipo: 'anual', monto: 400, montoAnual: 4800, mesPago: 11, cuentaDestinoId: 'reservas' }),
       partida('gas', { monto: 0 }),
     ],
     recibos: [
-      { id: 'r1', ingresoId: 'sal-moises', tipo: 'ordinario', ocurrencia: '2026-09-15', periodo: '2026-09', fecha: '2026-09-15', cuentaId: 'gastos', neto: 14100, deducciones: [{ deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 832.77 }] },
+      { id: 'r1', ingresoId: 'sal-moises', tipo: 'ordinario', ocurrencia: '2026-09-15', periodo: '2026-09', fecha: '2026-09-15', cuentaId: 'gastos', neto: 14100, deducciones: [{ deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 750.02 }] },
       { id: 'r2', ingresoId: 'sal-moises', tipo: 'ordinario', ocurrencia: '2026-10-15', periodo: '2026-10', fecha: '2026-10-15', cuentaId: 'gastos', neto: 14100, deducciones: [{ deduccionId: 'isr', nombre: 'ISR', monto: null }] },
       ...['2026-09-15', '2026-09-30', '2026-10-15'].map((o) => ({ id: `ruth-${o}`, ingresoId: 'sal-ruth', tipo: 'ordinario', ocurrencia: o, periodo: o.slice(0, 7), fecha: o, cuentaId: 'gastos', neto: 14250, deducciones: [] })),
     ],
@@ -97,7 +97,7 @@ test('avisos: pago sin registrar, deducciones pendientes, vencidas, por vencer, 
   assert.equal(porId['vencida:internet:principal:2026-10'].cuando, 'hoy');
   assert.equal(porId['vence:luz:principal:2026-10'].cuando, 'semana');
   assert.deepEqual(porId['abonos:super:principal:2026-09'].acciones.map((x) => x.tipo), ['cerrarPartida', 'pasarAlSiguiente']);
-  assert.equal(porId['cuota:prestamo:rap:2026-09'].texto, 'Se descontaron L832.77 de L1,665.54 por planilla.');
+  assert.equal(porId['cuota:prestamo:rap:2026-09'].texto, 'Se descontaron L750.02 de L1,500.05 por planilla.');
   assert.ok(porId['anual:tasa:2026-11']);
   assert.ok(Object.keys(porId).some((id) => id.startsWith('sin-monto:')));
   // Las cuotas con día que no son por planilla también avisan.

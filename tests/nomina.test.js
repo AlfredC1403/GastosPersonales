@@ -12,14 +12,15 @@ import { docVacio } from '../js/core/modelo.js';
 
 const cerca = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
 
-const rap = { id: 'rap', nombre: 'Préstamo RAP', tasa: 9.75, cuota: 1665.55, saldo: 45036.66, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2029-04-02', responsableId: 'moises', cuentaId: 'gastos', categoriaId: 'prestamos' };
+// Datos ficticios.
+const rap = { id: 'rap', nombre: 'Préstamo RAP', tasa: 10, cuota: 1500.05, saldo: 40000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2029-06-02', responsableId: 'moises', cuentaId: 'gastos', categoriaId: 'prestamos' };
 
 function salario(datos = {}) {
   return {
     id: 'sal', nombre: 'Salario Moises', personaId: 'moises', frecuencia: 'quincenal', diasPago: [15, 31], finDeSemana: 'igual', cuentaId: 'gastos',
     netoEsperado: 15000, decimo13: true, decimo14: true, activo: true,
     deducciones: [
-      { id: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', fija: true, montoEsperado: 595.29, aplicaEn: 'ambas' },
+      { id: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', fija: true, montoEsperado: 480.5, aplicaEn: 'ambas' },
       { id: 'isr', nombre: 'ISR', naturaleza: 'gasto', categoriaId: 'isr', fija: false, montoEsperado: null, aplicaEn: 'q2' },
       { id: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', categoriaId: 'prestamos', prestamoId: 'rap', aplicaEn: 'ambas' },
       { id: 'coop', nombre: 'Cooperativa', naturaleza: 'ahorro', categoriaId: 'ahorro', cuentaDestinoId: 'ahorro', fija: true, montoEsperado: 500, aplicaEn: 'q1' },
@@ -62,9 +63,9 @@ test('un préstamo por planilla descuenta la mitad en cada quincena y entre las 
   const s = salario();
   const [q1, q2] = pagosProgramados(s, '2026-10');
   const d = s.deducciones[2];
-  assert.equal(montoEsperado(ix, s, d, q1), 832.77);
-  assert.equal(montoEsperado(ix, s, d, q2), 832.78);
-  assert.equal(montoEsperado(ix, s, { ...d, aplicaEn: 'q1' }, q1), 1665.55);
+  assert.equal(montoEsperado(ix, s, d, q1), 750.02);
+  assert.equal(montoEsperado(ix, s, d, q2), 750.03);
+  assert.equal(montoEsperado(ix, s, { ...d, aplicaEn: 'q1' }, q1), 1500.05);
   assert.equal(montoEsperado(ix, s, s.deducciones[1], q2), null);
   assert.equal(planillaDe(ix, 'rap').veces, 2);
 });
@@ -75,10 +76,10 @@ test('el recibo sugerido trae llenas las deducciones fijas y la del préstamo; l
   const [, q2] = pagosProgramados(s, '2026-10');
   const r = reciboSugerido(ix, s, q2, { hoy: '2026-10-20' });
   assert.deepEqual([r.ocurrencia, r.fecha, r.neto, r.periodo], ['2026-10-31', '2026-10-20', 15000, '2026-10']);
-  assert.deepEqual(r.deducciones.map((x) => [x.deduccionId, x.monto]), [['ihss', 595.29], ['isr', null], ['rap', 832.78]]);
+  assert.deepEqual(r.deducciones.map((x) => [x.deduccionId, x.monto]), [['ihss', 480.5], ['isr', null], ['rap', 750.03]]);
   assert.deepEqual([r.deducciones[2].naturaleza, r.deducciones[2].prestamoId], ['prestamo', 'rap']);
   const e = estadoRecibo({ ...r, neto: 13500 });
-  assert.deepEqual([e.pendientes, e.completo, e.descontado, e.bruto], [1, false, 1428.07, 14928.07]);
+  assert.deepEqual([e.pendientes, e.completo, e.descontado, e.bruto], [1, false, 1230.53, 14730.53]);
 });
 
 test('los valores anteriores prefieren la misma quincena', () => {
@@ -100,8 +101,8 @@ test('los valores anteriores prefieren la misma quincena', () => {
 
 test('un recibo con planilla baja el préstamo, suma el ahorro y no cuenta como gasto del hogar', () => {
   const q1 = recibo('r1', '2026-10-15', [
-    { deduccionId: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', monto: 595.29 },
-    { deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 832.77 },
+    { deduccionId: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', monto: 480.5 },
+    { deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 750.02 },
     { deduccionId: 'coop', nombre: 'Cooperativa', naturaleza: 'ahorro', cuentaDestinoId: 'ahorro', monto: 500 },
   ]);
   let ix = indice({ recibos: [q1] });
@@ -113,26 +114,26 @@ test('un recibo con planilla baja el préstamo, suma el ahorro y no cuenta como 
   const r = resumenMes(ix, '2026-10');
   assert.ok(!r.plan.some((it) => it.clave === 'prestamo:rap')); // ya viene descontada del neto
   assert.equal(r.gastoReal, 0);
-  assert.equal(r.descontado.total, 1928.06);
-  assert.deepEqual(r.descontado.porConcepto, { IHSS: 595.29, 'Préstamo RAP': 832.77, Cooperativa: 500 });
+  assert.equal(r.descontado.total, 1730.52);
+  assert.deepEqual(r.descontado.porConcepto, { IHSS: 480.5, 'Préstamo RAP': 750.02, Cooperativa: 500 });
   const s = saldosCuentas(ix);
   assert.equal(s.gastos, 14000);
   assert.equal(s.ahorro, 500);
   assert.equal(descontadoDelMes(ix, '2026-10').incompletos.length, 0);
 
   // Con la segunda quincena, la cuota queda completa y el saldo igual que con un pago de la cuota entera.
-  const q2 = recibo('r2', '2026-10-31', [{ deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 832.78 }]);
+  const q2 = recibo('r2', '2026-10-31', [{ deduccionId: 'rap', nombre: 'Préstamo RAP', naturaleza: 'prestamo', prestamoId: 'rap', monto: 750.03 }]);
   ix = indice({ recibos: [q1, q2] });
   cuota = cuotasDelMes(ix, '2026-10').find((it) => it.prestamo.id === 'rap');
   assert.equal(cuota.estado, 'completo');
-  const entera = indice({ movimientos: [{ id: 'm', tipo: 'gasto', fecha: '2026-10-02', periodo: '2026-10', cuentaId: 'gastos', monto: 1665.55, prestamoId: 'rap' }], ingresos: [] });
+  const entera = indice({ movimientos: [{ id: 'm', tipo: 'gasto', fecha: '2026-10-02', periodo: '2026-10', cuentaId: 'gastos', monto: 1500.05, prestamoId: 'rap' }], ingresos: [] });
   assert.equal(estadoDe(ix, ix.prestamos.get('rap')).saldo, estadoDe(entera, entera.prestamos.get('rap')).saldo);
 
   // Borrar el recibo lo revierte todo.
   ix = indice({ recibos: [{ ...q1, borrado: true }] });
   assert.equal(cuotasDelMes(ix, '2026-10').find((it) => it.prestamo.id === 'rap').estado, 'pendiente');
   assert.equal(saldosCuentas(ix).ahorro, 0);
-  cerca(estadoDe(ix, ix.prestamos.get('rap')).saldo, 45036.66);
+  cerca(estadoDe(ix, ix.prestamos.get('rap')).saldo, 40000);
 });
 
 test('una deducción sin monto deja el recibo incompleto', () => {
@@ -146,7 +147,7 @@ test('el presupuesto no cuenta dos veces la cuota por planilla', () => {
   const ix = indice();
   const p = presupuestoMensual(ix, '2026-10');
   assert.equal(p.prestamos, 0);
-  assert.equal(p.planilla, 1665.55);
+  assert.equal(p.planilla, 1500.05);
   assert.equal(p.egresos, 0);
 });
 
