@@ -1,6 +1,6 @@
 # Publicar Gastos del hogar en GitHub Pages y conectarlo a OneDrive
 
-La guía parte de un equipo con Windows 11 que tiene el código en `C:\Repos\GastosPersonales`. Termina con la app publicada en `https://<usuario>.github.io/GastosPersonales/`, los datos en un archivo de OneDrive y dos personas usándolo cada una con su cuenta de Microsoft.
+La guía parte de un equipo con Windows 11 que tiene el código en `C:\Repos\GastosPersonales`. Termina con la app publicada en `https://<usuario>.github.io/GastosPersonales/`, los datos en una carpeta de OneDrive y dos personas usándola cada una con su cuenta de Microsoft.
 
 En toda la guía, `<usuario>` es tu nombre de usuario de GitHub.
 
@@ -112,27 +112,30 @@ Comprueba que en **Autenticación**, dentro de **Aplicación de página única**
    git push
    ```
 
-Espera uno o dos minutos y recarga la app publicada. En **Más** > **Ajustes**, la sección **OneDrive** debe mostrar el botón **Conectar con Microsoft**.
+Espera uno o dos minutos y recarga la app publicada. En **Menú** > **Datos y OneDrive**, la sección **OneDrive** debe mostrar el botón **Conectar con Microsoft**.
 
 ## 6. Cargar los datos y crear el archivo en OneDrive
 
 Estos pasos los hace la persona en cuyo OneDrive va a quedar el archivo, desde el equipo donde está `privado/finanzas-inicial.json`.
 
-1. Abre la app publicada y ve a **Más** > **Ajustes**.
+1. Abre la app publicada y ve a **Menú** > **Datos y OneDrive**.
 2. Haz clic en **Importar archivo** y elige `C:\Repos\GastosPersonales\privado\finanzas-inicial.json`.
-3. En **Quién usa este dispositivo**, elige tu nombre.
-4. Haz clic en **Conectar con Microsoft** e inicia sesión. La pantalla de permisos muestra la app como no verificada porque el registro es tuyo. Acepta los permisos.
+3. En **Menú** > **Personas**, dentro de **Quién usa este dispositivo**, elige tu nombre.
+4. Vuelve a **Datos y OneDrive**, haz clic en **Conectar con Microsoft** e inicia sesión. La pantalla de permisos muestra la app como no verificada porque el registro es tuyo. Acepta los permisos.
 5. De vuelta en la app, haz clic en **Usar mi OneDrive**.
 
-Comprueba que en tu OneDrive existe `GastosHogar\finanzas.json` y que la sección **OneDrive** de **Ajustes** muestra **Sincronizado**. El ícono de la nube de la parte superior se ve en verde.
+Comprueba que en tu OneDrive existe la carpeta `GastosHogar` con `finanzas.json` y un `finanzas-AAAA.json` por cada año con movimientos, y que la sección **OneDrive** de **Datos y OneDrive** muestra **Sincronizado**. El ícono de la nube de la parte superior se ve en verde.
 
 ## 7. Dar acceso a la otra persona
 
+> [!IMPORTANT]
+> Se comparte la carpeta `GastosHogar`, no el archivo `finanzas.json`. La app solo acepta el enlace de la carpeta, porque dentro de ella también guarda un archivo por año y los respaldos.
+
 1. En `https://onedrive.live.com`, selecciona la carpeta `GastosHogar` y haz clic en **Compartir**.
 2. Escribe el correo de la cuenta de Microsoft de la otra persona, deja el permiso en **Puede editar** y haz clic en **Enviar**. OneDrive le envía un correo con el enlace a la carpeta.
-3. En el celular de la otra persona, abre `https://<usuario>.github.io/GastosPersonales/`, elige su nombre en el aviso **¿Quién usa este dispositivo?** y ve a **Más** > **Ajustes**.
+3. En el celular de la otra persona, abre `https://<usuario>.github.io/GastosPersonales/`, elige su nombre en el aviso **¿Quién usa este dispositivo?** y ve a **Menú** > **Datos y OneDrive**.
 4. Haz clic en **Conectar con Microsoft** e inicia sesión con la cuenta de esa persona.
-5. En **Me compartieron el archivo**, pega el enlace del correo de OneDrive y haz clic en **Abrir archivo compartido**.
+5. En **Me compartieron la carpeta**, pega el enlace del correo de OneDrive y haz clic en **Abrir carpeta compartida**.
 
 Para comprobarlo, registra un gasto en un dispositivo y toca el ícono de la nube de la parte superior en el otro. El gasto debe aparecer en **Movimientos**, y el texto `anotó` debe mostrar el nombre de quien lo registró.
 
@@ -158,7 +161,29 @@ GitHub Pages publica la nueva versión en uno o dos minutos. Los datos no cambia
 
 ### Recuperar una versión anterior de los datos
 
-OneDrive guarda versiones anteriores de `finanzas.json`. En `https://onedrive.live.com`, haz clic derecho en el archivo y elige **Historial de versiones**. Para tener además una copia propia, usa **Más** > **Ajustes** > **Descargar respaldo (JSON)** en la app.
+Hay tres copias posibles:
+
+- **Historial de versiones de OneDrive.** En `https://onedrive.live.com`, abre la carpeta `GastosHogar`, haz clic derecho en `finanzas.json` o en el archivo del año y elige **Historial de versiones**.
+- **Carpeta `GastosHogar\respaldos`.** La app guarda ahí una copia antes de cambiar el formato de los datos, y otra cada vez que tocas **Menú** > **Datos y OneDrive** > **Guardar respaldo ahora**. Se conservan las 10 más recientes.
+- **Copia propia.** **Menú** > **Datos y OneDrive** > **Descargar respaldo (JSON)** descarga todos los datos en un solo archivo, que se puede volver a cargar con **Importar archivo**.
+
+### Actualizar a la versión con grupos y abonos
+
+Esta versión cambia el formato de los datos. La primera vez que un dispositivo con la versión nueva sincroniza:
+
+1. Guarda una copia del archivo anterior en `GastosHogar\respaldos\finanzas-e1-<fecha>.json`.
+2. Reparte los datos en `finanzas.json` (configuración, partidas, préstamos) y `finanzas-2026.json` (movimientos y pagos recibidos del año).
+3. Muestra en **Inicio** el aviso para revisar la configuración: grupos, cómo se paga cada partida y salarios.
+
+Abran la app con conexión en los dos celulares para que tomen la versión nueva. Un celular que todavía tiene la versión anterior muestra **Los datos se guardaron con una versión más nueva de la app** y no sube nada hasta tocar **Actualizar**.
+
+### Poner un PIN en un dispositivo
+
+En **Menú** > **Seguridad**, escribe un PIN de 4 a 6 números y elige cuándo se bloquea la app. El PIN es de ese dispositivo: cada persona pone el suyo en su celular. Si se olvida, **Olvidé mi PIN** pide iniciar sesión con Microsoft; en un dispositivo sin OneDrive conectado, la única salida es borrar los datos del navegador.
+
+### Actualizar la app en los celulares
+
+Cuando hay una versión nueva publicada, la app muestra **Hay una versión nueva de la app** con el botón **Actualizar**. Tócalo en cada dispositivo.
 
 ### Reconectar la sesión
 
@@ -181,3 +206,11 @@ El valor de `clientId` en `js/config.js` no coincide con **Id. de aplicación (c
 **`No tienes permiso para editar ese archivo`**
 
 La carpeta se compartió solo para ver. Repite el paso 7 con el permiso **Puede editar**.
+
+**`Ese enlace es de un archivo`**
+
+Se pegó el enlace de `finanzas.json`. En OneDrive, comparte la carpeta `GastosHogar` (paso 7) y pega ese enlace.
+
+**`No tengo acceso a la carpeta GastosHogar`**
+
+El dispositivo se conectó con una versión anterior usando el enlace del archivo, y la versión nueva necesita la carpeta. En **Datos y OneDrive**, toca **Desconectar** y repite los pasos 4 y 5 del paso 7 con el enlace de la carpeta.

@@ -1,14 +1,18 @@
-import { store, fmt, vivos, nombrePersona } from '../store.js';
-import { presupuestoMensual, equivalenteMensual, estadoPrestamo, ORDEN_CLASES } from '../core/finanzas.js';
-import { CLASES } from '../core/modelo.js';
-import { nombreMes, nombrePeriodo } from '../core/util.js';
+import { store, fmt, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
+import { presupuestoMensual, equivalenteMensual, ingresoMensual, pagosPorMes } from '../core/presupuesto.js';
+import { estadoDe } from '../core/prestamos.js';
+import { coincidePersona } from '../core/filtro.js';
+import { SIN_GRUPO } from '../core/asientos.js';
+import { colorGrupo } from '../core/reportes.js';
+import { FORMAS } from '../core/modelo.js';
+import { nombreMes, nombrePeriodo, redondear } from '../core/util.js';
+import { prefs, definirVista } from '../tema.js';
 import { BarraSegmentos } from './graficos.js';
-import { editarPlantilla, editarPrestamo } from './formularios.js';
+import { editarPartida, editarPrestamo, editarIngreso } from './formularios.js';
 
 const { computed } = Vue;
 
-const ACCION = { ingreso: '+ Agregar ingreso', fijo: '+ Agregar fijo', fijo_variable: '+ Agregar fijo variable', aporte: '+ Agregar aporte', provision: '+ Agregar pago anual' };
-const COLORES_PERSONA = ['var(--s1)', 'var(--s5)', 'var(--s2)', 'var(--s4)'];
+const VISTAS = { grupo: 'Por grupo', persona: 'Por persona', medio: 'Por medio' };
 
 export const VistaPresupuesto = {
   components: { BarraSegmentos },
@@ -17,16 +21,16 @@ export const VistaPresupuesto = {
     <p class="nota">Lo que el hogar paga, aparta o recibe cada mes. Los montos son promedios: un seguro de 10 meses cuenta 10/12 por mes y los décimos se reparten en el año.</p>
 
     <div class="kpis">
-      <div class="kpi"><div class="kpi-et">Ingresos al mes</div><div class="kpi-val positivo">{{ fmt(p.porClase.ingreso) }}</div><div class="kpi-nota">promedio, con décimos</div></div>
-      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmt(p.egresos) }}</div><div class="kpi-nota">compromisos, préstamos y aportes</div></div>
-      <div class="kpi"><div class="kpi-et">Libre planificado</div><div class="kpi-val" :class="{ negativo: libre < 0 }">{{ fmt(libre) }}</div><div class="kpi-nota">antes de gastos adicionales</div></div>
+      <div class="kpi"><div class="kpi-et">Ingresos al mes</div><div class="kpi-val positivo">{{ fmt(p.ingresos) }}</div><div class="kpi-nota">netos, con décimos</div></div>
+      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmt(p.egresos) }}</div><div class="kpi-nota">partidas, préstamos y aportes</div></div>
+      <div class="kpi"><div class="kpi-et">Libre planificado</div><div class="kpi-val" :class="{ negativo: libre < 0 }">{{ fmt(libre) }}</div><div class="kpi-nota">antes de gastos fuera del plan</div></div>
     </div>
 
     <div v-if="sinDefinir.length" class="aviso-banner ambar">
-      <p>Sin monto todavía: {{ sinDefinir.map((t) => t.nombre).join(', ') }}. Toca cada uno para definirlo.</p>
+      <p>Sin monto todavía: {{ sinDefinir.join(', ') }}. Toca cada uno para definirlo.</p>
     </div>
 
-    <article v-if="porPersona.length" class="tarjeta">
+    <article v-if="porPersona.length && !personaFiltro()" class="tarjeta">
       <h2 style="margin-bottom: 12px">Quién paga qué</h2>
       <barra-segmentos clase="media" :segmentos="porPersona"/>
       <ul class="lista" style="margin-top: 12px">
@@ -39,19 +43,41 @@ export const VistaPresupuesto = {
       </ul>
     </article>
 
-    <article v-for="g in grupos" :key="g.clase" class="tarjeta">
+    <article class="tarjeta">
       <div class="tarjeta-cab pegada">
-        <h2 class="titulo-grupo">{{ g.titulo }}</h2>
-        <span class="monto">{{ fmt(g.total) }}</span><span class="tenue" style="font-size: 0.8rem">/mes</span>
+        <h2 class="titulo-grupo"><i class="punto" style="background: var(--ok)"></i> Ingresos</h2>
+        <span class="monto">{{ fmt(p.ingresos) }}</span><span class="tenue" style="font-size: 0.8rem">/mes</span>
       </div>
       <ul class="lista">
-        <li v-for="x in g.filas" :key="x.id" class="fila clic" @click="x.abrir()">
+        <li v-for="x in filasIngresos" :key="x.id" class="fila clic" @click="editarIngreso(x.ingreso)">
+          <div class="fila-info">
+            <span class="fila-titulo" style="font-size: 0.93rem">{{ x.ingreso.nombre }}</span>
+            <span class="fila-sub envuelve"><span v-for="c in x.chips" :key="c.t" class="chip" :class="c.c">{{ c.t }}</span></span>
+          </div>
+          <div class="derecha">
+            <div class="monto">{{ fmt(x.ingreso.netoEsperado) }}</div>
+            <div v-if="x.detalle" class="meta">{{ x.detalle }}</div>
+          </div>
+        </li>
+      </ul>
+      <p v-if="!filasIngresos.length" class="nota chica" style="padding-top: 8px">Todavía no hay salarios ni otros ingresos.</p>
+      <button type="button" class="btn-punteado" style="margin-top: 14px" @click="editarIngreso({ personaId: personaFiltro() || undefined })">+ Agregar ingreso</button>
+    </article>
+
+    <div class="segmentos" role="group" aria-label="Ver partidas">
+      <button v-for="(n, k) in vistas" :key="k" type="button" :class="{ activo: prefs.vistaPresupuesto === k }" :aria-pressed="prefs.vistaPresupuesto === k" @click="definirVista('vistaPresupuesto', k)">{{ n }}</button>
+    </div>
+
+    <article v-for="s in secciones" :key="s.clave" class="tarjeta">
+      <div class="tarjeta-cab pegada">
+        <h2 class="titulo-grupo"><i v-if="s.color" class="punto" :style="{ background: s.color }"></i> {{ s.titulo }}</h2>
+        <span class="monto">{{ fmt(s.total) }}</span><span class="tenue" style="font-size: 0.8rem">/mes</span>
+      </div>
+      <ul class="lista">
+        <li v-for="x in s.filas" :key="x.id" class="fila clic" @click="x.abrir()">
           <div class="fila-info">
             <span class="fila-titulo" style="font-size: 0.93rem">{{ x.nombre }}</span>
-            <span class="fila-sub envuelve">
-              <span class="chip">{{ nombrePersona(x.responsableId) }}</span>
-              <span v-for="c in x.chips" :key="c.t" class="chip" :class="c.c">{{ c.t }}</span>
-            </span>
+            <span class="fila-sub envuelve"><span v-for="c in x.chips" :key="c.t" class="chip" :class="c.c">{{ c.t }}</span></span>
           </div>
           <div class="derecha">
             <div class="monto">{{ x.monto }}</div>
@@ -59,63 +85,110 @@ export const VistaPresupuesto = {
           </div>
         </li>
       </ul>
-      <p v-if="!g.filas.length" class="nota chica" style="padding-top: 8px">Nada todavía.</p>
-      <a v-if="g.clase === 'prestamo'" class="btn-punteado" href="#/prestamos" style="display: block; text-align: center; margin-top: 14px">Ver préstamos y plan</a>
-      <button v-else type="button" class="btn-punteado" style="margin-top: 14px" @click="editarPlantilla({ clase: g.clase })">{{ accion[g.clase] }}</button>
+      <button type="button" class="btn-punteado" style="margin-top: 14px" @click="s.agregar()">+ Agregar partida</button>
     </article>
+
+    <p v-if="!secciones.length" class="vacio">No hay partidas todavía.</p>
+    <button v-if="!secciones.length || prefs.vistaPresupuesto === 'grupo'" type="button" class="btn-punteado" @click="editarPartida({ responsableId: personaFiltro() || undefined })">+ Nueva partida</button>
+    <a class="btn-link" href="#/categorias" style="align-self: center">Editar grupos y categorías</a>
   </section>`,
   setup() {
-    const p = computed(() => presupuestoMensual(store.doc, store.periodo));
-    const libre = computed(() => p.value.porClase.ingreso - p.value.egresos);
+    const ix = computed(indice);
+    const p = computed(() => presupuestoMensual(ix.value, store.periodo, filtro()));
+    const libre = computed(() => p.value.ingresos - p.value.egresos);
     const porPersona = computed(() => {
       const total = p.value.egresos || 1;
       return Object.entries(p.value.porPersona)
         .filter(([, v]) => v > 0)
         .sort((a, b) => b[1] - a[1])
-        .map(([id, valor], i) => ({
-          id, valor, nombre: id === 'sin' ? 'El hogar' : nombrePersona(id), color: COLORES_PERSONA[i % COLORES_PERSONA.length],
+        .map(([id, valor]) => ({
+          id, valor, nombre: id === 'sin' ? 'El hogar' : nombrePersona(id), color: id === 'sin' ? 'var(--tinta3)' : colorPersona(id),
           pct: `${Math.round((valor / total) * 100)}%`, titulo: `${id === 'sin' ? 'El hogar' : nombrePersona(id)} ${fmt(valor)}`,
         }));
     });
-    const sinDefinir = computed(() => vivos('plantillas').filter((t) => t.activo !== false && !Number(t.clase === 'provision' ? t.montoAnual : t.monto)));
+    const sinDefinir = computed(() => [
+      ...vivos('partidas').filter((t) => t.activo !== false && !Number(t.tipo === 'anual' ? t.montoAnual : t.monto)).map((t) => t.nombre),
+      ...vivos('ingresos').filter((t) => t.activo !== false && !Number(t.netoEsperado)).map((t) => t.nombre),
+    ]);
 
-    function filaPlantilla(t) {
-      const chips = [];
-      const meses = t.meses?.length || 12;
-      if (t.activo === false) chips.push({ t: 'inactivo', c: '' });
-      if (!Number(t.clase === 'provision' ? t.montoAnual : t.monto)) chips.push({ t: 'sin monto', c: 'aviso' });
-      if (t.clase !== 'provision' && meses < 12) chips.push({ t: `${meses} meses`, c: '' });
-      if (t.dia) chips.push({ t: `día ${t.dia}`, c: '' });
-      if (t.decimo13 || t.decimo14) chips.push({ t: 'con décimos', c: 'acento' });
-      if (t.clase === 'provision' && !t.mesPago) chips.push({ t: 'sin mes de pago', c: 'aviso' });
-      let monto = fmt(t.monto);
-      let detalle = '';
-      if (t.clase === 'provision') {
-        monto = `${fmt(t.montoAnual)} al año`;
-        detalle = `aparta ${fmt(t.monto)}/mes${t.mesPago ? ' · se paga en ' + nombreMes(t.mesPago) : ''}`;
-      } else if (t.clase === 'aporte' && t.cuentaDestinoId) {
-        detalle = `a la cuenta ${store.doc.cuentas.find((c) => c.id === t.cuentaDestinoId)?.nombre || ''}`;
-      } else if (meses < 12 || t.decimo13 || t.decimo14) {
-        detalle = `≈ ${fmt(equivalenteMensual(t))}/mes`;
-      }
-      return { id: t.id, nombre: t.nombre, responsableId: t.responsableId, chips, monto, detalle, abrir: () => editarPlantilla(t) };
-    }
-    const filaPrestamo = (x) => ({
-      id: x.id, nombre: x.nombre, responsableId: x.responsableId, monto: fmt(x.cuota),
-      chips: x.dia ? [{ t: `día ${x.dia}`, c: '' }] : [], detalle: `hasta ${nombrePeriodo(x.fin, true)}`, abrir: () => editarPrestamo(x),
-    });
-    const grupos = computed(() => ORDEN_CLASES.map((clase) => {
-      const filas = clase === 'prestamo'
-        ? vivos('prestamos')
-          .map((x) => ({ ...x, fin: estadoPrestamo(x, store.doc.movimientos).finEstimado }))
-          .filter((x) => x.fin && x.fin >= store.periodo)
-          .map(filaPrestamo)
-        : vivos('plantillas').filter((t) => t.clase === clase)
-          .sort((a, b) => (a.activo === false) - (b.activo === false) || (Number(b.monto) || 0) - (Number(a.monto) || 0))
-          .map(filaPlantilla);
-      return { clase, titulo: CLASES[clase], filas, total: p.value.porClase[clase] };
+    const filasIngresos = computed(() => vivos('ingresos').filter((i) => coincidePersona(i.personaId || null, filtro())).map((i) => {
+      const chips = [{ t: nombrePersona(i.personaId), c: '' }];
+      if (i.activo === false) chips.push({ t: 'inactivo', c: '' });
+      if (!Number(i.netoEsperado)) chips.push({ t: 'sin monto', c: 'aviso' });
+      const dia = (d) => (d >= 31 ? 'último día' : `día ${d}`);
+      const dias = i.diasPago?.length ? i.diasPago : [31];
+      chips.push({ t: i.frecuencia === 'quincenal' ? `quincenal · ${dias.map((d) => (d >= 31 ? 'último' : d)).join(' y ')}` : `mensual · ${dia(dias[0])}`, c: '' });
+      if (i.decimo13 || i.decimo14) chips.push({ t: 'con décimos', c: 'acento' });
+      const promedio = Number(i.netoEsperado) > 0 && (pagosPorMes(i) > 1 || i.decimo13 || i.decimo14);
+      return { id: i.id, ingreso: i, chips, detalle: promedio ? `≈ ${fmt(ingresoMensual(i))}/mes` : '' };
     }));
 
-    return { p, libre, porPersona, sinDefinir, grupos, fmt, nombrePersona, editarPlantilla, accion: ACCION };
+    function filaPartida(t) {
+      const chips = [];
+      const meses = t.meses?.length || 12;
+      if (prefs.vistaPresupuesto !== 'persona') chips.push({ t: nombrePersona(t.responsableId), c: '' });
+      if (t.activo === false) chips.push({ t: 'inactiva', c: '' });
+      if (!Number(t.tipo === 'anual' ? t.montoAnual : t.monto)) chips.push({ t: 'sin monto', c: 'aviso' });
+      if (t.tipo === 'gasto' && t.forma !== 'fijo') chips.push({ t: FORMAS[t.forma].toLowerCase(), c: t.forma === 'abonos' ? 'acento' : '' });
+      if (t.tipo === 'aporte') chips.push({ t: 'aporte', c: 'acento' });
+      if (t.tipo !== 'anual' && meses < 12) chips.push({ t: `${meses} meses`, c: '' });
+      if (t.dia) chips.push({ t: `día ${t.dia}`, c: '' });
+      if (t.acumula) chips.push({ t: 'acumula', c: 'ok' });
+      if (prefs.vistaPresupuesto !== 'medio' && t.medioPagoId && t.medioPagoId !== 'gastos') chips.push({ t: nombreCuenta(t.medioPagoId), c: '' });
+      if (t.tipo === 'anual' && !t.mesPago) chips.push({ t: 'sin mes de pago', c: 'aviso' });
+      if (prefs.vistaPresupuesto !== 'grupo' && t.categoriaId) chips.push({ t: nombreCategoria(t.categoriaId), c: '' });
+      let monto = fmt(t.monto);
+      let detalle = '';
+      if (t.tipo === 'anual') {
+        monto = `${fmt(t.montoAnual)} al año`;
+        detalle = `aparta ${fmt(t.monto)}/mes${t.mesPago ? ' · se paga en ' + nombreMes(t.mesPago) : ''}`;
+      } else if (t.tipo === 'aporte' && t.cuentaDestinoId) {
+        detalle = `a ${nombreCuenta(t.cuentaDestinoId)}`;
+      } else if (meses < 12) {
+        detalle = `≈ ${fmt(equivalenteMensual(t))}/mes`;
+      }
+      const inactiva = t.activo === false || (t.hasta && store.periodo > t.hasta);
+      return { id: t.id, nombre: t.nombre, persona: t.responsableId || null, grupoId: ix.value.grupoDe(t.categoriaId), medioId: t.medioPagoId || 'sin',
+        valor: inactiva ? 0 : redondear(equivalenteMensual(t)), inactiva, chips, monto, detalle, abrir: () => editarPartida(t) };
+    }
+    function filaPrestamo(x) {
+      const fin = estadoDe(ix.value, x).finEstimado;
+      if (!fin || fin < store.periodo) return null;
+      const chips = [{ t: 'préstamo', c: '' }];
+      if (prefs.vistaPresupuesto !== 'persona') chips.unshift({ t: nombrePersona(x.responsableId), c: '' });
+      if (x.dia) chips.push({ t: `día ${x.dia}`, c: '' });
+      return { id: x.id, nombre: x.nombre, persona: x.responsableId || null, grupoId: ix.value.grupoDe(x.categoriaId || 'prestamos'), medioId: x.cuentaId || 'sin',
+        valor: Number(x.cuota) || 0, chips, monto: fmt(x.cuota), detalle: `hasta ${nombrePeriodo(fin, true)}`, abrir: () => editarPrestamo(x) };
+    }
+
+    const filas = computed(() => [
+      ...vivos('prestamos').filter((x) => coincidePersona(x.responsableId, filtro())).map(filaPrestamo).filter(Boolean),
+      ...vivos('partidas').filter((t) => coincidePersona(t.responsableId, filtro())).map(filaPartida),
+    ]);
+
+    const secciones = computed(() => {
+      const vista = prefs.vistaPresupuesto;
+      const orden = (lista) => lista.sort((a, b) => a.inactiva - b.inactiva || b.valor - a.valor || a.nombre.localeCompare(b.nombre));
+      const seccion = (clave, titulo, color, lista, agregar) => ({ clave, titulo, color, filas: orden(lista), total: lista.reduce((a, x) => a + x.valor, 0), agregar });
+      if (vista === 'persona') {
+        const ids = [...personas().map((x) => x.id), null];
+        return ids.map((id) => seccion(id || 'sin', id ? nombrePersona(id) : 'El hogar (sin responsable)', id ? colorPersona(id) : 'var(--tinta3)',
+          filas.value.filter((x) => x.persona === id), () => editarPartida({ responsableId: id }))).filter((s) => s.filas.length);
+      }
+      if (vista === 'medio') {
+        const ids = [...new Set([...cuentas().map((c) => c.id), ...filas.value.map((x) => x.medioId)])];
+        return ids.map((id) => seccion(id, id === 'sin' ? 'Sin medio de pago' : nombreCuenta(id), null,
+          filas.value.filter((x) => x.medioId === id), () => editarPartida({ medioPagoId: id === 'sin' ? 'gastos' : id, responsableId: personaFiltro() || undefined })))
+          .filter((s) => s.filas.length).sort((a, b) => b.total - a.total);
+      }
+      const x = ix.value;
+      return [...grupos().map((g) => g.id), SIN_GRUPO].map((id) => {
+        const primera = vivos('categorias').find((c) => c.grupoId === id && (c.tipo || 'gasto') === 'gasto');
+        return seccion(id, id === SIN_GRUPO ? 'Sin grupo' : x.grupos.get(id)?.nombre || id, id === SIN_GRUPO ? 'var(--tinta3)' : colorGrupo(x, id),
+          filas.value.filter((f) => f.grupoId === id), () => editarPartida({ categoriaId: primera?.id || null, responsableId: personaFiltro() || undefined }));
+      }).filter((s) => s.filas.length);
+    });
+
+    return { store, prefs, p, libre, porPersona, sinDefinir, filasIngresos, secciones, vistas: VISTAS, definirVista, fmt, editarPartida, editarIngreso, personaFiltro };
   },
 };

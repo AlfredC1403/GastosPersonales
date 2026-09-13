@@ -1,5 +1,6 @@
-import { store, fmt, fmtEntero, fmtCorto, vivos, nombrePersona, guardarConfig } from '../store.js';
-import { estadoPrestamo, prestamosParaSimular, simularDeudas, ordenarPrioridad } from '../core/finanzas.js';
+import { store, fmt, fmtEntero, fmtCorto, indice, vivos, nombrePersona, guardarConfig, filtro, personaFiltro } from '../store.js';
+import { estadoDe, prestamosParaSimular, simularDeudas, ordenarPrioridad } from '../core/prestamos.js';
+import { coincidePersona } from '../core/filtro.js';
 import { nombrePeriodo, sumarMeses, mesesEntre, duracion, periodoActual } from '../core/util.js';
 import { Icono } from './componentes.js';
 import { BarraSegmentos, LineaPlan } from './graficos.js';
@@ -109,7 +110,7 @@ export const Simulador = {
     }, { deep: true });
     onBeforeUnmount(() => clearTimeout(temporizador));
 
-    const todos = computed(() => prestamosParaSimular(store.doc));
+    const todos = computed(() => prestamosParaSimular(indice()));
     const fuera = (id) => plan.excluidos.includes(id);
     const incluidos = computed(() => todos.value.filter((p) => !fuera(p.id)));
     const cuotasIncluidas = computed(() => incluidos.value.reduce((a, p) => a + p.cuota, 0));
@@ -175,7 +176,7 @@ export const Simulador = {
 // ---------------------------------------------------------------- Vista de préstamos
 
 export const VistaPrestamos = {
-  components: { Simulador, BarraSegmentos },
+  components: { BarraSegmentos, Icono },
   template: `
   <section class="pila">
     <div>
@@ -201,7 +202,8 @@ export const VistaPrestamos = {
           <dt>Termina</dt><dd>{{ nombrePeriodo(x.e.finEstimado) }}</dd>
           <dt>Cuotas que faltan</dt><dd>{{ x.e.restantes }}</dd>
           <dt>Seguro en la cuota</dt><dd>{{ fmt(x.e.seguro) }}{{ x.p.seguro == null ? ' (estimado)' : '' }}</dd>
-          <dt>Saldo según</dt><dd>cuota de {{ nombrePeriodo(x.p.saldoPeriodo, true) }}{{ x.e.cuotasPagadas ? ' + ' + x.e.cuotasPagadas + ' pagos' : '' }}</dd>
+          <dt>Saldo según</dt><dd>cuota de {{ nombrePeriodo(x.p.saldoPeriodo, true) }}{{ x.e.cuotasPagadas ? ' + ' + x.e.cuotasPagadas + (x.e.cuotasPagadas === 1 ? ' cuota' : ' cuotas') : '' }}</dd>
+          <template v-if="x.e.parciales.length"><dt>Cuotas incompletas</dt><dd>{{ x.e.parciales.map((m) => nombrePeriodo(m, true)).join(', ') }}</dd></template>
         </dl>
       </template>
       <div class="botones">
@@ -209,13 +211,21 @@ export const VistaPrestamos = {
         <button type="button" class="btn" @click="editarPrestamo(x.p)">Editar</button>
       </div>
     </article>
+    <p v-if="!lista.length" class="vacio">{{ personaFiltro() ? 'No hay préstamos a nombre de ' + nombrePersona(personaFiltro()) + '.' : 'No hay préstamos registrados.' }}</p>
     <button type="button" class="btn-punteado" @click="editarPrestamo()">+ Nuevo préstamo</button>
 
-    <simulador v-if="activos.length"/>
+    <a v-if="activos.length" class="tarjeta enlace-tarjeta" href="#/plan-deudas">
+      <div class="fila-info">
+        <span style="font-weight: 600">Plan de deudas</span>
+        <span class="fila-sub envuelve">Simula cuánto pagar de ahora en adelante y en qué fecha terminan.</span>
+      </div>
+      <icono n="der" :t="20"/>
+    </a>
   </section>`,
   setup() {
     const lista = computed(() => vivos('prestamos')
-      .map((p) => ({ p, e: estadoPrestamo(p, store.doc.movimientos) }))
+      .filter((p) => coincidePersona(p.responsableId, filtro()))
+      .map((p) => ({ p, e: estadoDe(indice(), p) }))
       .sort((a, b) => a.e.pagado - b.e.pagado || b.e.saldo - a.e.saldo));
     const activos = computed(() => lista.value.filter((x) => !x.e.pagado));
     const totales = computed(() => ({
@@ -232,6 +242,23 @@ export const VistaPrestamos = {
       ];
     };
     const abonar = (p) => nuevoMovimiento({ tipo: 'abono', prestamoId: p.id, cuentaId: p.cuentaId || 'gastos', personaId: store.yo });
-    return { lista, activos, totales, partes, abonar, editarPrestamo, fmt, fmtEntero, nombrePersona, nombrePeriodo };
+    return { lista, activos, totales, partes, abonar, editarPrestamo, fmt, fmtEntero, nombrePersona, nombrePeriodo, personaFiltro };
+  },
+};
+
+// ---------------------------------------------------------------- Plan de deudas
+
+// El plan es del hogar: no se filtra por persona.
+export const VistaPlanDeudas = {
+  components: { Simulador },
+  template: `
+  <div class="pila">
+    <p v-if="personaFiltro()" class="nota">El plan de deudas incluye los préstamos de todo el hogar, aunque tengas un filtro de persona.</p>
+    <simulador v-if="hayPrestamos"/>
+    <p v-else class="vacio">No hay préstamos activos para simular. <a href="#/prestamos">Agrega uno</a>.</p>
+  </div>`,
+  setup() {
+    const hayPrestamos = computed(() => prestamosParaSimular(indice()).length > 0);
+    return { hayPrestamos, personaFiltro };
   },
 };

@@ -6,5 +6,4 @@ export const CONFIG = {
   // 'consumers' = solo cuentas personales de Microsoft (Microsoft 365 Personal o Familia).
   tenant: 'consumers',
   carpeta: 'GastosHogar',
-  archivo: 'finanzas.json',
 };

@@ -1,0 +1,126 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { resumenMes, gastoDelMes, historial, seriesDeGrupos, saldosCuentas } from '../js/core/reportes.js';
+import { presupuestoMensual } from '../js/core/presupuesto.js';
+import { deudaAl } from '../js/core/prestamos.js';
+import { crearIndice } from '../js/core/asientos.js';
+import { SIN_RESPONSABLE, personaDeMovimiento } from '../js/core/filtro.js';
+import { docVacio } from '../js/core/modelo.js';
+
+const cerca = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
+
+const partida = (id, datos) => ({ id, nombre: id, tipo: 'gasto', forma: 'fijo', meses: [], medioPagoId: 'gastos', activo: true, creado: '2026-09-01T00:00:00Z', ...datos });
+const carro = { id: 'carro', nombre: 'Carro', tasa: 16.5, cuota: 10132.46, saldo: 168000, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2028-04-02', responsableId: 'ruth', cuentaId: 'gastos', categoriaId: 'prestamos' };
+const casa = { id: 'casa', nombre: 'Casa', tasa: 9, cuota: 14916.23, saldo: 1679956.53, saldoPeriodo: '2026-09', fechaSaldo: '2026-09-10', ultimaCuota: '2055-01-07', responsableId: 'moises', cuentaId: 'gastos', categoriaId: 'prestamos' };
+
+function hogar() {
+  const doc = docVacio();
+  doc.config = { ...doc.config, inicio: '2026-09' };
+  doc.personas = [{ id: 'moises', nombre: 'Moises' }, { id: 'ruth', nombre: 'Ruth' }];
+  doc.cuentas.push({ id: 'banco-ruth', nombre: 'Banco de Ruth', tipo: 'banco', moneda: 'L', saldoInicial: 0, titularId: 'ruth' });
+  doc.prestamos = [carro, casa];
+  doc.partidas = [
+    partida('luz', { forma: 'variable', monto: 5000, categoriaId: 'servicios', responsableId: 'ruth' }),
+    partida('internet', { monto: 1199, categoriaId: 'comunicaciones', responsableId: 'moises' }),
+    partida('super', { forma: 'abonos', monto: 6000, categoriaId: 'comida', responsableId: 'ruth' }),
+    partida('ahorro', { tipo: 'aporte', monto: 3000, categoriaId: 'ahorro', responsableId: null, cuentaDestinoId: 'ahorro' }),
+  ];
+  doc.ingresos = [{ id: 'sal-ruth', nombre: 'Salario Ruth', personaId: 'ruth', frecuencia: 'quincenal', diasPago: [15, 31], netoEsperado: 19000, cuentaId: 'gastos', activo: true }];
+  doc.recibos = [{ id: 'r1', ingresoId: 'sal-ruth', tipo: 'ordinario', ocurrencia: '2026-10-15', periodo: '2026-10', fecha: '2026-10-15', cuentaId: 'gastos', neto: 18800, deducciones: [] }];
+  const g = (id, fecha, monto, extra) => ({ id, tipo: 'gasto', periodo: fecha.slice(0, 7), fecha, monto, cuentaId: 'gastos', ...extra });
+  doc.movimientos = [
+    g('m1', '2026-10-03', 700, { categoriaId: 'ropa', personaId: 'moises' }),
+    g('m2', '2026-10-04', 450, { cuentaId: 'banco-ruth', categoriaId: 'salud' }),
+    g('m3', '2026-10-05', 300, { categoriaId: 'otros' }),
+    g('m4', '2026-10-06', 5100, { categoriaId: 'servicios', partidaId: 'luz', personaId: 'moises' }),
+    g('m5', '2026-10-07', 2000, { categoriaId: 'comida', partidaId: 'super', personaId: 'ruth' }),
+    g('m6', '2026-10-02', 10132.46, { categoriaId: 'prestamos', prestamoId: 'carro', personaId: 'ruth' }),
+    { id: 't1', tipo: 'transferencia', periodo: '2026-10', fecha: '2026-10-16', monto: 3000, cuentaId: 'gastos', cuentaDestinoId: 'ahorro', partidaId: 'ahorro' },
+  ];
+  return crearIndice(doc, { hoy: '2026-10-20' });
+}
+
+test('resumen del mes: plan, pagado, pendiente, fuera del plan y libre', () => {
+  const ix = hogar();
+  const r = resumenMes(ix, '2026-10');
+  // plan: carro 10,132.46 + casa 14,916.23 + luz 5,100 (se pasó) + internet 1,199 + súper 6,000 + ahorro 3,000
+  cerca(r.comprometido, 10132.46 + 14916.23 + 5100 + 1199 + 6000 + 3000);
+  cerca(r.pagado, 10132.46 + 5100 + 2000 + 3000);
+  cerca(r.pendiente, 14916.23 + 1199 + 4000);
+  cerca(r.fueraDelPlan, 700 + 450 + 300);
+  cerca(r.ingresoEsperado, 38000);
+  cerca(r.ingresoReal, 18800);
+  cerca(r.ahorro, 3000);
+  cerca(r.libre, 38000 - r.comprometido - r.fueraDelPlan);
+  cerca(r.gastoReal, 700 + 450 + 300 + 5100 + 2000 + 10132.46);
+  assert.deepEqual(r.pendientes.map((it) => it.nombre), ['Casa', 'internet', 'super']);
+});
+
+test('gasto por grupo y gráfico con los cinco primeros grupos y "Otros grupos"', () => {
+  const ix = hogar();
+  const g = gastoDelMes(ix, '2026-10');
+  cerca(g.porGrupo.casa, 5100);
+  cerca(g.porGrupo.comida, 2000);
+  cerca(g.porGrupo.deudas, 10132.46);
+  cerca(g.porGrupo.personal, 1000);
+  cerca(g.porGrupo.salud, 450);
+  cerca(g.porMedio['banco-ruth'], 450);
+  const { series, valores } = seriesDeGrupos(ix);
+  assert.deepEqual(series.map((s) => s.clave), ['casa', 'comida', 'transporte', 'hijos', 'deudas', 'otros']);
+  const v = valores(g.porGrupo);
+  cerca(v[5], 1450); // personal + salud
+  cerca(v.reduce((a, x) => a + x, 0), g.total);
+  const h = historial(ix, '2026-10', 3);
+  assert.deepEqual(h.map((x) => x.periodo), ['2026-08', '2026-09', '2026-10']);
+  assert.equal(h[0].total, 0);
+});
+
+test('filtro por persona: Moises + Ruth + sin responsable suman lo del hogar', () => {
+  const ix = hogar();
+  assert.equal(personaDeMovimiento(ix.doc.movimientos[1], ix.cuentas), 'ruth'); // sin persona: el titular de la cuenta
+  assert.equal(personaDeMovimiento(ix.doc.movimientos[2], ix.cuentas), null);
+
+  const periodo = '2026-10';
+  const total = resumenMes(ix, periodo);
+  const partes = ['moises', 'ruth', SIN_RESPONSABLE].map((p) => resumenMes(ix, periodo, { personaId: p }));
+  for (const campo of ['comprometido', 'pagado', 'pendiente', 'fueraDelPlan', 'gastoReal', 'ingresoEsperado', 'ingresoReal', 'ahorro']) {
+    cerca(partes.reduce((a, r) => a + r[campo], 0), total[campo]);
+  }
+  const [moises, ruth, sin] = partes;
+  cerca(ruth.comprometido, 10132.46 + 5100 + 6000); // carro + luz + súper, aunque la luz la pagó Moises
+  cerca(ruth.pagado, 10132.46 + 5100 + 2000);
+  cerca(ruth.gastoReal, 450 + 2000 + 10132.46);
+  cerca(moises.gastoReal, 700 + 5100);
+  cerca(sin.comprometido, 3000);
+  cerca(sin.fueraDelPlan, 300);
+
+  const pTotal = presupuestoMensual(ix, periodo);
+  const pPartes = ['moises', 'ruth', SIN_RESPONSABLE].map((p) => presupuestoMensual(ix, periodo, { personaId: p }));
+  cerca(pPartes.reduce((a, r) => a + r.egresos, 0), pTotal.egresos);
+  cerca(pPartes.reduce((a, r) => a + r.ingresos, 0), pTotal.ingresos);
+  cerca(deudaAl(ix, periodo, { personaId: 'ruth' }) + deudaAl(ix, periodo, { personaId: 'moises' }), deudaAl(ix, periodo));
+});
+
+test('saldos de cuentas con gastos, transferencias, ajustes, recibos y una cuenta en dólares', () => {
+  const doc = docVacio();
+  doc.config = { ...doc.config, tasaReferencia: 24.6 };
+  doc.cuentas.push({ id: 'usd', nombre: 'Ahorro en dólares', tipo: 'ahorro', moneda: 'USD', saldoInicial: 100 });
+  doc.movimientos = [
+    { id: '1', tipo: 'ingreso', fecha: '2026-09-01', cuentaId: 'gastos', monto: 50000 },
+    { id: '2', tipo: 'gasto', fecha: '2026-09-02', cuentaId: 'gastos', monto: 1200.5 },
+    { id: '3', tipo: 'transferencia', fecha: '2026-09-03', cuentaId: 'gastos', cuentaDestinoId: 'emergencias', monto: 5000 },
+    { id: '4', tipo: 'ajuste', fecha: '2026-09-04', cuentaId: 'ahorro', monto: 300 },
+    { id: '5', tipo: 'gasto', fecha: '2026-09-05', cuentaId: 'gastos', monto: 999, borrado: true },
+    { id: '6', tipo: 'transferencia', fecha: '2026-09-06', cuentaId: 'gastos', cuentaDestinoId: 'usd', monto: 2450, tasa: 24.5 },
+    { id: '7', tipo: 'gasto', fecha: '2026-09-07', cuentaId: 'usd', monto: 10, tasa: 24.7, categoriaId: 'otros' },
+  ];
+  doc.recibos = [{ id: 'r', ingresoId: 'x', tipo: 'ordinario', ocurrencia: '2026-09-15', fecha: '2026-09-15', cuentaId: 'gastos', neto: 1000 }];
+  const ix = crearIndice(doc, { hoy: '2026-09-20' });
+  const s = saldosCuentas(ix);
+  cerca(s.gastos, 50000 - 1200.5 - 5000 - 2450 + 1000);
+  assert.equal(s.emergencias, 5000);
+  assert.equal(s.ahorro, 300);
+  cerca(s.usd, 100 + 100 - 10);
+  cerca(saldosCuentas(ix, '2026-09-03').gastos, 50000 - 1200.5 - 5000);
+  cerca(gastoDelMes(ix, '2026-09').total, 1200.5 + 247);
+});

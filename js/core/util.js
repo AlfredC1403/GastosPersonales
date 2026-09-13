@@ -2,6 +2,10 @@
 
 export const redondear = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
+// Los cálculos suman centavos enteros para que 0.1 + 0.2 no deje residuos.
+export const aCentavos = (n) => Math.round((Number(n) || 0) * 100);
+export const deCentavos = (c) => c / 100;
+
 export function hoy(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -9,6 +13,18 @@ export function hoy(d = new Date()) {
 export const periodoDe = (fecha) => String(fecha).slice(0, 7);
 export const periodoActual = () => periodoDe(hoy());
 export const mesDe = (periodo) => Number(periodo.slice(5, 7));
+export const anioDe = (fechaOPeriodo) => String(fechaOPeriodo ?? '').slice(0, 4);
+
+export function ultimoDia(periodo) {
+  const [y, m] = periodo.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+// Día `dia` del mes, sin pasarse del último: fechaEnMes('2026-02', 31) → '2026-02-28'.
+export function fechaEnMes(periodo, dia) {
+  const d = Math.min(Math.max(Math.round(Number(dia)) || 1, 1), ultimoDia(periodo));
+  return `${periodo}-${String(d).padStart(2, '0')}`;
+}
 
 export function sumarMeses(periodo, n) {
   const [y, m] = periodo.split('-').map(Number);

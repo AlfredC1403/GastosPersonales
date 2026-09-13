@@ -1,15 +1,21 @@
-import { store, fmt, fmtEntero, fmtCorto, simbolo, vivos, cuentas, nombrePersona, nombreCategoria } from '../store.js';
-import { resumenMes, saldosCuentas, historial, estadoPrestamo, deudaAl, presupuestoMensual } from '../core/finanzas.js';
-import { nombrePeriodo, redondear, mesesEntre, sumarMeses, mesDe } from '../core/util.js';
-import { prefs } from '../tema.js';
-import { BarraSegmentos, ColumnasApiladas, Sparkline, CLASES_GRAFICO } from './graficos.js';
+import {
+  store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro,
+} from '../store.js';
+import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox } from '../core/reportes.js';
+import { presupuestoMensual } from '../core/presupuesto.js';
+import { deudaAl, estadoDe } from '../core/prestamos.js';
+import { SIN_RESPONSABLE, coincidePersona } from '../core/filtro.js';
+import { SIN_GRUPO } from '../core/asientos.js';
+import { nombrePeriodo, redondear, mesesEntre, sumarMeses } from '../core/util.js';
+import { prefs, definirVista } from '../tema.js';
+import { BarraSegmentos, ColumnasApiladas, Sparkline } from './graficos.js';
 import { Icono } from './componentes.js';
-import { marcarCompromiso, registrarCompromiso, abrirCompromiso } from './formularios.js';
+import { marcarItem, abrirItem } from './formularios.js';
+import { PASOS_ASISTENTE } from './configurar.js';
 
 const { computed } = Vue;
 
 const DIA_SEMANA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-const COLOR_CLASE = { prestamo: 'var(--s1)', fijo: 'var(--s2)', fijo_variable: 'var(--s3)', provision: 'var(--s4)', aporte: 'var(--tinta3)', ingreso: 'var(--ok)' };
 const MAX_PENDIENTES = 6;
 
 export const VistaInicio = {
@@ -18,7 +24,11 @@ export const VistaInicio = {
   <section class="pila amplia">
     <div v-if="sinPersonas" class="aviso-banner">
       <p>Para empezar, importa tu archivo de datos o agrega a las personas del hogar.</p>
-      <a class="btn primario" href="#/ajustes">Ir a Ajustes</a>
+      <a class="btn primario" href="#/datos">Ir a Datos y OneDrive</a>
+    </div>
+    <div v-else-if="asistentePendiente" class="aviso-banner">
+      <p>La app ahora agrupa los gastos por grupos y permite pagar partidas en abonos. Revisa en {{ pasosAsistente }} pasos cómo quedaron tus datos.</p>
+      <a class="btn primario" href="#/configurar">Revisar</a>
     </div>
     <div v-else-if="faltan.length" class="aviso-banner ambar">
       <p>Faltan montos por definir: {{ faltan.map((t) => t.nombre).join(', ') }}.</p>
@@ -29,8 +39,9 @@ export const VistaInicio = {
       <p class="etiqueta">{{ r.libre < 0 ? 'Faltan este mes' : 'Libre este mes' }}</p>
       <p class="hero-num xl" :class="{ negativo: r.libre < 0 }">{{ fmt(Math.abs(r.libre)) }}</p>
       <p v-if="!r.ingresoEsperado" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>
-      <p v-else-if="r.libre >= 0" class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos quedan {{ fmt(r.libre) }} después de compromisos y gastos adicionales.</p>
-      <p v-else class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos faltan {{ fmt(-r.libre) }} para cubrir compromisos y gastos adicionales.</p>
+      <p v-else-if="r.libre >= 0" class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos quedan {{ fmt(r.libre) }} después del plan y de lo gastado fuera del plan.</p>
+      <p v-else class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos faltan {{ fmt(-r.libre) }} para cubrir el plan y lo gastado fuera del plan.</p>
+      <p v-if="sinResponsable" class="nota chica" style="margin-top: 6px">No incluye {{ fmt(sinResponsable) }} del hogar sin responsable.</p>
       <barra-segmentos :segmentos="flujo" style="margin-top: 14px"/>
       <div class="leyenda">
         <span v-for="f in flujo" :key="f.nombre"><i class="punto" :style="{ background: f.color }"></i>{{ f.nombre }} <b>{{ fmtEntero(f.valor) }}</b></span>
@@ -55,12 +66,13 @@ export const VistaInicio = {
       <p v-if="!r.pendientes.length" class="vacio">Todo lo del mes está registrado.</p>
       <ul v-else-if="prefs.pendientes === 'lista'" class="lista" style="margin-top: 8px">
         <li v-for="it in pendientes" :key="it.clave" class="fila">
-          <button type="button" class="check" :aria-label="'Registrar ' + it.nombre" @click="marcar(it)"></button>
-          <div class="fila-info clic" @click="registrar(it)">
+          <button type="button" class="check" :class="{ parcial: it.estado === 'parcial' }" :style="it.estado === 'parcial' ? { '--pct': pctItem(it) } : null"
+                  :aria-label="'Registrar ' + it.nombre" @click="marcar(it)"></button>
+          <div class="fila-info clic" @click="abrir(it)">
             <span class="fila-titulo">{{ it.nombre }}</span>
-            <span class="fila-sub">{{ nombrePersona(it.responsableId) }}{{ it.dia ? ' · día ' + it.dia : '' }}</span>
+            <span class="fila-sub">{{ subPendiente(it) }}</span>
           </div>
-          <span class="monto">{{ fmt(it.esperado) }}</span>
+          <span class="monto">{{ fmt(it.queda || it.esperado) }}</span>
         </li>
       </ul>
       <div v-else style="display: flex; flex-direction: column; gap: 2px; margin-top: 10px">
@@ -68,13 +80,13 @@ export const VistaInicio = {
           <div class="agenda-fecha"><div class="num">{{ d.num }}</div><div class="dia">{{ d.nombreDia }}</div></div>
           <div class="agenda-linea"></div>
           <div class="agenda-items">
-            <div v-for="it in d.items" :key="it.clave" class="agenda-item" @click="registrar(it)">
-              <span class="punto" :style="{ background: color(it.clase), borderRadius: '50%' }"></span>
+            <div v-for="it in d.items" :key="it.clave" class="agenda-item" @click="abrir(it)">
+              <span class="punto" :style="{ background: colorGrupo(ix, it.grupoId), borderRadius: '50%' }"></span>
               <div style="flex: 1; min-width: 0">
                 <div class="fila-titulo" style="font-size: 0.93rem">{{ it.nombre }}</div>
-                <div class="fila-sub">{{ nombrePersona(it.responsableId) }}</div>
+                <div class="fila-sub">{{ subPendiente(it) }}</div>
               </div>
-              <span class="monto">{{ fmt(it.esperado) }}</span>
+              <span class="monto">{{ fmt(it.queda || it.esperado) }}</span>
             </div>
           </div>
         </div>
@@ -85,12 +97,16 @@ export const VistaInicio = {
 
     <article class="tarjeta">
       <h2>A dónde va cada {{ simbolo() }}100</h2>
-      <p class="nota chica" style="margin: 3px 0 14px">De {{ fmt(r.gastoReal) }} gastados en {{ nombrePeriodo(store.periodo) }}.</p>
+      <p class="nota chica" style="margin: 3px 0 12px">De {{ fmt(r.gastoReal) }} gastados en {{ nombrePeriodo(store.periodo) }}.</p>
+      <div class="segmentos" role="group" aria-label="Agrupar" style="margin-bottom: 14px">
+        <button type="button" :class="{ activo: prefs.repartoInicio === 'grupo' }" :aria-pressed="prefs.repartoInicio === 'grupo'" @click="definirVista('repartoInicio', 'grupo')">Por grupo</button>
+        <button type="button" :class="{ activo: prefs.repartoInicio === 'medio' }" :aria-pressed="prefs.repartoInicio === 'medio'" @click="definirVista('repartoInicio', 'medio')">Por medio de pago</button>
+      </div>
       <p v-if="!r.gastoReal" class="vacio" style="padding: 8px 0">Aún no hay gastos registrados este mes.</p>
       <template v-else>
         <barra-segmentos clase="alta" :segmentos="reparto"/>
         <ul class="lista" style="margin-top: 14px">
-          <li v-for="x in reparto" :key="x.nombre" class="fila compacta">
+          <li v-for="x in reparto" :key="x.id" class="fila compacta">
             <i class="punto" :style="{ background: x.color }"></i>
             <span style="flex: 1; min-width: 0; font-size: 0.92rem">{{ x.nombre }}</span>
             <span class="monto">{{ fmtEntero(x.valor) }}</span>
@@ -102,23 +118,23 @@ export const VistaInicio = {
 
     <article class="tarjeta">
       <h2>Mes a mes</h2>
-      <p class="nota chica" style="margin: 3px 0 14px">Gasto registrado por tipo{{ meses.length > 1 ? ', últimos ' + meses.length + ' meses' : '' }}.</p>
+      <p class="nota chica" style="margin: 3px 0 14px">Gasto registrado por grupo{{ meses.length > 1 ? ', últimos ' + meses.length + ' meses' : '' }}.</p>
       <p v-if="!hayHistorial" class="vacio" style="padding: 8px 0">Cuando registres gastos, aquí verás cómo cambian mes a mes.</p>
       <template v-else>
-        <columnas-apiladas :meses="meses" :series="clases" :formatear="fmtCorto"/>
+        <columnas-apiladas :meses="meses" :series="series.series" :formatear="fmtCorto" etiqueta="Gasto por grupo"/>
         <div class="leyenda-grafico">
-          <span v-for="c in clases" :key="c.clave"><i class="punto" :style="{ background: c.color }"></i>{{ c.nombre }}</span>
+          <span v-for="c in series.series" :key="c.clave"><i class="punto" :style="{ background: c.color }"></i>{{ c.nombre }}</span>
         </div>
       </template>
     </article>
 
     <article v-if="variables.length" class="tarjeta">
-      <div class="tarjeta-cab"><h2>Fijos variables contra lo estimado</h2></div>
+      <div class="tarjeta-cab"><h2>Variables contra lo previsto</h2></div>
       <ul class="lista">
         <li v-for="v in variables" :key="v.clave" class="fila compacta clic" @click="abrir(v.item)">
           <span class="fila-titulo" style="flex: 1; min-width: 0; font-size: 0.92rem">{{ v.nombre }}</span>
-          <span class="tenue" style="font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap">est. {{ fmtEntero(v.esperado) }}</span>
-          <span :class="v.clase" style="min-width: 86px; text-align: right; font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap">{{ v.texto }}</span>
+          <span class="tenue" style="font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap">prev. {{ fmtEntero(v.esperado) }}</span>
+          <span :class="v.clase" style="min-width: 96px; text-align: right; font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap">{{ v.texto }}</span>
         </li>
       </ul>
       <p class="nota" style="margin-top: 12px">{{ resumenVariables }}</p>
@@ -127,7 +143,7 @@ export const VistaInicio = {
     <article class="tarjeta">
       <div class="tarjeta-cab centro">
         <h2>Deudas</h2>
-        <a class="btn-link" href="#/prestamos">Ver el plan</a>
+        <a class="btn-link" href="#/plan-deudas">Ver el plan</a>
       </div>
       <div style="display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap">
         <div style="flex: 1 1 auto; min-width: 0">
@@ -153,7 +169,7 @@ export const VistaInicio = {
             <div v-if="c.pct !== null" class="progreso fino acento"><div :style="{ width: c.pct + '%' }"></div></div>
             <span v-if="c.nota" class="fila-sub" style="margin-top: 4px">{{ c.nota }}</span>
           </div>
-          <span class="monto" :class="{ negativo: c.saldo < 0 }">{{ fmt(c.saldo) }}</span>
+          <span class="monto" :class="{ negativo: c.saldo < 0 }">{{ fmtMoneda(c.saldo, c.moneda) }}</span>
         </li>
       </ul>
     </article>
@@ -166,145 +182,172 @@ export const VistaInicio = {
             <span class="fila-titulo" style="flex: 1; min-width: 0; font-size: 0.9rem">{{ c.nombre }}</span>
             <span class="monto" style="font-size: 0.95rem">{{ fmt(c.valor) }}</span>
           </div>
-          <div class="progreso"><div :style="{ width: c.pct + '%', background: 'var(--s1)' }"></div></div>
+          <div class="progreso"><div :style="{ width: c.pct + '%', background: c.color }"></div></div>
         </li>
       </ul>
     </article>
   </section>`,
   setup() {
-    const r = computed(() => resumenMes(store.doc, store.periodo));
-    const compromisos = computed(() => r.value.items.filter((i) => i.clase !== 'ingreso'));
+    const ix = computed(indice);
+    const r = computed(() => resumenMes(ix.value, store.periodo, filtro()));
+    // Con filtro de persona: lo que no es de nadie y queda fuera de los totales.
+    const sinResponsable = computed(() => {
+      if (!personaFiltro()) return 0;
+      const s = resumenMes(ix.value, store.periodo, { personaId: SIN_RESPONSABLE });
+      return redondear(s.comprometido + s.fueraDelPlan);
+    });
+    const plan = computed(() => r.value.plan.filter((it) => it.esperado > 0 || it.real > 0));
     const pct = computed(() => (r.value.comprometido ? Math.min(100, (r.value.pagado / r.value.comprometido) * 100) : 0));
     const avanceTexto = computed(() => {
-      const hechos = compromisos.value.filter((i) => i.hecho).length;
-      const total = compromisos.value.length;
-      if (!total) return 'No hay compromisos para este mes.';
+      const hechos = plan.value.filter((i) => i.hecho).length;
+      const total = plan.value.length;
+      if (!total) return 'No hay partidas para este mes.';
       return r.value.pendiente > 0
-        ? `${hechos} de ${total} compromisos registrados. Faltan ${fmt(r.value.pendiente)}.`
-        : `Los ${total} compromisos del mes están registrados.`;
+        ? `${hechos} de ${total} partidas completas. Faltan ${fmt(r.value.pendiente)}.`
+        : `Las ${total} partidas del mes están completas.`;
     });
     const flujo = computed(() => [
-      { nombre: 'Compromisos', valor: r.value.comprometido, color: 'var(--s1)', titulo: `Compromisos ${fmt(r.value.comprometido)}` },
-      { nombre: 'Adicionales', valor: r.value.adicionales, color: 'var(--s5)', titulo: `Adicionales ${fmt(r.value.adicionales)}` },
+      { nombre: 'Plan', valor: r.value.comprometido, color: 'var(--s1)', titulo: `Plan ${fmt(r.value.comprometido)}` },
+      { nombre: 'Fuera del plan', valor: r.value.fueraDelPlan, color: 'var(--s5)', titulo: `Fuera del plan ${fmt(r.value.fueraDelPlan)}` },
       r.value.libre >= 0
         ? { nombre: 'Libre', valor: r.value.libre, color: 'var(--s3)', titulo: `Libre ${fmt(r.value.libre)}` }
         : { nombre: 'Faltan', valor: -r.value.libre, color: 'var(--mal)', titulo: `Faltan ${fmt(-r.value.libre)}` },
     ]);
 
     const pendientes = computed(() => r.value.pendientes.slice(0, MAX_PENDIENTES));
+    const pctItem = (it) => (it.esperado ? Math.min(100, Math.round((it.real / it.esperado) * 100)) : 0);
+    const subPendiente = (it) => {
+      if (it.estado === 'parcial') return `${fmt(it.real)} de ${fmt(it.esperado)}`;
+      return `${nombrePersona(it.responsableId)}${it.dia ? ' · día ' + it.dia : ''}${it.forma === 'abonos' ? ' · en abonos' : ''}`;
+    };
     const agenda = computed(() => {
       const [y, m] = store.periodo.split('-').map(Number);
-      const grupos = new Map();
+      const dias = new Map();
       for (const it of [...r.value.pendientes].sort((a, b) => (a.dia || 99) - (b.dia || 99))) {
         const clave = it.dia || 'sin';
-        if (!grupos.has(clave)) {
-          grupos.set(clave, {
-            clave,
-            num: it.dia || '—',
-            nombreDia: it.dia ? DIA_SEMANA[new Date(y, m - 1, Math.min(it.dia, 28)).getDay()] : 'sin día',
-            items: [],
+        if (!dias.has(clave)) {
+          dias.set(clave, {
+            clave, num: it.dia || '—', nombreDia: it.dia ? DIA_SEMANA[new Date(y, m - 1, Math.min(it.dia, 28)).getDay()] : 'sin día', items: [],
           });
         }
-        grupos.get(clave).items.push(it);
+        dias.get(clave).items.push(it);
       }
-      return [...grupos.values()];
+      return [...dias.values()];
     });
 
     const reparto = computed(() => {
-      const total = r.value.gastoReal || 1;
-      return CLASES_GRAFICO
-        .map((c) => ({ nombre: c.nombre, color: c.color, valor: redondear(r.value.porClase[c.clave]) }))
-        .filter((x) => x.valor > 0)
-        .sort((a, b) => b.valor - a.valor)
-        .map((x) => ({ ...x, pct: `${Math.round((x.valor / total) * 100)}%`, titulo: `${x.nombre} ${fmt(x.valor)}` }));
+      const g = r.value.gasto;
+      const total = g.total || 1;
+      const porMedio = prefs.repartoInicio === 'medio';
+      const colores = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
+      return Object.entries(porMedio ? g.porMedio : g.porGrupo)
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, valor], i) => {
+          const nombre = porMedio ? (id === 'sin' ? 'Sin medio' : nombreCuenta(id)) : id === SIN_GRUPO ? 'Sin grupo' : ix.value.grupos.get(id)?.nombre || id;
+          const color = porMedio ? colores[i] || 'var(--tinta3)' : id === SIN_GRUPO ? 'var(--tinta3)' : colorGrupo(ix.value, id);
+          return { id, nombre, color, valor, pct: `${Math.round((valor / total) * 100)}%`, titulo: `${nombre} ${fmt(valor)}` };
+        });
     });
 
+    const series = computed(() => seriesDeGrupos(ix.value));
     const meses = computed(() => {
       const desdeInicio = mesesEntre(store.doc.config.inicio || store.periodo, store.periodo) + 1;
-      return historial(store.doc, store.periodo, Math.min(6, Math.max(1, desdeInicio))).map((h) => {
-        const valores = CLASES_GRAFICO.map((c) => redondear(h.porClase[c.clave]));
-        const total = valores.reduce((a, v) => a + v, 0);
-        return { periodo: h.periodo, etiqueta: nombrePeriodo(h.periodo, true).slice(0, 3), largo: nombrePeriodo(h.periodo), total, textoTotal: fmtCorto(total), valores };
+      return historial(ix.value, store.periodo, Math.min(6, Math.max(1, desdeInicio)), filtro()).map((h) => {
+        const valores = series.value.valores(h.porGrupo);
+        return { periodo: h.periodo, etiqueta: nombrePeriodo(h.periodo, true).slice(0, 3), largo: nombrePeriodo(h.periodo), total: h.total, textoTotal: fmtCorto(h.total), valores };
       });
     });
     const hayHistorial = computed(() => meses.value.some((m) => m.total > 0));
 
-    const variables = computed(() => r.value.items.filter((i) => i.clase === 'fijo_variable').map((i) => {
-      const d = i.hecho ? redondear(i.real - i.esperado) : null;
-      return {
-        clave: i.clave, item: i, nombre: i.nombre, esperado: i.esperado,
-        texto: d === null ? 'pendiente' : d === 0 ? 'exacto' : `${d > 0 ? '+' : ''}${fmt(d)}`,
-        clase: d === null || d === 0 ? 'tenue' : d > 0 ? 'negativo' : 'positivo',
-        dif: d,
-      };
+    const variables = computed(() => r.value.partidas.filter((it) => it.tipo === 'gasto' && (it.forma === 'variable' || it.forma === 'abonos') && it.esperado > 0).map((it) => {
+      const cerrada = it.estado === 'completo' || it.estado === 'excedido';
+      const d = cerrada ? redondear(it.real - it.esperado) : null;
+      let texto = 'pendiente';
+      if (it.estado === 'parcial') texto = `van ${fmtEntero(it.real)}`;
+      else if (d !== null) texto = d === 0 ? 'exacto' : `${d > 0 ? '+' : ''}${fmt(d)}`;
+      return { clave: it.clave, item: it, nombre: it.nombre, esperado: it.esperado, texto, clase: d === null || d === 0 ? 'tenue' : d > 0 ? 'negativo' : 'positivo', dif: d };
     }));
     const resumenVariables = computed(() => {
-      const registrados = variables.value.filter((v) => v.dif !== null);
-      const faltan = variables.value.filter((v) => v.dif === null).map((v) => v.nombre.toLowerCase());
-      const exceso = redondear(registrados.reduce((a, v) => a + v.dif, 0));
-      let texto = !registrados.length ? 'Todavía no hay fijos variables registrados este mes'
-        : exceso > 0 ? `Van ${fmt(exceso)} por encima de lo estimado`
-          : exceso < 0 ? `Van ${fmt(-exceso)} por debajo de lo estimado` : 'Van justo en lo estimado';
-      if (registrados.length && faltan.length) {
-        const lista = faltan.length > 1 ? `${faltan.slice(0, -1).join(', ')} y ${faltan[faltan.length - 1]}` : faltan[0];
-        texto += `, con ${lista} todavía sin registrar`;
+      const cerradas = variables.value.filter((v) => v.dif !== null);
+      const abiertas = variables.value.filter((v) => v.dif === null).map((v) => v.nombre.toLowerCase());
+      const exceso = redondear(cerradas.reduce((a, v) => a + v.dif, 0));
+      let texto = !cerradas.length ? 'Todavía no hay partidas variables cerradas este mes'
+        : exceso > 0 ? `Van ${fmt(exceso)} por encima de lo previsto`
+          : exceso < 0 ? `Van ${fmt(-exceso)} por debajo de lo previsto` : 'Van justo en lo previsto';
+      if (cerradas.length && abiertas.length) {
+        const lista = abiertas.length > 1 ? `${abiertas.slice(0, -1).join(', ')} y ${abiertas[abiertas.length - 1]}` : abiertas[0];
+        texto += `, con ${lista} todavía abiertas`;
       }
       return `${texto}.`;
     });
 
     const deuda = computed(() => {
+      const x = ix.value;
       const inicio = store.doc.config.inicio || store.periodo;
-      const hoy = deudaAl(store.doc, store.periodo);
-      const alInicio = deudaAl(store.doc, inicio);
+      const hoy = deudaAl(x, store.periodo, filtro());
+      const alInicio = deudaAl(x, inicio, filtro());
       const baja = redondear(alInicio - hoy);
       const desde = mesesEntre(inicio, store.periodo) > 5 ? sumarMeses(store.periodo, -5) : inicio;
       const n = Math.max(0, mesesEntre(desde, store.periodo)) + 1;
-      const serie = store.periodo >= inicio ? Array.from({ length: n }, (_, i) => deudaAl(store.doc, sumarMeses(desde, i))) : [];
-      const activos = vivos('prestamos').map((p) => ({ p, e: estadoPrestamo(p, store.doc.movimientos) })).filter((x) => !x.e.pagado);
-      const cuotas = activos.reduce((a, x) => a + x.p.cuota, 0);
-      const costo = activos.reduce((a, x) => a + x.e.interesMes + x.e.seguro, 0);
+      const serie = store.periodo >= inicio ? Array.from({ length: n }, (_, i) => deudaAl(x, sumarMeses(desde, i), filtro())) : [];
+      const activos = [...x.prestamos.values()].filter((p) => !p.borrado && coincidePersona(p.responsableId, filtro()))
+        .map((p) => ({ p, e: estadoDe(x, p) })).filter((y) => !y.e.pagado);
+      const cuotas = activos.reduce((a, y) => a + y.p.cuota, 0);
+      const costo = activos.reduce((a, y) => a + y.e.interesMes + y.e.seguro, 0);
       const texto = baja > 0 ? `↓ ${fmt(baja)} menos que en ${nombrePeriodo(inicio)}`
         : store.periodo <= inicio ? 'Saldo al empezar el registro' : `Sin cambios desde ${nombrePeriodo(inicio)}`;
       return { hoy, baja, texto, serie, cuotas, costo, pct: cuotas ? Math.round((costo / cuotas) * 100) : 0 };
     });
 
-    const saldos = computed(() => saldosCuentas(store.doc));
-    const esenciales = computed(() => presupuestoMensual(store.doc, store.periodo).esenciales);
-    const listaCuentas = computed(() => cuentas().map((c) => {
+    const saldos = computed(() => saldosCuentas(ix.value));
+    const esenciales = computed(() => presupuestoMensual(ix.value, store.periodo).esenciales);
+    const listaCuentas = computed(() => cuentas().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
       const saldo = saldos.value[c.id] || 0;
-      let objetivo = c.meta || null;
+      const meta = vivos('metas').find((m) => m.cuentaId === c.id && m.activo !== false);
+      let objetivo = meta?.montoObjetivo || null;
       let nota = c.nota || '';
-      if (c.meta) nota = `${Math.round((saldo / c.meta) * 100)}% de la meta de ${fmt(c.meta)}`;
+      if (meta) nota = `${Math.round((saldo / meta.montoObjetivo) * 100)}% de la meta de ${fmtMoneda(meta.montoObjetivo, c.moneda)}`;
       else if (c.tipo === 'emergencias' && esenciales.value) {
         objetivo = esenciales.value * 3;
         nota = `${Math.round((saldo / objetivo) * 100)}% de 3 meses de gastos`;
       } else if (c.tipo === 'gastos' && !nota) nota = 'Cuenta del día a día';
       else if (c.tipo === 'reservas' && !nota) {
-        const anuales = vivos('plantillas').filter((t) => t.clase === 'provision' && t.activo !== false).map((t) => t.nombre.toLowerCase());
+        const anuales = vivos('partidas').filter((p) => p.tipo === 'anual' && p.activo !== false).map((p) => p.nombre.toLowerCase());
         if (anuales.length) nota = `Para ${anuales.length > 1 ? anuales.slice(0, -1).join(', ') + ' y ' + anuales[anuales.length - 1] : anuales[0]}`;
       }
       const pctMeta = objetivo ? Math.max(0, Math.min(100, Math.round((saldo / objetivo) * 100))) : null;
-      return { id: c.id, nombre: c.nombre, saldo, nota, pct: pctMeta };
+      return { id: c.id, nombre: c.nombre, moneda: c.moneda || 'L', saldo, nota, pct: pctMeta };
     }));
-    const totalCuentas = computed(() => listaCuentas.value.reduce((a, c) => a + c.saldo, 0));
+    const totalCuentas = computed(() => redondear(listaCuentas.value.reduce((a, c) => a + enLempirasAprox(ix.value, c.id, c.saldo), 0)));
 
     const categoriasMes = computed(() => {
-      const filas = Object.entries(r.value.porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 7);
+      const x = ix.value;
+      const filas = Object.entries(r.value.gasto.porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 7);
       const max = filas.length ? filas[0][1] : 1;
-      return filas.map(([id, valor]) => ({ id, nombre: nombreCategoria(id), valor, pct: Math.max(2, (valor / max) * 100) }));
+      return filas.map(([id, valor]) => ({
+        id, nombre: nombreCategoria(id === 'sin' ? null : id), valor, pct: Math.max(2, (valor / max) * 100),
+        color: id === 'sin' ? 'var(--tinta3)' : colorGrupo(x, x.grupoDe(id)),
+      }));
     });
 
-    const faltan = computed(() => vivos('plantillas').filter((t) => t.activo !== false && !Number(t.clase === 'provision' ? t.montoAnual : t.monto)));
+    // Con filtro: lo de esa persona y lo que no tiene responsable (también le toca revisarlo).
+    const faltan = computed(() => [
+      ...vivos('partidas').map((p) => ({ nombre: p.nombre, activo: p.activo, monto: p.tipo === 'anual' ? p.montoAnual : p.monto, persona: p.responsableId })),
+      ...vivos('ingresos').map((i) => ({ nombre: i.nombre, activo: i.activo, monto: i.netoEsperado, persona: i.personaId })),
+    ].filter((t) => t.activo !== false && !Number(t.monto) && (!t.persona || coincidePersona(t.persona, filtro()))));
     const sinPersonas = computed(() => !vivos('personas').length);
+    const asistentePendiente = computed(() => {
+      const hechos = store.doc.config.asistente?.completados || [];
+      return !!store.doc.config.migradoDesde && PASOS_ASISTENTE.some((p) => !hechos.includes(p.id));
+    });
 
     return {
-      store, prefs, r, pct, avanceTexto, flujo, pendientes, agenda, reparto, meses, hayHistorial, variables, resumenVariables,
-      deuda, listaCuentas, totalCuentas, categoriasMes, faltan, sinPersonas, clases: CLASES_GRAFICO,
-      fmt, fmtEntero, fmtCorto, simbolo, nombrePersona, nombrePeriodo, mesDe,
-      color: (clase) => COLOR_CLASE[clase] || 'var(--tinta3)',
-      marcar: (it) => marcarCompromiso(it, store.periodo),
-      registrar: (it) => registrarCompromiso(it, store.periodo),
-      abrir: (it) => abrirCompromiso(it, store.periodo),
+      store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
+      variables, resumenVariables, deuda, listaCuentas, totalCuentas, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: PASOS_ASISTENTE.length,
+      fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
+      marcar: (it) => marcarItem(it, store.periodo),
+      abrir: (it) => abrirItem(it, store.periodo),
     };
   },
 };

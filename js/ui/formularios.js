@@ -1,16 +1,21 @@
 import {
-  store, guardar, borrar, aviso, abrirModal, personas, cuentas, categorias, vivos, buscar, nombreCuenta, fmt,
+  store, guardar, borrar, aviso, abrirModal, indice, personas, cuentas, grupos, categoriasPorGrupo, vivos, buscar,
+  nombreCuenta, nombrePersona, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
 } from '../store.js';
-import { TIPOS_MOVIMIENTO, CLASES, TIPOS_CUENTA } from '../core/modelo.js';
-import { saldosCuentas, seguroEstimado, cuotasRestantes, movimientoParaCompromiso } from '../core/finanzas.js';
-import { hoy, periodoDe, periodoActual, nombrePeriodo, nombreMes, redondear } from '../core/util.js';
+import { TIPOS_MOVIMIENTO, TIPOS_CUENTA, TIPOS_PARTIDA, FORMAS, FRECUENCIAS, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
+import { estadoPartidas, partidaActivaEn, partesDelMes, movimientoParaItem, reciboParaItem } from '../core/presupuesto.js';
+import { seguroEstimado, cuotasRestantes } from '../core/prestamos.js';
+import { saldosCuentas, resumenMes } from '../core/reportes.js';
+import { parteDe } from '../core/asientos.js';
+import { hoy, periodoDe, periodoActual, nombrePeriodo, nombreMes, fechaCorta, sumarMeses, redondear } from '../core/util.js';
 
-const { reactive, ref, computed } = Vue;
+const { reactive, ref, computed, watch, nextTick } = Vue;
 
 const copia = (x) => JSON.parse(JSON.stringify(x ?? {}));
 const TIPOS_CORTOS = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferir', abono: 'Abono', ajuste: 'Ajuste' };
 const quien = (id) => buscar('personas', id)?.nombre || 'alguien';
 const fechaHora = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const hayValor = (v) => v !== null && v !== undefined && v !== '';
 
 export function textoAuditoria(r) {
   if (!r?.creado) return '';
@@ -31,15 +36,26 @@ const PIE = `
     <button type="submit" class="btn primario">Guardar</button>
   </div>`;
 
+// Opciones de un selector de categoría agrupadas; `lista` es una expresión con categoriasPorGrupo(tipo).
+const opcionesCategoria = (lista) => `
+  <option :value="null">Sin categoría</option>
+  <optgroup v-for="g in ${lista}" :key="g.grupo.id" :label="g.grupo.nombre">
+    <option v-for="c in g.categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+  </optgroup>`;
+
 // Helpers comunes a todos los formularios de edición. `que`: "este movimiento", "esta cuenta"…
 function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}) {
   const error = ref('');
   const existe = !!original.id;
   const auditoria = textoAuditoria(original);
-  function terminar(r) {
-    guardar(coleccion, r);
-    aviso(existe ? 'Cambios guardados.' : 'Guardado.', 'ok', 2500);
-    emit('listo');
+  // `mensaje` puede ser un texto o una función que recibe el registro guardado.
+  function terminar(r, { mensaje, deshacer = false, cerrar = true } = {}) {
+    const guardado = guardar(coleccion, r);
+    const texto = (typeof mensaje === 'function' ? mensaje(guardado) : mensaje) || (existe ? 'Cambios guardados.' : 'Guardado.');
+    const accion = deshacer && !existe ? { texto: 'Deshacer', fn: () => borrar(coleccion, guardado.id) } : null;
+    aviso(texto, 'ok', accion ? 6000 : 2500, accion);
+    if (cerrar) emit('listo');
+    return guardado;
   }
   function eliminar() {
     if (!confirm(`¿Eliminar ${que}?`)) return;
@@ -54,63 +70,177 @@ function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}) {
   return { error, existe, auditoria, terminar, eliminar };
 }
 
+// Estado de una partida en un mes, sin contar el movimiento que se está editando.
+function estadoSinEste(partidaId, parte, periodo, movimientoId) {
+  if (!partidaId || !periodo) return null;
+  const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
+  if (!it) return null;
+  const propio = it.pagos.find((p) => p.id === movimientoId);
+  const real = redondear(it.real - (propio ? Number(propio.monto) || 0 : 0));
+  return { ...it, realSinEste: real, quedaSinEste: redondear(Math.max(0, it.esperado - real)) };
+}
+
+// Texto del aviso después de registrar un pago de una partida.
+export function textoDePartida(partidaId, parte, periodo) {
+  const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
+  if (!it) return '';
+  if (it.estado === 'parcial') return `Quedan ${fmt(it.queda)} en ${it.nombre}.`;
+  if (it.estado === 'excedido') return `${it.nombre}: ${fmt(it.real - it.esperado)} más de lo previsto.`;
+  if (it.sobrante > 0) return `${it.nombre} cerrada. Sobran ${fmt(it.sobrante)}${it.acumula ? ' para el mes siguiente' : ''}.`;
+  return `${it.nombre} completa.`;
+}
+
 // ---------------------------------------------------------------- Movimiento
 
 export const MovimientoForm = {
-  props: { inicial: Object },
+  props: { inicial: Object, sugerirMontos: Boolean },
   emits: ['listo'],
   template: `
-  <form class="formulario" novalidate @submit.prevent="enviar">
-    <div v-if="!vinculado" class="segmentos" role="group" aria-label="Tipo de movimiento">
+  <form class="formulario" novalidate @submit.prevent="enviar(false)">
+    <div v-if="!tipoFijo" class="segmentos" role="group" aria-label="Tipo de movimiento">
       <button v-for="(n, k) in tipos" :key="k" type="button" :class="{ activo: m.tipo === k }" :aria-pressed="m.tipo === k" :title="nombresTipo[k]" @click="m.tipo = k">{{ n }}</button>
     </div>
-    <p v-else class="nota">Corresponde a <strong>{{ nombreVinculo }}</strong> de {{ nombrePeriodo(m.periodo) }}.</p>
+    <p v-else class="nota">{{ textoVinculo }}</p>
 
-    <label v-if="m.tipo !== 'ajuste'" class="campo"><span>Monto</span>
-      <input v-model.number="m.monto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+    <template v-if="m.tipo !== 'ajuste'">
+      <label class="campo"><span>Monto{{ monedaOrigen === 'USD' ? ' (' + simboloDe('USD') + ')' : '' }}</span>
+        <input ref="campoMonto" v-model.number="m.monto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+      <div v-if="montosRapidos.length" class="chips-filtro" style="margin-top: -4px">
+        <button v-for="x in montosRapidos" :key="x.texto" type="button" class="chip-filtro" :class="{ activo: Number(m.monto) === x.valor }" @click="m.monto = x.valor">{{ x.texto }}</button>
+      </div>
+    </template>
     <template v-else>
       <label class="campo"><span>Saldo real hoy</span>
         <input v-model.number="saldoReal" type="number" inputmode="decimal" step="0.01"></label>
-      <p class="nota">En la app: {{ fmt(saldoSinEste) }} → ajuste de {{ fmt(diferencia) }}</p>
+      <p class="nota">En la app: {{ fmtMoneda(saldoSinEste, monedaOrigen) }} → ajuste de {{ fmtMoneda(diferencia, monedaOrigen) }}</p>
     </template>
 
     <div class="fila-campos">
       <label class="campo"><span>Fecha</span><input v-model="m.fecha" type="date" required></label>
       <label class="campo"><span>{{ etiquetaCuenta }}</span>
-        <select v-model="m.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+        <select v-model="m.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option></select></label>
       <label v-if="m.tipo === 'transferencia'" class="campo"><span>Hacia</span>
         <select v-model="m.cuentaDestinoId">
           <option :value="null" disabled>Elige…</option>
-          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === m.cuentaId">{{ c.nombre }}</option>
+          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === m.cuentaId">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option>
         </select></label>
     </div>
+
+    <label v-if="m.tipo === 'transferencia' && monedasDistintas" class="campo"><span>Llega a {{ nombreCuenta(m.cuentaDestinoId) }} ({{ simboloDe(monedaDestino) }})</span>
+      <input v-model.number="m.montoDestino" type="number" inputmode="decimal" step="0.01" min="0"></label>
+    <label v-else-if="(m.tipo === 'gasto' || m.tipo === 'ingreso') && monedaOrigen === 'USD'" class="campo"><span>Tasa de cambio de ese día (opcional)</span>
+      <input v-model.number="m.tasa" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65"></label>
 
     <label v-if="m.tipo === 'abono'" class="campo"><span>Préstamo</span>
       <select v-model="m.prestamoId"><option :value="null" disabled>Elige…</option>
         <option v-for="p in listaPrestamos" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
 
+    <label v-if="m.tipo === 'gasto' && !esCuota" class="campo"><span>Partida del presupuesto</span>
+      <select v-model="m.partidaId" :disabled="!!m.parte">
+        <option :value="null">Fuera del plan</option>
+        <option v-for="p in partidasGasto" :key="p.id" :value="p.id">{{ p.texto }}</option>
+      </select></label>
+    <label v-if="m.tipo === 'transferencia' && partidasAporte.length && !m.parte" class="campo"><span>Aporte del presupuesto</span>
+      <select v-model="m.partidaId"><option :value="null">Ninguno</option>
+        <option v-for="p in partidasAporte" :key="p.id" :value="p.id">{{ p.texto }}</option></select></label>
+
+    <label v-if="enPartida && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
+      <input v-model="m.cierra" type="checkbox"> Cierra la partida: sobran {{ fmt(estado.quedaSinEste - m.monto) }}{{ estado.acumula ? ' para el mes siguiente' : '' }}
+    </label>
+
     <div class="fila-campos">
-      <label v-if="m.tipo === 'gasto' || m.tipo === 'ingreso'" class="campo"><span>Categoría</span>
-        <select v-model="m.categoriaId"><option :value="null">Sin categoría</option>
-          <option v-for="c in listaCategorias" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+      <label v-if="(m.tipo === 'gasto' || m.tipo === 'ingreso') && !esCuota" class="campo"><span>Categoría</span>
+        <select v-model="m.categoriaId">${opcionesCategoria("(m.tipo === 'ingreso' ? categoriasIngreso : categoriasGasto)")}</select></label>
+      <label v-if="vinculado" class="campo"><span>Cuenta en el mes de</span>
+        <select v-model="m.periodo" @change="periodoTocado = true"><option v-for="p in opcionesPeriodo" :key="p" :value="p">{{ nombrePeriodo(p) }}</option></select></label>
       <label v-if="m.tipo !== 'ajuste'" class="campo"><span>{{ m.tipo === 'ingreso' ? 'Quién lo recibió' : 'Quién pagó' }}</span>
         <select v-model="m.personaId"><option :value="null">Hogar</option>
           <option v-for="p in listaPersonas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
     </div>
 
     <label class="campo"><span>Nota</span><input v-model.trim="m.nota" type="text" maxlength="140" placeholder="Opcional"></label>
-    ${PIE}
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="auditoria" class="meta">{{ auditoria }}</p>
+    <div class="acciones">
+      <button v-if="existe" type="button" class="btn peligro" @click="eliminar">Eliminar</button>
+      <span class="espacio"></span>
+      <button v-if="!existe && !tipoFijo" type="button" class="btn" @click="enviar(true)">Guardar y otro</button>
+      <button v-else type="button" class="btn" @click="$emit('listo')">Cancelar</button>
+      <button type="submit" class="btn primario">Guardar</button>
+    </div>
   </form>`,
   setup(props, { emit }) {
     const original = copia(props.inicial);
     const m = reactive({
-      tipo: 'gasto', fecha: hoy(), monto: null, cuentaId: cuentas()[0]?.id || 'gastos', cuentaDestinoId: null,
-      categoriaId: null, personaId: store.yo, nota: '', prestamoId: null, plantillaId: null, parte: null, periodo: null,
+      tipo: 'gasto', fecha: store.hoy, monto: null, cuentaId: cuentas()[0]?.id || 'gastos', cuentaDestinoId: null, montoDestino: null, tasa: null,
+      categoriaId: null, personaId: store.yo, nota: '', prestamoId: null, partidaId: null, parte: null, periodo: null, cierra: false,
       ...original,
     });
-    const vinculado = !!(m.plantillaId || (m.prestamoId && m.tipo === 'gasto'));
-    const nombreVinculo = computed(() => buscar('plantillas', m.plantillaId)?.nombre || buscar('prestamos', m.prestamoId)?.nombre || '');
-    const saldos = computed(() => saldosCuentas(store.doc));
+    const campoMonto = ref(null);
+    const periodoTocado = ref(!!original.periodo);
+    if (!parteDe(m)) m.parte = null;
+    const esCuota = computed(() => !!(m.prestamoId && m.tipo === 'gasto'));
+    const tipoFijo = computed(() => esCuota.value || !!m.parte);
+    const vinculado = computed(() => esCuota.value || (!!m.partidaId && (m.tipo === 'gasto' || m.tipo === 'transferencia')));
+    const enPartida = computed(() => m.tipo === 'gasto' && !!m.partidaId && !m.parte);
+    const periodoMov = computed(() => (vinculado.value ? m.periodo || periodoDe(m.fecha) : periodoDe(m.fecha)));
+
+    // Si se registró desde "+", el mes sigue a la fecha hasta que se elija otro.
+    watch(() => m.fecha, (f) => {
+      if (f && !periodoTocado.value) m.periodo = periodoDe(f);
+    });
+    watch(vinculado, (v) => {
+      if (v && !m.periodo) m.periodo = periodoDe(m.fecha);
+    }, { immediate: true });
+
+    const partida = computed(() => buscar('partidas', m.partidaId));
+    watch(() => m.partidaId, (id, anterior) => {
+      const p = buscar('partidas', id);
+      if (p && id !== anterior && p.categoriaId) m.categoriaId = p.categoriaId;
+    });
+
+    const nombreVinculo = computed(() => partida.value?.nombre || buscar('prestamos', m.prestamoId)?.nombre || '');
+    const textoVinculo = computed(() => {
+      const mes = nombrePeriodo(periodoMov.value);
+      if (esCuota.value) return `Cuota de ${nombreVinculo.value} de ${mes}.`;
+      if (m.parte === 'apartar') return `Se aparta para ${nombreVinculo.value} (${mes}).`;
+      if (m.parte === 'pagar') return `Pago de ${nombreVinculo.value} (${mes}), desde lo apartado.`;
+      return '';
+    });
+
+    const estado = computed(() => estadoSinEste(m.partidaId, parteDe(m), periodoMov.value, original.id));
+    const textoPartida = (p, periodo) => {
+      const it = estadoSinEste(p.id, null, periodo, original.id);
+      if (!it) return `${p.nombre} · no toca en ${nombrePeriodo(periodo, true)}`;
+      if (it.estado === 'omitida') return `${p.nombre} · omitida este mes`;
+      return it.quedaSinEste > 0 ? `${p.nombre} · quedan ${fmt(it.quedaSinEste)}` : `${p.nombre} · completa`;
+    };
+    const partidasGasto = computed(() => vivos('partidas')
+      .filter((p) => p.tipo === 'gasto' && (p.id === m.partidaId || partidaActivaEn(p, periodoMov.value)))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+      .map((p) => ({ id: p.id, texto: textoPartida(p, periodoMov.value) })));
+    const partidasAporte = computed(() => vivos('partidas')
+      .filter((p) => p.tipo === 'aporte' && (p.id === m.partidaId || partidaActivaEn(p, periodoMov.value)))
+      .map((p) => ({ id: p.id, texto: textoPartida(p, periodoMov.value) })));
+    const opcionesPeriodo = computed(() => {
+      const base = periodoDe(m.fecha || store.hoy);
+      return [...new Set([sumarMeses(base, -1), base, sumarMeses(base, 1), m.periodo].filter(Boolean))].sort();
+    });
+
+    const montosRapidos = computed(() => {
+      const it = estado.value;
+      const abonos = props.sugerirMontos || partida.value?.forma === 'abonos';
+      if (!enPartida.value || !it || !abonos || !(it.quedaSinEste > 0)) return [];
+      const lista = [1000, 2000].filter((v) => v < it.quedaSinEste).map((v) => ({ texto: fmt(v).replace('.00', ''), valor: v }));
+      lista.push({ texto: `Lo que queda (${fmt(it.quedaSinEste)})`, valor: it.quedaSinEste });
+      return lista;
+    });
+
+    const monedaOrigen = computed(() => monedaDeCuenta(m.cuentaId));
+    const monedaDestino = computed(() => monedaDeCuenta(m.cuentaDestinoId));
+    const monedasDistintas = computed(() => !!m.cuentaDestinoId && monedaOrigen.value !== monedaDestino.value);
+
+    const saldos = computed(() => saldosCuentas(indice()));
     const saldoSinEste = computed(() => {
       const propio = original.tipo === 'ajuste' && original.cuentaId === m.cuentaId && original.creado ? Number(original.monto) : 0;
       return redondear((saldos.value[m.cuentaId] || 0) - propio);
@@ -120,11 +250,11 @@ export const MovimientoForm = {
     const etiquetaCuenta = computed(() => ({ gasto: 'Pagado desde', ingreso: 'Entra a', transferencia: 'Desde', abono: 'Pagado desde', ajuste: 'Cuenta' })[m.tipo]);
     const f = usarFormulario('movimientos', original, emit, { que: 'este movimiento' });
 
-    function enviar() {
+    function enviar(otro) {
       f.error.value = '';
       const r = { ...m };
       if (r.tipo === 'ajuste') {
-        if (saldoReal.value === null || saldoReal.value === '' || Number.isNaN(Number(saldoReal.value))) return (f.error.value = 'Escribe el saldo real de la cuenta.');
+        if (!hayValor(saldoReal.value) || Number.isNaN(Number(saldoReal.value))) return (f.error.value = 'Escribe el saldo real de la cuenta.');
         r.monto = diferencia.value;
         if (!r.monto) return (f.error.value = 'El saldo ya coincide; no hace falta ajustar.');
       } else if (!(Number(r.monto) > 0)) {
@@ -132,116 +262,145 @@ export const MovimientoForm = {
       }
       if (!r.fecha) return (f.error.value = 'Elige la fecha.');
       if (r.tipo === 'transferencia' && (!r.cuentaDestinoId || r.cuentaDestinoId === r.cuentaId)) return (f.error.value = 'Elige una cuenta de destino distinta.');
+      if (r.tipo === 'transferencia' && monedasDistintas.value && !(Number(r.montoDestino) > 0)) return (f.error.value = `Escribe cuánto llega en ${simboloDe(monedaDestino.value)}.`);
       if (r.tipo === 'abono' && !r.prestamoId) return (f.error.value = 'Elige el préstamo.');
+
       r.monto = redondear(Number(r.monto));
-      if (!vinculado) r.periodo = periodoDe(r.fecha);
+      r.moneda = monedaOrigen.value;
+      r.periodo = periodoMov.value;
       if (r.tipo !== 'transferencia') r.cuentaDestinoId = null;
+      r.montoDestino = r.tipo === 'transferencia' && monedasDistintas.value ? redondear(Number(r.montoDestino)) : null;
+      r.tasa = (r.tipo === 'gasto' || r.tipo === 'ingreso') && monedaOrigen.value === 'USD' && Number(r.tasa) > 0 ? Number(r.tasa) : null;
       if (r.tipo !== 'gasto' && r.tipo !== 'ingreso') r.categoriaId = null;
-      if (r.tipo !== 'abono' && !vinculado) r.prestamoId = null;
+      if (r.tipo !== 'abono' && !esCuota.value) r.prestamoId = null;
+      if (!(r.tipo === 'gasto' || r.tipo === 'transferencia')) r.partidaId = null;
+      if (!r.partidaId) r.parte = null;
+      r.cierra = enPartida.value && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
       if (r.tipo === 'ajuste') r.personaId = null;
-      f.terminar(r);
+
+      const mensaje = r.partidaId ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'} ${textoDePartida(g.partidaId, parteDe(g), g.periodo)}` : undefined;
+      f.terminar(r, { deshacer: true, cerrar: !otro, mensaje });
+      if (otro) {
+        Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null });
+        nextTick(() => campoMonto.value?.focus());
+      }
     }
 
     return {
-      m, vinculado, nombreVinculo, saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar, fmt, nombrePeriodo,
-      tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO, listaCuentas: computed(cuentas), listaPersonas: computed(personas), listaCategorias: computed(categorias),
-      listaPrestamos: computed(() => vivos('prestamos')), ...f,
+      m, campoMonto, periodoTocado, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
+      montosRapidos, monedaOrigen, monedaDestino, monedasDistintas, saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
+      fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
+      listaCuentas: computed(cuentas), listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),
+      categoriasGasto: computed(() => categoriasPorGrupo('gasto')), categoriasIngreso: computed(() => categoriasPorGrupo('ingreso')), ...f,
     };
   },
 };
 
-// ---------------------------------------------------------------- Compromiso (plantilla)
+// ---------------------------------------------------------------- Partida del presupuesto
 
-const CLASES_PLANTILLA = Object.fromEntries(Object.entries(CLASES).filter(([k]) => k !== 'prestamo'));
+const AYUDA_FORMA = {
+  fijo: 'Toca el círculo en Mes y queda registrada con este monto.',
+  variable: 'Al tocar el círculo se abre para escribir el monto real (por ejemplo, la luz).',
+  abonos: 'Se paga en partes (por ejemplo, el súper): cada pago se suma hasta llegar al monto.',
+};
 
-export const PlantillaForm = {
+export const PartidaForm = {
   props: { inicial: Object },
   emits: ['listo'],
   template: `
   <form class="formulario" novalidate @submit.prevent="enviar">
-    <label class="campo"><span>Nombre</span><input v-model="t.nombre" maxlength="60" required></label>
+    <label class="campo"><span>Nombre</span><input v-model="p.nombre" maxlength="60" required></label>
+    <div class="segmentos" role="group" aria-label="Tipo de partida">
+      <button v-for="(n, k) in tipos" :key="k" type="button" :class="{ activo: p.tipo === k }" :aria-pressed="p.tipo === k" @click="cambiarTipo(k)">{{ n }}</button>
+    </div>
+
     <div class="fila-campos">
-      <label class="campo"><span>Tipo</span>
-        <select v-model="t.clase"><option v-for="(n, k) in clases" :key="k" :value="k">{{ n }}</option></select></label>
-      <label class="campo"><span>{{ t.clase === 'ingreso' ? 'De quién' : 'Quién lo paga' }}</span>
-        <select v-model="t.responsableId"><option :value="null">Hogar</option>
-          <option v-for="p in listaPersonas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
+      <label class="campo"><span>Categoría</span><select v-model="p.categoriaId">${opcionesCategoria('lista')}</select></label>
+      <label class="campo"><span>Quién la paga</span>
+        <select v-model="p.responsableId"><option :value="null">Hogar</option>
+          <option v-for="x in listaPersonas" :key="x.id" :value="x.id">{{ x.nombre }}</option></select></label>
     </div>
 
-    <div v-if="t.clase === 'provision'" class="fila-campos">
-      <label class="campo"><span>Monto del pago anual</span>
-        <input v-model.number="t.montoAnual" type="number" inputmode="decimal" step="0.01" min="0"></label>
-      <label class="campo"><span>Mes en que se paga</span>
-        <select v-model="t.mesPago"><option :value="null">Sin definir</option>
-          <option v-for="n in 12" :key="n" :value="n">{{ nombreMes(n) }}</option></select></label>
-    </div>
-    <div v-else class="fila-campos">
-      <label class="campo"><span>{{ etiquetaMonto }}</span>
-        <input v-model.number="t.monto" type="number" inputmode="decimal" step="0.01" min="0"></label>
-      <label class="campo"><span>Día de pago</span>
-        <input v-model.number="t.dia" type="number" min="1" max="31" placeholder="Opcional"></label>
-    </div>
-    <p v-if="t.clase === 'provision'" class="nota">Cada mes se apartan {{ fmt((t.montoAnual || 0) / 12) }} en {{ nombreCuenta(t.cuentaDestinoId || 'reservas') }} y, cuando llega el cobro, se paga de ahí.</p>
-
-    <div v-if="t.clase !== 'provision'" class="campo">
-      <span>Meses en que aplica {{ todos ? '(todos)' : '(' + t.meses.length + ' de 12)' }}</span>
-      <div class="meses">
-        <button v-for="n in 12" :key="n" type="button" :class="{ activo: todos || t.meses.includes(n) }" :aria-pressed="todos || t.meses.includes(n)" @click="alternarMes(n)">{{ nombreMes(n).slice(0, 3) }}</button>
+    <template v-if="p.tipo === 'anual'">
+      <div class="fila-campos">
+        <label class="campo"><span>Monto del pago anual</span><input v-model.number="p.montoAnual" type="number" inputmode="decimal" step="0.01" min="0"></label>
+        <label class="campo"><span>Mes en que se paga</span>
+          <select v-model="p.mesPago"><option :value="null">Sin definir</option><option v-for="n in 12" :key="n" :value="n">{{ nombreMes(n) }}</option></select></label>
       </div>
-    </div>
-    <div v-if="t.clase === 'ingreso'" class="fila-campos">
-      <label class="casilla"><input v-model="t.decimo14" type="checkbox"> Décimo cuarto mes (junio)</label>
-      <label class="casilla"><input v-model="t.decimo13" type="checkbox"> Décimo tercer mes (diciembre)</label>
-    </div>
+      <p class="nota">Cada mes se apartan {{ fmt((p.montoAnual || 0) / 12) }} en {{ nombreCuenta(p.cuentaDestinoId || 'reservas') }} y, cuando llega el cobro, se paga de ahí.</p>
+    </template>
+    <template v-else>
+      <div class="fila-campos">
+        <label class="campo"><span>{{ p.tipo === 'aporte' ? 'Aporte al mes' : 'Monto al mes' }}</span><input v-model.number="p.monto" type="number" inputmode="decimal" step="0.01" min="0"></label>
+        <label class="campo"><span>Día de pago</span><input v-model.number="p.dia" type="number" min="1" max="31" placeholder="Opcional"></label>
+      </div>
+      <div class="campo">
+        <span>Cómo se paga</span>
+        <div class="segmentos" role="group" aria-label="Cómo se paga">
+          <button v-for="(n, k) in formas" :key="k" type="button" :class="{ activo: p.forma === k }" :aria-pressed="p.forma === k" @click="p.forma = k">{{ n }}</button>
+        </div>
+        <p class="nota chica" style="margin-top: 6px">{{ ayudaForma[p.forma] }}</p>
+      </div>
+      <div class="campo">
+        <span>Meses en que aplica {{ todos ? '(todos)' : '(' + p.meses.length + ' de 12)' }}</span>
+        <div class="meses">
+          <button v-for="n in 12" :key="n" type="button" :class="{ activo: todos || p.meses.includes(n) }" :aria-pressed="todos || p.meses.includes(n)" @click="alternarMes(n)">{{ nombreMes(n).slice(0, 3) }}</button>
+        </div>
+      </div>
+    </template>
 
     <div class="fila-campos">
-      <label class="campo"><span>{{ t.clase === 'ingreso' ? 'Entra a' : 'Sale de' }}</span>
-        <select v-model="t.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
-      <label v-if="t.clase === 'aporte' || t.clase === 'provision'" class="campo"><span>{{ t.clase === 'aporte' ? 'Va a' : 'Se aparta en' }}</span>
-        <select v-model="t.cuentaDestinoId"><option :value="null" disabled>Elige…</option>
-          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === t.cuentaId">{{ c.nombre }}</option></select></label>
-      <label v-if="['fijo', 'fijo_variable', 'provision'].includes(t.clase)" class="campo"><span>Categoría</span>
-        <select v-model="t.categoriaId"><option :value="null">Sin categoría</option>
-          <option v-for="c in listaCategorias" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+      <label class="campo"><span>Sale de</span>
+        <select v-model="p.medioPagoId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+      <label v-if="p.tipo !== 'gasto'" class="campo"><span>{{ p.tipo === 'aporte' ? 'Va a' : 'Se aparta en' }}</span>
+        <select v-model="p.cuentaDestinoId"><option :value="null" disabled>Elige…</option>
+          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === p.medioPagoId">{{ c.nombre }}</option></select></label>
     </div>
 
-    <label class="casilla"><input v-model="t.activo" type="checkbox"> Activo</label>
-    <label class="campo"><span>Nota</span><input v-model.trim="t.nota" maxlength="140" placeholder="Opcional"></label>
+    <label v-if="p.tipo === 'gasto'" class="casilla"><input v-model="p.acumula" type="checkbox"> Lo que sobre en el mes pasa al mes siguiente</label>
+    <label class="casilla"><input v-model="p.activo" type="checkbox"> Activa</label>
+    <label class="campo"><span>Nota</span><input v-model.trim="p.nota" maxlength="140" placeholder="Opcional"></label>
     ${PIE}
   </form>`,
   setup(props, { emit }) {
     const original = copia(props.inicial);
-    const t = reactive({
-      nombre: '', clase: 'fijo', monto: null, montoAnual: null, mesPago: null, meses: [], decimo13: false, decimo14: false,
-      responsableId: store.yo, cuentaId: 'gastos', cuentaDestinoId: null, categoriaId: null, dia: null, activo: true, nota: '',
-      ...original,
+    const p = reactive({
+      nombre: '', tipo: 'gasto', forma: 'fijo', categoriaId: null, responsableId: store.yo, monto: null, montoAnual: null, mesPago: null, meses: [],
+      dia: null, medioPagoId: 'gastos', cuentaDestinoId: null, acumula: false, acumulaDesde: null, activo: true, metaId: null, sePagaCon: 'auto',
+      desde: null, hasta: null, nota: '', ...original,
     });
-    if (!Array.isArray(t.meses)) t.meses = [];
-    if (t.clase === 'provision' && !t.cuentaDestinoId) t.cuentaDestinoId = 'reservas';
-    const todos = computed(() => !t.meses.length || t.meses.length === 12);
+    if (!Array.isArray(p.meses)) p.meses = [];
+    const todos = computed(() => !p.meses.length || p.meses.length === 12);
     function alternarMes(n) {
-      let ms = todos.value ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [...t.meses];
+      let ms = todos.value ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [...p.meses];
       ms = ms.includes(n) ? ms.filter((x) => x !== n) : [...ms, n].sort((a, b) => a - b);
-      if (ms.length) t.meses = ms.length === 12 ? [] : ms;
+      if (ms.length) p.meses = ms.length === 12 ? [] : ms;
     }
-    const etiquetaMonto = computed(() => ({
-      ingreso: 'Monto mensual (neto)', fijo: 'Monto mensual', fijo_variable: 'Monto estimado al mes', aporte: 'Aporte mensual',
-    })[t.clase]);
-    const f = usarFormulario('plantillas', original, emit, { que: 'este compromiso' });
+    function cambiarTipo(tipo) {
+      p.tipo = tipo;
+      if (tipo === 'anual') p.cuentaDestinoId ||= 'reservas';
+      if (tipo === 'aporte') {
+        p.cuentaDestinoId ||= 'ahorro';
+        if (!p.categoriaId) p.categoriaId = 'ahorro';
+        if (p.forma === 'variable') p.forma = 'fijo';
+      }
+    }
+    const formas = computed(() => (p.tipo === 'aporte' ? { fijo: FORMAS.fijo, abonos: FORMAS.abonos } : FORMAS));
+    const f = usarFormulario('partidas', original, emit, { que: 'esta partida' });
 
     function enviar() {
       f.error.value = '';
-      const r = { ...t, nombre: t.nombre.trim() };
+      const r = { ...p, nombre: p.nombre.trim() };
       if (!r.nombre) return (f.error.value = 'Ponle un nombre.');
-      const monto = r.clase === 'provision' ? r.montoAnual : r.monto;
-      if (monto === null || monto === '' || !(Number(monto) >= 0)) return (f.error.value = 'Escribe el monto (puede ser 0 si todavía no lo sabes).');
-      if (r.clase === 'aporte' && !r.cuentaDestinoId) return (f.error.value = 'Elige a qué cuenta va el aporte.');
-      if (r.clase === 'provision') {
+      const monto = r.tipo === 'anual' ? r.montoAnual : r.monto;
+      if (!hayValor(monto) || !(Number(monto) >= 0)) return (f.error.value = 'Escribe el monto (puede ser 0 si todavía no lo sabes).');
+      if (r.tipo !== 'gasto' && !r.cuentaDestinoId) return (f.error.value = r.tipo === 'aporte' ? 'Elige a qué cuenta va el aporte.' : 'Elige dónde se aparta.');
+      if (r.tipo === 'anual') {
         r.montoAnual = redondear(Number(r.montoAnual));
         r.monto = redondear(r.montoAnual / 12);
         r.meses = [];
         r.dia = null;
-        r.cuentaDestinoId ||= 'reservas';
+        r.forma = 'fijo';
         r.mesPago = r.mesPago ? Number(r.mesPago) : null;
       } else {
         r.monto = redondear(Number(r.monto));
@@ -249,16 +408,171 @@ export const PlantillaForm = {
         r.mesPago = null;
         r.dia = r.dia ? Math.min(31, Math.max(1, Math.round(Number(r.dia)))) : null;
       }
-      if (r.clase !== 'ingreso') r.decimo13 = r.decimo14 = false;
-      if (r.clase !== 'aporte' && r.clase !== 'provision') r.cuentaDestinoId = null;
-      if (!['fijo', 'fijo_variable', 'provision'].includes(r.clase)) r.categoriaId = r.clase === 'ingreso' ? 'salario' : null;
+      if (r.tipo === 'gasto') r.cuentaDestinoId = null;
+      r.acumula = r.tipo === 'gasto' && !!r.acumula;
+      // Lo que sobre se empieza a guardar desde el mes en que se activó.
+      if (r.acumula && !original.acumula) r.acumulaDesde = store.periodo < periodoActual() ? store.periodo : periodoActual();
+      if (!r.acumula) r.acumulaDesde = null;
       f.terminar(r);
     }
 
     return {
-      t, todos, alternarMes, etiquetaMonto, enviar, fmt, nombreMes, nombreCuenta, clases: CLASES_PLANTILLA,
-      listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaCategorias: computed(categorias), ...f,
+      p, todos, alternarMes, cambiarTipo, formas, enviar, fmt, nombreMes, nombreCuenta, tipos: TIPOS_PARTIDA, ayudaForma: AYUDA_FORMA,
+      lista: computed(() => categoriasPorGrupo('gasto')), listaPersonas: computed(personas), listaCuentas: computed(cuentas), ...f,
     };
+  },
+};
+
+// "Cambiar solo este mes": otro monto u omitir la partida en un mes, sin tocar la partida.
+export const AjusteMesForm = {
+  props: { partidaId: String, periodo: String },
+  emits: ['listo'],
+  template: `
+  <form class="formulario" novalidate @submit.prevent="enviar">
+    <p class="nota">Solo cambia {{ nombrePeriodo(periodo) }}. El monto de siempre es {{ fmt(montoNormal) }}.</p>
+    <label class="casilla"><input v-model="a.omitir" type="checkbox"> Omitir {{ partida?.nombre }} este mes</label>
+    <label v-if="!a.omitir" class="campo"><span>Monto para {{ nombrePeriodo(periodo) }}</span>
+      <input v-model.number="a.monto" type="number" inputmode="decimal" step="0.01" min="0"></label>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <div class="acciones">
+      <button v-if="existe" type="button" class="btn peligro" @click="quitar">Volver al monto de siempre</button>
+      <span class="espacio"></span>
+      <button type="button" class="btn" @click="$emit('listo')">Cancelar</button>
+      <button type="submit" class="btn primario">Guardar</button>
+    </div>
+  </form>`,
+  setup(props, { emit }) {
+    const id = `${props.partidaId}:${props.periodo}`;
+    const partida = computed(() => buscar('partidas', props.partidaId));
+    const actual = buscar('ajustesPartida', id);
+    const existe = !!actual && !actual.borrado;
+    const montoNormal = computed(() => {
+      const p = partida.value;
+      if (!p) return 0;
+      const partes = partesDelMes(p, props.periodo);
+      const principal = partes.find((x) => x.parte === (p.tipo === 'anual' ? (partes.length > 1 ? 'pagar' : 'apartar') : null));
+      return (principal?.base || 0) / 100;
+    });
+    const a = reactive({ omitir: existe ? !!actual.omitir : false, monto: existe && hayValor(actual.monto) ? actual.monto : montoNormal.value });
+    const error = ref('');
+    function enviar() {
+      error.value = '';
+      if (!a.omitir && !(Number(a.monto) >= 0 && hayValor(a.monto))) return (error.value = 'Escribe el monto de este mes.');
+      guardar('ajustesPartida', {
+        ...(actual || {}), id, partidaId: props.partidaId, periodo: props.periodo, omitir: !!a.omitir,
+        monto: a.omitir ? null : redondear(Number(a.monto)), borrado: false,
+      });
+      aviso(a.omitir ? `${partida.value?.nombre} no se paga en ${nombrePeriodo(props.periodo)}.` : 'Monto de este mes guardado.', 'ok');
+      emit('listo');
+    }
+    function quitar() {
+      borrar('ajustesPartida', id);
+      aviso('La partida vuelve a su monto de siempre este mes.', 'info');
+      emit('listo');
+    }
+    return { a, partida, existe, montoNormal, error, enviar, quitar, fmt, nombrePeriodo };
+  },
+};
+
+// ---------------------------------------------------------------- Ingresos
+
+export const IngresoForm = {
+  props: { inicial: Object },
+  emits: ['listo'],
+  template: `
+  <form class="formulario" novalidate @submit.prevent="enviar">
+    <div class="fila-campos">
+      <label class="campo"><span>Nombre</span><input v-model="i.nombre" maxlength="60" required placeholder="Salario de…"></label>
+      <label class="campo"><span>De quién</span>
+        <select v-model="i.personaId"><option :value="null">Hogar</option>
+          <option v-for="x in listaPersonas" :key="x.id" :value="x.id">{{ x.nombre }}</option></select></label>
+    </div>
+    <div class="segmentos" role="group" aria-label="Frecuencia">
+      <button v-for="(n, k) in frecuencias" :key="k" type="button" :class="{ activo: i.frecuencia === k }" :aria-pressed="i.frecuencia === k" @click="cambiarFrecuencia(k)">{{ n }}</button>
+    </div>
+    <div class="fila-campos">
+      <label class="campo"><span>{{ i.frecuencia === 'quincenal' ? 'Neto de cada quincena' : 'Neto al mes' }}</span>
+        <input v-model.number="i.netoEsperado" type="number" inputmode="decimal" step="0.01" min="0"></label>
+      <label class="campo"><span>{{ i.frecuencia === 'quincenal' ? 'Primer día de pago' : 'Día de pago' }}</span>
+        <input v-model.number="i.diasPago[0]" type="number" min="1" max="31"></label>
+      <label v-if="i.frecuencia === 'quincenal'" class="campo"><span>Segundo día (31 = último)</span>
+        <input v-model.number="i.diasPago[1]" type="number" min="1" max="31"></label>
+    </div>
+    <div class="fila-campos">
+      <label class="campo"><span>Si cae en fin de semana</span>
+        <select v-model="i.finDeSemana"><option value="anterior">Se paga el viernes antes</option><option value="igual">Se registra ese día</option></select></label>
+      <label class="campo"><span>Entra a</span>
+        <select v-model="i.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+    </div>
+    <div class="fila-campos">
+      <label class="casilla"><input v-model="i.decimo14" type="checkbox"> Décimo cuarto mes (junio)</label>
+      <label class="casilla"><input v-model="i.decimo13" type="checkbox"> Décimo tercer mes (diciembre)</label>
+    </div>
+    <p class="nota chica">Las deducciones (IHSS, ISR y otras) se podrán registrar en cada pago en una próxima versión.</p>
+    <label class="casilla"><input v-model="i.activo" type="checkbox"> Activo</label>
+    <label class="campo"><span>Nota</span><input v-model.trim="i.nota" maxlength="140" placeholder="Opcional"></label>
+    ${PIE}
+  </form>`,
+  setup(props, { emit }) {
+    const original = copia(props.inicial);
+    const i = reactive({
+      nombre: '', personaId: store.yo, frecuencia: 'quincenal', diasPago: [15, 31], finDeSemana: 'anterior', cuentaId: 'gastos', categoriaId: 'salario',
+      netoEsperado: null, meses: [], decimo13: true, decimo14: true, vigenteDesde: null, activo: true, deducciones: [], nota: '', ...original,
+    });
+    if (!Array.isArray(i.diasPago) || !i.diasPago.length) i.diasPago = [31];
+    function cambiarFrecuencia(k) {
+      i.frecuencia = k;
+      i.diasPago = k === 'quincenal' ? [i.diasPago[0] && i.diasPago[0] < 28 ? i.diasPago[0] : 15, 31] : [i.diasPago[1] || i.diasPago[0] || 31];
+    }
+    const f = usarFormulario('ingresos', original, emit, { que: 'este ingreso' });
+    function enviar() {
+      f.error.value = '';
+      const r = { ...i, nombre: i.nombre.trim() };
+      if (!r.nombre) return (f.error.value = 'Ponle un nombre.');
+      if (!hayValor(r.netoEsperado) || !(Number(r.netoEsperado) >= 0)) return (f.error.value = 'Escribe el neto (puede ser 0 si todavía no lo sabes).');
+      const dias = r.diasPago.slice(0, r.frecuencia === 'quincenal' ? 2 : 1).map((d) => Math.min(31, Math.max(1, Math.round(Number(d)) || 0)));
+      if (dias.some((d) => !d)) return (f.error.value = 'Escribe los días de pago.');
+      r.diasPago = [...new Set(dias)].sort((a, b) => a - b);
+      if (r.frecuencia === 'quincenal' && r.diasPago.length < 2) return (f.error.value = 'Los dos días de pago tienen que ser distintos.');
+      r.netoEsperado = redondear(Number(r.netoEsperado));
+      f.terminar(r);
+    }
+    return { i, cambiarFrecuencia, enviar, frecuencias: FRECUENCIAS, listaPersonas: computed(personas), listaCuentas: computed(cuentas), ...f };
+  },
+};
+
+export const ReciboForm = {
+  props: { inicial: Object },
+  emits: ['listo'],
+  template: `
+  <form class="formulario" novalidate @submit.prevent="enviar">
+    <p class="nota">{{ descripcion }}</p>
+    <div class="fila-campos">
+      <label class="campo"><span>Neto recibido</span><input v-model.number="r.neto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+      <label class="campo"><span>Fecha</span><input v-model="r.fecha" type="date" required></label>
+    </div>
+    <label class="campo"><span>Entra a</span>
+      <select v-model="r.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+    <label class="campo"><span>Nota</span><input v-model.trim="r.nota" maxlength="140" placeholder="Opcional"></label>
+    ${PIE}
+  </form>`,
+  setup(props, { emit }) {
+    const original = copia(props.inicial);
+    const r = reactive({ neto: null, fecha: store.hoy, cuentaId: 'gastos', nota: '', extras: [], deducciones: [], ...original });
+    const ingreso = buscar('ingresos', r.ingresoId);
+    const descripcion = computed(() => {
+      const nombre = ingreso?.nombre || 'Ingreso';
+      if (r.tipo === 'decimo13' || r.tipo === 'decimo14') return `${TIPOS_RECIBO[r.tipo]} de ${nombre}, ${nombrePeriodo(periodoDe(r.ocurrencia))}.`;
+      return `${nombre}: pago del ${fechaCorta(r.ocurrencia)}${ingreso?.netoEsperado ? ` (se esperaban ${fmt(ingreso.netoEsperado * (r.tipo === 'ordinario' ? 1 : ingreso.frecuencia === 'quincenal' ? 2 : 1))})` : ''}.`;
+    });
+    const f = usarFormulario('recibos', original, emit, { que: 'este pago recibido' });
+    function enviar() {
+      f.error.value = '';
+      if (!(Number(r.neto) >= 0) || !hayValor(r.neto)) return (f.error.value = 'Escribe el neto que llegó a la cuenta.');
+      if (!r.fecha) return (f.error.value = 'Elige la fecha.');
+      f.terminar({ ...r, neto: redondear(Number(r.neto)), periodo: periodoDe(r.ocurrencia || r.fecha) }, { deshacer: true, mensaje: `Registrado: ${fmt(r.neto)}.` });
+    }
+    return { r, descripcion, enviar, listaCuentas: computed(cuentas), ...f };
   },
 };
 
@@ -332,7 +646,7 @@ export const PrestamoForm = {
   },
 };
 
-// ---------------------------------------------------------------- Cuenta, persona y categoría
+// ---------------------------------------------------------------- Cuenta, persona, grupo y categoría
 
 export const CuentaForm = {
   props: { inicial: Object },
@@ -344,28 +658,46 @@ export const CuentaForm = {
       <label class="campo"><span>Tipo</span><select v-model="c.tipo"><option v-for="(n, k) in tipos" :key="k" :value="k">{{ n }}</option></select></label>
     </div>
     <div class="fila-campos">
-      <label class="campo"><span>Saldo inicial</span><input v-model.number="c.saldoInicial" type="number" inputmode="decimal" step="0.01"></label>
-      <label class="campo"><span>Meta (opcional)</span><input v-model.number="c.meta" type="number" inputmode="decimal" step="100" min="0"></label>
+      <label class="campo"><span>Moneda</span><select v-model="c.moneda"><option v-for="(n, k) in monedas" :key="k" :value="k">{{ n }}</option></select></label>
+      <label class="campo"><span>Saldo inicial ({{ simboloDe(c.moneda) }})</span><input v-model.number="c.saldoInicial" type="number" inputmode="decimal" step="0.01"></label>
     </div>
+    <p v-if="cambioMoneda" class="nota chica">La cuenta ya tiene movimientos: al cambiar la moneda, sus montos se leerán en {{ monedas[c.moneda].toLowerCase() }}.</p>
+    <div class="fila-campos">
+      <label class="campo"><span>Titular</span>
+        <select v-model="c.titularId"><option :value="null">Hogar (de los dos)</option>
+          <option v-for="p in listaPersonas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
+      <label class="campo"><span>Meta de ahorro (opcional)</span><input v-model.number="meta" type="number" inputmode="decimal" step="100" min="0"></label>
+    </div>
+    <p class="nota chica">Los gastos de esta cuenta que no digan quién pagó se cuentan como del titular.</p>
     <label class="campo"><span>Nota</span><input v-model.trim="c.nota" maxlength="140" placeholder="Opcional"></label>
     ${PIE}
   </form>`,
   setup(props, { emit }) {
     const original = copia(props.inicial);
-    const c = reactive({ nombre: '', tipo: 'banco', saldoInicial: 0, meta: null, nota: '', ...original });
+    const c = reactive({ nombre: '', tipo: 'banco', moneda: 'L', saldoInicial: 0, nota: '', titularId: null, ...original });
+    const metaActual = original.id ? vivos('metas').find((x) => x.cuentaId === original.id) : null;
+    const meta = ref(metaActual?.montoObjetivo ?? null);
+    const usos = original.id ? vivos('movimientos').filter((m) => m.cuentaId === original.id || m.cuentaDestinoId === original.id).length : 0;
+    const cambioMoneda = computed(() => usos > 0 && c.moneda !== (original.moneda || 'L'));
     const f = usarFormulario('cuentas', original, emit, {
       que: 'esta cuenta',
-      alBorrar: () => {
-        const usos = vivos('movimientos').filter((m) => m.cuentaId === original.id || m.cuentaDestinoId === original.id).length;
-        return !usos || confirm(`La cuenta tiene ${usos} movimientos que dejarán de sumar en su saldo. ¿Eliminarla igual?`);
-      },
+      alBorrar: () => !usos || confirm(`La cuenta tiene ${usos} movimientos que dejarán de sumar en su saldo. ¿Eliminarla igual?`),
     });
     function enviar() {
       f.error.value = '';
       if (!c.nombre.trim()) return (f.error.value = 'Ponle un nombre.');
-      f.terminar({ ...c, nombre: c.nombre.trim(), saldoInicial: redondear(Number(c.saldoInicial) || 0), meta: Number(c.meta) > 0 ? redondear(Number(c.meta)) : null });
+      const guardada = f.terminar({ ...c, nombre: c.nombre.trim(), titularId: c.titularId || null, saldoInicial: redondear(Number(c.saldoInicial) || 0) });
+      const objetivo = Number(meta.value) > 0 ? redondear(Number(meta.value)) : null;
+      if (objetivo && (!metaActual || metaActual.montoObjetivo !== objetivo)) {
+        guardar('metas', {
+          ...(metaActual || { id: `meta-${guardada.id}`, fechaObjetivo: null, saldoInicial: 0, activo: true, nota: '' }),
+          nombre: guardada.nombre, montoObjetivo: objetivo, cuentaId: guardada.id, responsableId: guardada.titularId,
+        });
+      } else if (!objetivo && metaActual) {
+        borrar('metas', metaActual.id);
+      }
     }
-    return { c, enviar, tipos: TIPOS_CUENTA, ...f };
+    return { c, meta, cambioMoneda, enviar, simboloDe, tipos: TIPOS_CUENTA, monedas: MONEDAS, listaPersonas: computed(personas), ...f };
   },
 };
 
@@ -392,51 +724,216 @@ export const PersonaForm = {
   },
 };
 
+export const GrupoForm = {
+  props: { inicial: Object },
+  emits: ['listo'],
+  template: `
+  <form class="formulario" novalidate @submit.prevent="enviar">
+    <label class="campo"><span>Nombre del grupo</span><input v-model="g.nombre" maxlength="40" required></label>
+    <p v-if="existe && usadas" class="nota chica">Si lo eliminas, sus {{ usadas }} categorías pasan a Personal.</p>
+    ${PIE}
+  </form>`,
+  setup(props, { emit }) {
+    const original = copia(props.inicial);
+    const g = reactive({ nombre: '', orden: grupos().length + 1, ...original });
+    const usadas = vivos('categorias').filter((c) => c.grupoId === original.id).length;
+    const f = usarFormulario('grupos', original, emit, {
+      que: 'este grupo',
+      alBorrar: () => {
+        if (original.id === 'personal') {
+          aviso('Personal recibe las categorías de los grupos que se eliminan: no se puede eliminar.', 'error', 6000);
+          return false;
+        }
+        for (const c of vivos('categorias').filter((x) => x.grupoId === original.id)) guardar('categorias', { ...c, grupoId: 'personal' });
+        return true;
+      },
+    });
+    function enviar() {
+      f.error.value = '';
+      if (!g.nombre.trim()) return (f.error.value = 'Escribe el nombre.');
+      f.terminar({ ...g, nombre: g.nombre.trim() });
+    }
+    return { g, usadas, enviar, ...f };
+  },
+};
+
 export const CategoriaForm = {
   props: { inicial: Object },
   emits: ['listo'],
   template: `
   <form class="formulario" novalidate @submit.prevent="enviar">
     <label class="campo"><span>Nombre</span><input v-model="c.nombre" maxlength="40" required></label>
+    <div class="fila-campos">
+      <label class="campo"><span>Grupo</span>
+        <select v-model="c.grupoId"><option v-for="g in listaGrupos" :key="g.id" :value="g.id">{{ g.nombre }}</option></select></label>
+      <label class="campo"><span>Se usa para</span>
+        <select v-model="c.tipo"><option value="gasto">Gastos</option><option value="ingreso">Ingresos</option></select></label>
+    </div>
     ${PIE}
   </form>`,
   setup(props, { emit }) {
     const original = copia(props.inicial);
-    const c = reactive({ nombre: '', ...original });
+    const c = reactive({ nombre: '', grupoId: 'personal', tipo: 'gasto', ...original });
     const f = usarFormulario('categorias', original, emit, { que: 'esta categoría' });
     function enviar() {
       f.error.value = '';
       if (!c.nombre.trim()) return (f.error.value = 'Escribe el nombre.');
       f.terminar({ ...c, nombre: c.nombre.trim() });
     }
-    return { c, enviar, ...f };
+    return { c, enviar, listaGrupos: computed(grupos), ...f };
   },
 };
+
+// ---------------------------------------------------------------- Detalle de una partida, cuota o ingreso en un mes
+
+const ESTADOS = {
+  pendiente: { texto: 'Pendiente', clase: '' },
+  parcial: { texto: 'En abonos', clase: 'aviso' },
+  completo: { texto: 'Completa', clase: 'ok' },
+  excedido: { texto: 'Se pasó', clase: 'aviso' },
+  omitida: { texto: 'Omitida este mes', clase: '' },
+};
+
+export const DetalleItem = {
+  props: { clave: String, periodo: String },
+  emits: ['listo'],
+  template: `
+  <div v-if="it" class="formulario">
+    <div>
+      <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
+        <span class="hero-num md">{{ fmt(it.real) }}</span>
+        <span class="tenue">de {{ fmt(it.esperado) }}</span>
+        <span class="espacio"></span>
+        <span class="chip" :class="estado.clase">{{ estado.texto }}</span>
+      </div>
+      <div class="progreso" style="margin-top: 10px"><div :style="{ width: pct + '%', background: it.estado === 'excedido' ? 'var(--ambar)' : null }"></div></div>
+      <p class="nota" style="margin-top: 8px">{{ resumen }}</p>
+      <p v-if="it.arrastre > 0" class="nota chica">Incluye {{ fmt(it.arrastre) }} que sobraron de meses anteriores.</p>
+      <p v-if="it.ajuste && !it.omitida" class="nota chica">Este mes: {{ fmt(it.base) }} en vez del monto de siempre.</p>
+    </div>
+
+    <div>
+      <h3 class="titulo-grupo">{{ it.tipoItem === 'ingreso' ? 'Recibido' : 'Pagos del mes' }}</h3>
+      <ul v-if="registros.length" class="lista">
+        <li v-for="r in registros" :key="r.id" class="fila clic" @click="abrirRegistro(r)">
+          <div class="fila-info">
+            <span class="fila-titulo" style="font-size: 0.92rem">{{ fechaCorta(r.fecha) }}{{ r.cierra ? ' · cerró la partida' : '' }}</span>
+            <span class="fila-sub">{{ subtitulo(r) }}</span>
+          </div>
+          <span class="monto">{{ fmt(r.neto ?? r.monto) }}</span>
+        </li>
+      </ul>
+      <p v-else class="nota chica" style="padding: 6px 0">Todavía no hay nada registrado.</p>
+    </div>
+
+    <div class="acciones" style="flex-wrap: wrap">
+      <button v-if="it.tipoItem === 'partida'" type="button" class="btn" @click="solo">Cambiar solo este mes</button>
+      <button v-if="it.estado === 'parcial' && it.tipoItem === 'partida'" type="button" class="btn" @click="cerrarPartida">Cerrar la partida</button>
+      <button type="button" class="btn" @click="editarPlantilla">{{ textoEditar }}</button>
+      <span class="espacio"></span>
+      <button v-if="puedeRegistrar" type="button" class="btn primario" style="margin-left: auto" @click="registrar">{{ it.tipoItem === 'ingreso' ? 'Registrar lo recibido' : 'Registrar un pago' }}</button>
+    </div>
+  </div>
+  <p v-else class="vacio">Esta partida ya no aplica en {{ nombrePeriodo(periodo) }}.</p>`,
+  setup(props, { emit }) {
+    const it = computed(() => itemsDelMes(props.periodo).find((x) => x.clave === props.clave));
+    const estado = computed(() => (it.value?.tipoItem === 'ingreso'
+      ? (it.value.hecho ? { texto: 'Recibido', clase: 'ok' } : { texto: 'Pendiente', clase: '' })
+      : ESTADOS[it.value?.estado] || ESTADOS.pendiente));
+    const pct = computed(() => (it.value?.esperado ? Math.min(100, (it.value.real / it.value.esperado) * 100) : it.value?.real ? 100 : 0));
+    const resumen = computed(() => {
+      const x = it.value;
+      if (x.tipoItem === 'ingreso') return x.hecho ? `Se esperaban ${fmt(x.esperado)}.` : `Se esperan ${fmt(x.esperado)} el ${fechaCorta(x.fecha)}.`;
+      if (x.estado === 'omitida') return 'Este mes no se paga.';
+      if (x.estado === 'parcial' || x.estado === 'pendiente') return `Quedan ${fmt(x.queda)}.`;
+      if (x.estado === 'excedido') return `${fmt(x.real - x.esperado)} más de lo previsto.`;
+      return x.sobrante > 0 ? `Cerrada con ${fmt(x.sobrante)} de sobra${x.acumula ? ', que pasan al mes siguiente' : ''}.` : 'Pagada completa.';
+    });
+    const registros = computed(() => (it.value?.tipoItem === 'ingreso' ? it.value.recibos : it.value?.pagos || []));
+    const subtitulo = (r) => {
+      const partes = [];
+      if (r.personaId) partes.push(`${r.tipo === 'ingreso' || r.neto !== undefined ? 'recibió' : 'pagó'} ${nombrePersona(r.personaId)}`);
+      if (r.creadoPor && r.creadoPor !== r.personaId) partes.push(`anotó ${nombrePersona(r.creadoPor)}`);
+      partes.push(nombreCuenta(r.cuentaId));
+      return partes.join(' · ');
+    };
+    const puedeRegistrar = computed(() => it.value && (it.value.tipoItem === 'ingreso' ? true : it.value.estado !== 'omitida'));
+    const textoEditar = computed(() => ({ partida: 'Editar partida', prestamo: 'Editar préstamo', ingreso: 'Editar ingreso' })[it.value?.tipoItem]);
+
+    function abrirRegistro(r) {
+      if (r.neto !== undefined) abrirModal('Pago recibido', ReciboForm, { inicial: r });
+      else abrirModal('Editar movimiento', MovimientoForm, { inicial: r });
+    }
+    function registrar() {
+      const x = it.value;
+      if (x.tipoItem === 'ingreso') return registrarRecibo(x);
+      abrirModal(`Registrar: ${x.nombre}`, MovimientoForm, { inicial: movimientoParaItem(x, props.periodo, { hoy: store.hoy, monto: x.forma === 'abonos' ? null : undefined }), sugerirMontos: x.forma === 'abonos' });
+    }
+    function cerrarPartida() {
+      const ultimo = it.value.pagos[it.value.pagos.length - 1];
+      if (!ultimo) return;
+      guardar('movimientos', { ...ultimo, cierra: true });
+      aviso(textoDePartida(it.value.partida.id, it.value.parte, props.periodo) || 'Partida cerrada.', 'ok', 5000, {
+        texto: 'Deshacer', fn: () => guardar('movimientos', { ...buscar('movimientos', ultimo.id), cierra: false }),
+      });
+      emit('listo');
+    }
+    const solo = () => abrirModal(`${it.value.partida.nombre}: solo ${nombrePeriodo(props.periodo)}`, AjusteMesForm, { partidaId: it.value.partida.id, periodo: props.periodo });
+    function editarPlantilla() {
+      const x = it.value;
+      if (x.tipoItem === 'partida') editarPartida(x.partida);
+      else if (x.tipoItem === 'prestamo') editarPrestamo(x.prestamo);
+      else editarIngreso(x.ingreso);
+    }
+    return {
+      it, estado, pct, resumen, registros, subtitulo, puedeRegistrar, textoEditar, abrirRegistro, registrar, cerrarPartida, solo, editarPlantilla,
+      fmt, fechaCorta, nombrePeriodo,
+    };
+  },
+};
+
+// Todo lo que se puede registrar en un mes: partidas, cuotas e ingresos (del hogar).
+export function itemsDelMes(periodo) {
+  const r = resumenMes(indice(), periodo);
+  return [...r.ingresos, ...r.cuotas, ...r.partidas];
+}
 
 // ---------------------------------------------------------------- Atajos para abrirlos
 
 export const nuevoMovimiento = (base = {}) =>
   abrirModal(base.tipo === 'ajuste' ? 'Ajustar saldo' : base.tipo === 'abono' ? 'Abono a capital' : 'Nuevo movimiento', MovimientoForm, { inicial: base });
 export const editarMovimiento = (m) => abrirModal('Editar movimiento', MovimientoForm, { inicial: m });
-export const registrarCompromiso = (item, periodo) =>
-  abrirModal(`Registrar: ${item.nombre}`, MovimientoForm, { inicial: movimientoParaCompromiso(item, periodo) });
+export const editarRecibo = (r) => abrirModal('Pago recibido', ReciboForm, { inicial: r });
+export const registrarRecibo = (it) => abrirModal(`Registrar: ${it.nombre}`, ReciboForm, { inicial: reciboParaItem(it, { hoy: store.hoy }) });
+export const abrirDetalle = (it, periodo) => abrirModal(`${it.nombre} · ${nombrePeriodo(periodo)}`, DetalleItem, { clave: it.clave, periodo });
 
-// Abre el pago ya registrado para editarlo, o el formulario para registrarlo.
-export const abrirCompromiso = (item, periodo) =>
-  (item.hecho ? editarMovimiento(item.movimientos[0]) : registrarCompromiso(item, periodo));
-
-// Toque en el círculo de un compromiso: lo fijo se registra al instante con el monto de
-// siempre (con opción de deshacer); lo variable abre el formulario para escribir el monto real.
-export function marcarCompromiso(item, periodo) {
-  if (item.hecho) return editarMovimiento(item.movimientos[0]);
-  if (item.clase === 'fijo_variable' || (item.clase === 'provision' && item.parte === 'pagar')) {
-    return registrarCompromiso(item, periodo);
+// Toque en el círculo: lo fijo se registra al instante con el monto de siempre (con opción
+// de deshacer); lo variable abre el formulario con el monto sugerido y "Cierra la partida"
+// marcada; lo que se paga en abonos abre el formulario vacío con montos rápidos.
+export function marcarItem(it, periodo) {
+  if (it.tipoItem === 'ingreso') return it.hecho ? abrirDetalle(it, periodo) : registrarRecibo(it);
+  if (it.hecho) return abrirDetalle(it, periodo);
+  const variable = it.forma === 'variable' || it.parte === 'pagar';
+  if (it.forma === 'abonos' || variable || it.estado === 'parcial') {
+    const inicial = movimientoParaItem(it, periodo, { hoy: store.hoy, monto: it.forma === 'abonos' ? null : it.queda, cierra: variable && it.tipoItem === 'partida' });
+    return abrirModal(`Registrar: ${it.nombre}`, MovimientoForm, { inicial, sugerirMontos: it.forma === 'abonos' });
   }
-  const m = guardar('movimientos', movimientoParaCompromiso(item, periodo));
-  aviso(`Registrado: ${item.nombre}, ${fmt(item.esperado)}`, 'ok', 6000, { texto: 'Deshacer', fn: () => borrar('movimientos', m.id) });
+  const m = guardar('movimientos', movimientoParaItem(it, periodo, { hoy: store.hoy }));
+  aviso(`Registrado: ${it.nombre}, ${fmt(m.monto)}`, 'ok', 6000, { texto: 'Deshacer', fn: () => borrar('movimientos', m.id) });
 }
-export const editarPlantilla = (t = {}) => abrirModal(t.id ? 'Editar compromiso' : 'Nuevo compromiso', PlantillaForm, { inicial: t });
+
+// Toque en el nombre: el detalle del mes (pagos, "solo este mes", editar). Un ingreso sin
+// nada recibido abre directo el formulario para registrarlo.
+export function abrirItem(it, periodo) {
+  if (it.tipoItem === 'ingreso' && !it.recibos.length) return registrarRecibo(it);
+  return abrirDetalle(it, periodo);
+}
+
+export const editarPartida = (p = {}) => abrirModal(p.id ? 'Editar partida' : 'Nueva partida', PartidaForm, { inicial: p });
+export const editarIngreso = (i = {}) => abrirModal(i.id ? 'Editar ingreso' : 'Nuevo ingreso', IngresoForm, { inicial: i });
 export const editarPrestamo = (p = {}) => abrirModal(p.id ? 'Editar préstamo' : 'Nuevo préstamo', PrestamoForm, { inicial: p });
 export const editarCuenta = (c = {}) => abrirModal(c.id ? 'Editar cuenta' : 'Nueva cuenta', CuentaForm, { inicial: c });
 export const editarPersona = (p = {}) => abrirModal(p.id ? 'Editar persona' : 'Nueva persona', PersonaForm, { inicial: p });
+export const editarGrupo = (g = {}) => abrirModal(g.id ? 'Editar grupo' : 'Nuevo grupo', GrupoForm, { inicial: g });
 export const editarCategoria = (c = {}) => abrirModal(c.id ? 'Editar categoría' : 'Nueva categoría', CategoriaForm, { inicial: c });
+export const cambiarSoloEsteMes = (partida, periodo) => abrirModal(`${partida.nombre}: solo ${nombrePeriodo(periodo)}`, AjusteMesForm, { partidaId: partida.id, periodo });

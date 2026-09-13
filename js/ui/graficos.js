@@ -1,14 +1,6 @@
 // Gráficos en SVG y CSS. Los colores son variables CSS, así cambian solos con el tema.
-// El color sigue a la entidad: Préstamos siempre --s1, Fijos --s2, y así.
+// El color sigue a la entidad: cada uno de los cinco primeros grupos tiene el suyo (--s1 a --s5).
 const { ref, computed } = Vue;
-
-export const CLASES_GRAFICO = [
-  { clave: 'prestamo', nombre: 'Préstamos', color: 'var(--s1)' },
-  { clave: 'fijo', nombre: 'Fijos', color: 'var(--s2)' },
-  { clave: 'fijo_variable', nombre: 'Fijos variables', color: 'var(--s3)' },
-  { clave: 'provision', nombre: 'Pagos anuales', color: 'var(--s4)' },
-  { clave: 'adicional', nombre: 'Adicionales', color: 'var(--s5)' },
-];
 
 // Barra horizontal dividida en segmentos proporcionales: [{ valor, color, titulo }].
 export const BarraSegmentos = {
@@ -33,11 +25,12 @@ export const ColumnasApiladas = {
     meses: { type: Array, required: true },
     series: { type: Array, required: true }, // [{ nombre, color }] en el mismo orden que `valores`
     formatear: { type: Function, required: true },
+    etiqueta: { type: String, default: 'Gasto por mes' },
   },
   template: `
   <div>
     <svg class="grafico" viewBox="0 0 336 150" preserveAspectRatio="none" style="height: 150px"
-         role="img" :aria-label="etiqueta" @mouseleave="elegido = null">
+         role="img" :aria-label="descripcion" @mouseleave="elegido = null">
       <line v-for="y in [12, 51, 90, 129]" :key="y" x1="0" x2="336" :y1="y" :y2="y" stroke="var(--linea)" stroke-width="1" vector-effect="non-scaling-stroke"/>
       <g v-for="c in columnas" :key="c.periodo" class="clic" @click="elegir(c.i)" @mouseenter="elegido = c.i">
         <rect :x="c.xSlot" y="0" :width="slot" height="150" fill="transparent"/>
@@ -74,9 +67,9 @@ export const ColumnasApiladas = {
       const partes = m.valores.map((v, j) => (v > 0 ? `${props.series[j].nombre} ${props.formatear(v)}` : null)).filter(Boolean);
       return `${m.largo}: ${partes.length ? partes.join(' · ') + ' · ' : ''}total ${props.formatear(m.total)}`;
     });
-    const etiqueta = computed(() => `Gasto por tipo en ${props.meses.length} meses`);
+    const descripcion = computed(() => `${props.etiqueta}, ${props.meses.length} meses`);
     const elegir = (i) => { elegido.value = elegido.value === i ? null : i; };
-    return { elegido, slot, ancho, columnas, info, etiqueta, elegir };
+    return { elegido, slot, ancho, columnas, info, descripcion, elegir };
   },
 };
 

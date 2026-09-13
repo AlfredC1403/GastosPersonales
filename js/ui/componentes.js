@@ -1,6 +1,7 @@
-import { store, cerrarModal, cerrarAviso } from '../store.js';
+import { store, cerrarModal, cerrarAviso, personas, buscar, personaFiltro, colorPersona } from '../store.js';
+import { definirPersona } from '../tema.js';
 
-const { ref, watch, nextTick } = Vue;
+const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue;
 
 const TRAZOS = {
   mas: 'M12 5v14M5 12h14',
@@ -26,6 +27,14 @@ const TRAZOS = {
   pastel: 'M12 3a9 9 0 1 0 9 9h-9z',
   banco: 'M3 7h18v12H3zM3 7l3-4h12l3 4M3 12h18',
   ajustes: 'M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4',
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  personas: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.3a3.5 3.5 0 0 1 0 6.4M18.5 14.2A6.5 6.5 0 0 1 21.5 20',
+  etiqueta: 'M3 12V4h8l10 10-8 8zM7.5 8h.01',
+  candado: 'M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11',
+  objetivo: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01',
+  paleta: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.8 17 3 12 3zM7.5 12h.01M9.5 7.5h.01M14.5 7.5h.01',
+  contraer: 'M11 17l-5-5 5-5M18 17l-5-5 5-5',
+  expandir: 'M13 17l5-5-5-5M6 17l5-5-5-5',
 };
 
 export const Icono = {
@@ -93,6 +102,68 @@ export const Avisos = {
       cerrarAviso(a.id);
     };
     return { store, ejecutar };
+  },
+};
+
+// Botón de la cabecera para ver todo el hogar o solo lo de una persona.
+export const SelectorPersona = {
+  components: { Icono },
+  template: `
+  <div class="selector-persona" ref="raiz">
+    <button type="button" class="btn-persona" :class="{ activo: !!actual }" :aria-expanded="abierto" aria-haspopup="true"
+            :aria-label="actual ? 'Viendo lo de ' + actual.nombre + '. Cambiar' : 'Viendo todo el hogar. Cambiar'" @click="abierto = !abierto">
+      <span v-if="actual" class="inicial">{{ actual.nombre.slice(0, 1).toUpperCase() }}</span>
+      <icono v-else n="casa" :t="17"/>
+    </button>
+    <div v-if="abierto" class="popover" role="menu">
+      <p class="popover-titulo">Ver</p>
+      <button type="button" role="menuitemradio" :aria-checked="!actual" @click="elegir(null)">
+        <icono n="casa" :t="16"/><span>Todo el hogar</span><icono v-if="!actual" n="check" :t="16" class="marca"/>
+      </button>
+      <button v-for="p in lista" :key="p.id" type="button" role="menuitemradio" :aria-checked="actual?.id === p.id" @click="elegir(p.id)">
+        <span class="inicial chica" :style="{ background: colorPersona(p.id) }">{{ p.nombre.slice(0, 1).toUpperCase() }}</span>
+        <span>Solo {{ p.nombre }}</span><icono v-if="actual?.id === p.id" n="check" :t="16" class="marca"/>
+      </button>
+    </div>
+  </div>`,
+  setup() {
+    const abierto = ref(false);
+    const raiz = ref(null);
+    const lista = computed(personas);
+    const actual = computed(() => buscar('personas', personaFiltro()));
+    const elegir = (id) => {
+      definirPersona(id);
+      abierto.value = false;
+    };
+    const fuera = (e) => {
+      if (abierto.value && raiz.value && !raiz.value.contains(e.target)) abierto.value = false;
+    };
+    const escape = (e) => {
+      if (e.key === 'Escape') abierto.value = false;
+    };
+    onMounted(() => {
+      document.addEventListener('pointerdown', fuera);
+      document.addEventListener('keydown', escape);
+    });
+    onBeforeUnmount(() => {
+      document.removeEventListener('pointerdown', fuera);
+      document.removeEventListener('keydown', escape);
+    });
+    return { abierto, raiz, lista, actual, elegir, colorPersona };
+  },
+};
+
+// Franja que avisa que hay un filtro de persona activo.
+export const FranjaPersona = {
+  props: { nota: { type: String, default: '' } },
+  template: `
+  <div v-if="actual" class="franja-persona" role="status">
+    <span>Viendo solo lo de {{ actual.nombre }}<template v-if="nota"> · {{ nota }}</template></span>
+    <button type="button" class="btn-link" @click="definirPersona(null)">Ver el hogar</button>
+  </div>`,
+  setup() {
+    const actual = computed(() => buscar('personas', personaFiltro()));
+    return { actual, definirPersona };
   },
 };
 

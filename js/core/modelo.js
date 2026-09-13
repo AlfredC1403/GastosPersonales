@@ -1,17 +1,13 @@
-// Estructura del documento de datos (un solo JSON) y fusión entre copias.
+// Estructura de los datos (esquema 2) y fusión entre copias.
+// En memoria todo es un solo documento. En OneDrive se guarda repartido en un archivo
+// principal (configuración y catálogos) y un archivo por año (ver anios.js).
 import { periodoActual } from './util.js';
+import { GRUPOS_BASE, CATEGORIAS_BASE } from './catalogos.js';
 
-export const ESQUEMA = 1;
-export const COLECCIONES = ['personas', 'cuentas', 'categorias', 'plantillas', 'prestamos', 'movimientos'];
-
-export const CLASES = {
-  ingreso: 'Ingresos',
-  prestamo: 'Préstamos',
-  fijo: 'Fijos',
-  fijo_variable: 'Fijos variables',
-  aporte: 'Aportes',
-  provision: 'Pagos anuales',
-};
+export const ESQUEMA = 2;
+export const COLECCIONES_PRINCIPAL = ['personas', 'grupos', 'categorias', 'cuentas', 'partidas', 'ingresos', 'prestamos', 'metas', 'comercios', 'resumenes'];
+export const COLECCIONES_ANIO = ['movimientos', 'recibos', 'ajustesPartida'];
+export const COLECCIONES = [...COLECCIONES_PRINCIPAL, ...COLECCIONES_ANIO];
 
 export const TIPOS_MOVIMIENTO = {
   gasto: 'Gasto',
@@ -23,20 +19,37 @@ export const TIPOS_MOVIMIENTO = {
 
 export const TIPOS_CUENTA = {
   gastos: 'Gastos',
+  banco: 'Banco',
+  efectivo: 'Efectivo',
   ahorro: 'Ahorro',
   emergencias: 'Emergencias',
   reservas: 'Reservas',
-  banco: 'Banco',
-  efectivo: 'Efectivo',
   otra: 'Otra',
 };
 
-const CATEGORIAS = [
-  ['vivienda', 'Vivienda'], ['servicios', 'Servicios'], ['comida', 'Comida'], ['restaurantes', 'Restaurantes'],
-  ['transporte', 'Transporte'], ['salud', 'Salud'], ['ninos', 'Niños'], ['comunicaciones', 'Comunicaciones'],
-  ['prestamos', 'Préstamos'], ['impuestos', 'Impuestos'], ['ropa', 'Ropa'], ['regalos', 'Regalos'],
-  ['educacion', 'Educación'], ['entretenimiento', 'Entretenimiento'], ['salario', 'Salario'], ['otros', 'Otros'],
-];
+export const MONEDAS = { L: 'Lempiras', USD: 'Dólares' };
+
+export const TIPOS_PARTIDA = {
+  gasto: 'Gasto',
+  aporte: 'Aporte a una cuenta',
+  anual: 'Pago anual',
+};
+
+// Qué hace el círculo de la partida en la pantalla Mes.
+export const FORMAS = {
+  fijo: 'Monto fijo',
+  variable: 'Monto variable',
+  abonos: 'En abonos',
+};
+
+export const FRECUENCIAS = { quincenal: 'Quincenal', mensual: 'Mensual' };
+
+export const TIPOS_RECIBO = {
+  ordinario: 'Pago',
+  decimo14: 'Décimo cuarto mes',
+  decimo13: 'Décimo tercer mes',
+  extra: 'Pago extra',
+};
 
 export const vivo = (r) => !!r && !r.borrado;
 
@@ -46,23 +59,39 @@ export function nuevoId() {
 
 // Los registros por defecto tienen id fijo y "actualizado" vacío: así, al fusionar con
 // un archivo existente, nunca pisan los datos reales ni se duplican.
-const base = (id, datos) => ({ id, ...datos, creado: '', creadoPor: null, actualizado: '', actualizadoPor: null });
+export const base = (id, datos) => ({ id, ...datos, creado: '', creadoPor: null, actualizado: '', actualizadoPor: null });
+
+export const gruposBase = () => GRUPOS_BASE.map(([id, nombre], i) => base(id, { nombre, orden: i + 1 }));
+export const categoriasBase = () => CATEGORIAS_BASE.map(([id, nombre, grupoId, tipo = 'gasto']) => base(id, { nombre, grupoId, tipo }));
+
+export const configBase = () => ({
+  moneda: 'L', monedaExt: 'USD', simboloExt: 'US$', inicio: periodoActual(), tasaReferencia: null,
+  asistente: { completados: [] }, actualizado: '',
+});
 
 export function docVacio() {
+  const cuenta = (id, nombre, tipo) => base(id, { nombre, tipo, saldoInicial: 0, moneda: 'L', titularId: null });
   return {
     esquema: ESQUEMA,
-    config: { moneda: 'L', inicio: periodoActual(), actualizado: '' },
+    config: configBase(),
     personas: [],
+    grupos: gruposBase(),
+    categorias: categoriasBase(),
     cuentas: [
-      base('gastos', { nombre: 'Gastos', tipo: 'gastos', saldoInicial: 0, meta: null }),
-      base('ahorro', { nombre: 'Ahorro', tipo: 'ahorro', saldoInicial: 0, meta: null }),
-      base('emergencias', { nombre: 'Emergencias', tipo: 'emergencias', saldoInicial: 0, meta: null }),
-      base('reservas', { nombre: 'Reservas (pagos anuales)', tipo: 'reservas', saldoInicial: 0, meta: null }),
+      cuenta('gastos', 'Gastos', 'gastos'),
+      cuenta('ahorro', 'Ahorro', 'ahorro'),
+      cuenta('emergencias', 'Emergencias', 'emergencias'),
+      cuenta('reservas', 'Reservas (pagos anuales)', 'reservas'),
     ],
-    categorias: CATEGORIAS.map(([id, nombre]) => base(id, { nombre })),
-    plantillas: [],
+    partidas: [],
+    ingresos: [],
     prestamos: [],
+    metas: [],
+    comercios: [],
+    resumenes: [],
     movimientos: [],
+    recibos: [],
+    ajustesPartida: [],
   };
 }
 
@@ -79,42 +108,38 @@ export function sellar(registro, personaId, ahora = new Date().toISOString()) {
   return r;
 }
 
-export function normalizar(doc) {
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !('esquema' in doc)) {
-    throw new Error('El archivo no tiene el formato de Gastos del hogar.');
-  }
-  if (doc.esquema > ESQUEMA) {
-    throw new Error('El archivo es de una versión más nueva de la app. Recarga la página.');
-  }
-  const vacio = docVacio();
-  const d = { ...vacio, ...doc, config: { ...vacio.config, ...(doc.config || {}) } };
-  for (const c of COLECCIONES) if (!Array.isArray(d[c])) d[c] = vacio[c] ?? [];
-  return d;
-}
-
 // ¿Gana a sobre b? Gana la edición más reciente; en empate, un criterio fijo para que
 // todas las copias lleguen al mismo resultado.
-function gana(a, b) {
+export function gana(a, b) {
   const ta = a?.actualizado || '';
   const tb = b?.actualizado || '';
   if (ta !== tb) return ta > tb;
   return JSON.stringify(a) > JSON.stringify(b);
 }
 
-// Fusiona dos copias del documento registro por registro (los borrados se conservan
-// como marcas para que no "revivan").
-export function fusionar(local, remoto) {
-  const out = { ...remoto, ...local, esquema: Math.max(local.esquema || 1, remoto.esquema || 1) };
-  out.config = gana(remoto.config, local.config) ? remoto.config : local.config;
-  for (const c of COLECCIONES) {
-    const m = new Map();
-    for (const r of remoto[c] || []) m.set(r.id, r);
-    for (const r of local[c] || []) {
-      const x = m.get(r.id);
-      if (!x || gana(r, x)) m.set(r.id, r);
-    }
-    out[c] = [...m.values()];
+// Une dos listas registro por registro (los borrados se conservan como marcas para que no "revivan").
+export function fusionarColeccion(local = [], remoto = []) {
+  const m = new Map();
+  for (const r of remoto) m.set(r.id, r);
+  for (const r of local) {
+    const x = m.get(r.id);
+    if (!x || gana(r, x)) m.set(r.id, r);
   }
+  return [...m.values()];
+}
+
+// Fusiona dos copias completas del documento.
+export function fusionar(local, remoto) {
+  const out = { ...remoto, ...local, esquema: Math.max(Number(local.esquema) || 1, Number(remoto.esquema) || 1) };
+  out.config = gana(remoto.config, local.config) ? remoto.config : local.config;
+  for (const c of COLECCIONES) out[c] = fusionarColeccion(local[c], remoto[c]);
+  return out;
+}
+
+// Fusiona solo algunas colecciones de `parte` (por ejemplo, un archivo de año) en `doc`.
+export function fusionarEn(doc, parte, colecciones) {
+  const out = { ...doc };
+  for (const c of colecciones) out[c] = fusionarColeccion(doc[c], parte[c]);
   return out;
 }
 

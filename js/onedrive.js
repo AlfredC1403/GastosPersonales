@@ -1,11 +1,13 @@
 // Inicio de sesión con Microsoft (OAuth 2.0 con PKCE, sin librerías) y acceso al archivo
 // de datos en OneDrive mediante Microsoft Graph.
 import { CONFIG } from './config.js';
+import { nombreArchivo, PRINCIPAL } from './core/anios.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const ALCANCES = 'openid profile offline_access User.Read Files.ReadWrite.All';
 const CLAVES = { auth: 'gastos.auth', pkce: 'gastos.pkce', clientId: 'gastos.clientId', intento: 'gastos.intentoSesion' };
-const RUTA_PROPIA = `/me/drive/root:/${CONFIG.carpeta}/${CONFIG.archivo}`;
+const ARCHIVO = nombreArchivo(PRINCIPAL);
+const RUTA_PROPIA = `/me/drive/root:/${CONFIG.carpeta}/${ARCHIVO}`;
 
 export const clientId = () => localStorage.getItem(CLAVES.clientId) || CONFIG.clientId || '';
 export const configurado = () => !!clientId();
@@ -49,8 +51,9 @@ export function cerrarSesion() {
 }
 
 // Redirige a Microsoft. Con `silenciosa`, no muestra pantalla si ya hay una sesión abierta.
-export async function iniciarSesion({ silenciosa = false } = {}) {
-  if (!configurado()) throw errorCon('Falta el ID de la aplicación de Azure (ver Ajustes).');
+// Con `pedirClave`, Microsoft pide la contraseña aunque haya una sesión abierta.
+export async function iniciarSesion({ silenciosa = false, pedirClave = false } = {}) {
+  if (!configurado()) throw errorCon('Falta el ID de la aplicación de Azure (ver Datos y OneDrive).');
   const verificador = aleatorio(48);
   const reto = base64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verificador)));
   const estado = aleatorio(16);
@@ -60,6 +63,7 @@ export async function iniciarSesion({ silenciosa = false } = {}) {
     scope: ALCANCES, code_challenge: reto, code_challenge_method: 'S256', state: estado,
   });
   if (silenciosa) q.set('prompt', 'none');
+  else if (pedirClave) q.set('prompt', 'login');
   location.assign(`${autoridad()}/authorize?${q}`);
   return new Promise(() => {}); // la página se va a Microsoft
 }
@@ -173,11 +177,14 @@ export async function perfil() {
   return { nombre: yo.displayName || '', email: yo.mail || yo.userPrincipalName || '' };
 }
 
-const ubicacionDe = (item, propio) => ({
+// `origen`: 'propio' (OneDrive de quien inicia sesión) o 'carpeta' (enlace compartido de la carpeta).
+const ubicacionDe = (item, origen) => ({
   driveId: item.parentReference?.driveId,
   itemId: item.id,
+  carpetaId: item.parentReference?.id || null,
   nombre: item.name,
-  propio,
+  origen,
+  propio: origen === 'propio',
   dueno: item.createdBy?.user?.displayName || '',
 });
 
@@ -185,10 +192,11 @@ export async function buscarPropio() {
   const res = await graph(RUTA_PROPIA);
   if (res.status === 404) return null;
   if (!res.ok) throw await errorGraph(res);
-  return ubicacionDe(await res.json(), true);
+  return ubicacionDe(await res.json(), 'propio');
 }
 
-export async function crearPropio(doc) {
+// Crea la carpeta en el OneDrive de quien inicia sesión y el archivo principal con `contenido`.
+export async function crearPropio(contenido) {
   const carpeta = await graph('/me/drive/root/children', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -198,24 +206,30 @@ export async function crearPropio(doc) {
   const item = await graphJSON(`${RUTA_PROPIA}:/content?%40microsoft.graph.conflictBehavior=fail`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(doc),
+    body: JSON.stringify(contenido),
   });
-  return { ubicacion: ubicacionDe(item, true), eTag: item.eTag };
+  return { ubicacion: ubicacionDe(item, 'propio'), itemId: item.id, eTag: item.eTag };
 }
 
-// Enlace que compartió la otra persona (de la carpeta GastosHogar o del archivo).
+// Código que pide Graph para abrir un enlace compartido (`/shares/{codigo}`).
+export const codificarEnlace = (url) =>
+  'u!' + btoa(unescape(encodeURIComponent(url))).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+
+// Enlace de la carpeta GastosHogar que compartió la otra persona. Tiene que ser de la
+// carpeta (no del archivo) para poder ver también los respaldos y los archivos por año.
 export async function resolverEnlace(enlace) {
   const url = enlace.trim();
   if (!/^https:\/\//i.test(url)) throw errorCon('Pega el enlace completo, empieza con https://');
-  const codigo = 'u!' + btoa(unescape(encodeURIComponent(url))).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
-  const item = await graphJSON(`/shares/${codigo}/driveItem?$expand=children`);
-  if (item.folder) {
-    const hijo = (item.children || []).find((c) => c.name.toLowerCase() === CONFIG.archivo);
-    if (!hijo) throw errorCon(`En esa carpeta no está ${CONFIG.archivo}.`);
-    const driveId = hijo.parentReference?.driveId || item.parentReference?.driveId;
-    return ubicacionDe({ ...hijo, parentReference: { ...hijo.parentReference, driveId } }, false);
+  const item = await graphJSON(`/shares/${codificarEnlace(url)}/driveItem`, { headers: { Prefer: 'redeemSharingLink' } });
+  if (!item.folder) {
+    throw errorCon(`Ese enlace es de un archivo. Pide el enlace de la carpeta ${CONFIG.carpeta} (compartida con permiso para editar).`);
   }
-  return ubicacionDe(item, false);
+  const driveId = item.parentReference?.driveId;
+  const res = await graph(`/drives/${driveId}/items/${item.id}:/${encodeURIComponent(ARCHIVO)}`);
+  if (res.status === 404) throw errorCon(`En esa carpeta no está ${ARCHIVO}.`);
+  if (!res.ok) throw await errorGraph(res);
+  const hijo = await res.json();
+  return ubicacionDe({ ...hijo, parentReference: { ...hijo.parentReference, driveId: hijo.parentReference?.driveId || driveId } }, 'carpeta');
 }
 
 export async function metadatos(ub) {
@@ -223,27 +237,97 @@ export async function metadatos(ub) {
   return {
     eTag: item.eTag,
     url: item['@microsoft.graph.downloadUrl'],
+    carpetaId: item.parentReference?.id || null,
     modificado: item.lastModifiedDateTime,
     modificadoPor: item.lastModifiedBy?.user?.displayName || '',
   };
 }
 
-export async function descargar(ub, meta) {
-  const res = meta?.url
-    ? await fetch(meta.url, { cache: 'no-store' })
-    : await graph(`/drives/${ub.driveId}/items/${ub.itemId}/content`, { cache: 'no-store' });
-  if (!res.ok) throw errorCon(`No pude descargar el archivo de OneDrive (${res.status}).`);
+// ---------------------------------------------------------------- Archivos de la carpeta
+
+// Archivos de la carpeta de datos (sin subcarpetas). Si no hay acceso a la carpeta, la
+// conexión se hizo con el enlace de un archivo suelto.
+export async function listarCarpeta(ub) {
+  const archivos = [];
+  let ruta = `/drives/${ub.driveId}/items/${ub.carpetaId}/children?$top=200`;
+  while (ruta) {
+    const res = await graph(ruta);
+    if (res.status === 403 || res.status === 404) {
+      throw errorCon(`No tengo acceso a la carpeta ${CONFIG.carpeta}. Pide que te compartan la carpeta (no el archivo) con permiso para editar y vuelve a conectar en Datos y OneDrive.`, { status: res.status, codigo: 'sin_carpeta' });
+    }
+    if (!res.ok) throw await errorGraph(res);
+    const pagina = await res.json();
+    for (const it of pagina.value || []) {
+      if (!it.file) continue;
+      archivos.push({
+        nombre: it.name, itemId: it.id, eTag: it.eTag, url: it['@microsoft.graph.downloadUrl'], tamano: it.size,
+        modificado: it.lastModifiedDateTime, modificadoPor: it.lastModifiedBy?.user?.displayName || '',
+      });
+    }
+    ruta = pagina['@odata.nextLink'] || null;
+  }
+  return archivos;
+}
+
+// Siempre con el enlace de descarga: pedir `/content` desde el navegador falla por CORS.
+export async function descargarArchivo(ub, archivo) {
+  let url = archivo.url;
+  if (!url) url = (await graphJSON(`/drives/${ub.driveId}/items/${archivo.itemId}`))['@microsoft.graph.downloadUrl'];
+  if (!url) throw errorCon('OneDrive no dio el enlace de descarga. Intenta sincronizar de nuevo.');
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw errorCon(`No pude descargar ${archivo.nombre} de OneDrive (${res.status}).`);
   return res.json();
 }
 
-// Sube el documento solo si nadie lo cambió desde `eTag` (si no, lanza status 412).
-export async function subir(ub, doc, eTag) {
-  const res = await graph(`/drives/${ub.driveId}/items/${ub.itemId}/content`, {
+async function escribir(ruta, contenido, encabezados = {}) {
+  const res = await graph(ruta, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...(eTag ? { 'If-Match': eTag } : {}) },
-    body: JSON.stringify(doc),
+    headers: { 'Content-Type': 'application/json', ...encabezados },
+    body: JSON.stringify(contenido),
   });
   if (!res.ok) throw await errorGraph(res);
   const item = await res.json();
-  return { eTag: item.eTag };
+  return { itemId: item.id, eTag: item.eTag };
+}
+
+// Sube un archivo solo si nadie lo cambió desde `eTag` (si no, lanza status 412).
+export const subirArchivo = (ub, archivo, contenido, eTag) =>
+  escribir(`/drives/${ub.driveId}/items/${archivo.itemId}/content`, contenido, eTag ? { 'If-Match': eTag } : {});
+
+// Crea un archivo nuevo en la carpeta; si ya existe, lanza status 409.
+export const crearArchivo = (ub, nombre, contenido) =>
+  escribir(`/drives/${ub.driveId}/items/${ub.carpetaId}:/${encodeURIComponent(nombre)}:/content?%40microsoft.graph.conflictBehavior=fail`, contenido);
+
+// ---------------------------------------------------------------- Respaldos
+
+const CARPETA_RESPALDOS = 'respaldos';
+const MAX_RESPALDOS = 10;
+
+export async function listarRespaldos(ub) {
+  const res = await graph(`/drives/${ub.driveId}/items/${ub.carpetaId}:/${CARPETA_RESPALDOS}:/children?$top=200`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw await errorGraph(res);
+  const pagina = await res.json();
+  return (pagina.value || [])
+    .filter((it) => it.file)
+    .map((it) => ({ nombre: it.name, itemId: it.id, tamano: it.size, modificado: it.lastModifiedDateTime }))
+    .sort((a, b) => (b.modificado || '').localeCompare(a.modificado || ''));
+}
+
+// Guarda una copia en GastosHogar/respaldos y deja solo las más recientes.
+export async function respaldar(ub, nombre, contenido) {
+  const carpeta = await graph(`/drives/${ub.driveId}/items/${ub.carpetaId}/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: CARPETA_RESPALDOS, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }),
+  });
+  if (!carpeta.ok && carpeta.status !== 409) throw await errorGraph(carpeta);
+  await escribir(`/drives/${ub.driveId}/items/${ub.carpetaId}:/${CARPETA_RESPALDOS}/${encodeURIComponent(nombre)}:/content`, contenido);
+  try {
+    for (const viejo of (await listarRespaldos(ub)).slice(MAX_RESPALDOS)) {
+      await graph(`/drives/${ub.driveId}/items/${viejo.itemId}`, { method: 'DELETE' });
+    }
+  } catch {
+    /* si no se pueden quitar los viejos, el respaldo nuevo igual quedó guardado */
+  }
 }
