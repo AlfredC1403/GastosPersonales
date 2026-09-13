@@ -33,6 +33,7 @@ export const GRUPOS_MENU = [
   { nombre: 'Reportes', items: [
     { id: 'resumen', nombre: 'Resumen anual', icono: 'barras' },
     { id: 'comparar', nombre: 'Comparar años', icono: 'comparar' },
+    { id: 'anios', nombre: 'Años anteriores', icono: 'archivo' },
   ] },
   { nombre: 'Configuración', items: [
     { id: 'configurar', nombre: 'Revisar configuración', icono: 'check' },

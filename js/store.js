@@ -1,10 +1,12 @@
 // Estado de la app: el documento de datos, quién está usando el dispositivo y la
 // sincronización con OneDrive. Todo cambio se guarda al instante en el navegador y se
 // sube a OneDrive unos segundos después, al archivo que le toca (principal o del año).
-import { ESQUEMA, docVacio, sellar, fusionar, esPristino, vivo } from './core/modelo.js';
+import { ESQUEMA, COLECCIONES_ANIO, docVacio, sellar, fusionar, esPristino, vivo } from './core/modelo.js';
 import { normalizar } from './core/migraciones.js';
 import { crearIndice } from './core/asientos.js';
-import { PRINCIPAL, archivoDe, aniosDelDoc, contenidoArchivo } from './core/anios.js';
+import { resumenDelAnio } from './core/reportes.js';
+import { PRINCIPAL, archivoDe, aniosDelDoc, contenidoArchivo, claveDeNombre } from './core/anios.js';
+import { aniosCargados, aperturaActiva, quitarAnios, cierresPendientes } from './core/cierres.js';
 import { periodoActual, hoy, dinero, dineroCorto } from './core/util.js';
 import { sincronizarCarpeta, marcarPendiente } from './sincronizacion.js';
 import { calcularAvisos, avisosVisibles } from './core/avisos.js';
@@ -47,9 +49,12 @@ export const store = reactive({
   periodo: periodoActual(),
   anio: periodoActual().slice(0, 4), // año que se ve en el resumen anual
   usuario: null, // cuenta de Microsoft conectada: { nombre, email }
-  // archivos: { [clave]: { itemId, eTag, esquema } }; pendientes: claves con cambios por subir
-  sync: { estado: 'local', mensaje: '', codigo: '', ultima: null, ubicacion: null, archivos: {}, pendientes: [] },
+  // archivos: { [clave]: { itemId, eTag, esquema } }; pendientes: claves con cambios por subir;
+  // cargados: años cuyo archivo está en el documento (con OneDrive se cargan el año actual y el anterior)
+  sync: { estado: 'local', mensaje: '', codigo: '', ultima: null, ubicacion: null, archivos: {}, pendientes: [], cargados: undefined },
   carpeta: [], // archivos de la carpeta de OneDrive en la última sincronización
+  // Años anteriores abiertos en esta sesión (se cargan de OneDrive) y los que se pueden editar.
+  anios: { abiertos: [], editar: [], cargando: '' },
   modal: null,
   avisos: [],
   // Recordatorios en Outlook de este dispositivo: la última pasada y su resultado (ver js/recordatorios.js).
@@ -67,10 +72,12 @@ export function guardarEstadoRecordatorios() {
 
 const docCrudo = () => toRaw(store.doc);
 
-// Índice con asientos, estados y totales. Se rehace solo cuando cambian los datos o el día.
+// Índice con asientos, estados y totales. Se rehace solo cuando cambian los datos o el día. Si los
+// años anteriores no están cargados, el más viejo empieza con su apertura.
 const indiceActual = computed(() => {
   void store.rev;
-  return markRaw(crearIndice(docCrudo(), { hoy: store.hoy }));
+  const doc = docCrudo();
+  return markRaw(crearIndice(doc, { hoy: store.hoy, apertura: aperturaActiva(doc) }));
 });
 export const indice = () => indiceActual.value;
 
@@ -168,8 +175,8 @@ function persistirLocal() {
 }
 
 function persistirSync() {
-  const { ubicacion, archivos, pendientes, ultima } = toRaw(store.sync);
-  almacen.guardarSync({ ubicacion, archivos, pendientes, ultima }).catch(errorGuardado);
+  const { ubicacion, archivos, pendientes, ultima, cargados } = toRaw(store.sync);
+  almacen.guardarSync({ ubicacion, archivos, pendientes, ultima, cargados }).catch(errorGuardado);
 }
 
 async function cargarLocal() {
@@ -197,6 +204,7 @@ async function cargarLocal() {
       ubicacion: sync.ubicacion,
       archivos: anterior ? {} : sync.archivos || {},
       pendientes: anterior ? (sync.pendiente ? [PRINCIPAL, ...aniosDelDoc(docCrudo())] : []) : sync.pendientes || [],
+      cargados: anterior ? undefined : sync.cargados,
       ultima: sync.ultima || null,
       estado: 'pendiente',
     });
@@ -220,15 +228,33 @@ function cambio(claves) {
   }
 }
 
+// Con OneDrive, lo de un año anterior al pasado solo se cambia con ese año abierto en Años
+// anteriores y en modo edición: así no se sube un archivo de año que no está cargado y nadie
+// cambia un año viejo sin querer.
+function revisarAnios(coleccion, anios) {
+  if (!COLECCIONES_ANIO.includes(coleccion) || !store.sync.ubicacion) return;
+  const anterior = Number(store.hoy.slice(0, 4)) - 1;
+  for (const a of new Set(anios)) {
+    if (Number(a) >= anterior || store.anios.editar.includes(a)) continue;
+    const texto = aniosCargados(docCrudo()).includes(a)
+      ? `${a} está abierto solo para ver. Toca «Editar este año» para cambiarlo.`
+      : `Para registrar algo de ${a}, abre ese año en Años anteriores y toca «Editar este año».`;
+    aviso(texto, 'error', 7000);
+    throw Object.assign(new Error(texto), { codigo: 'anio_cerrado' });
+  }
+}
+
 export function guardar(coleccion, registro) {
   const limpio = sellar(JSON.parse(JSON.stringify(registro)), store.yo);
   const lista = store.doc[coleccion];
   const i = lista.findIndex((r) => r.id === limpio.id);
   const antes = i >= 0 ? toRaw(lista[i]) : null;
+  // Si cambia de año, se suben los dos archivos: el nuevo con el registro y el viejo sin él.
+  const claves = [antes && archivoDe(docCrudo(), coleccion, antes), archivoDe(docCrudo(), coleccion, limpio)].filter(Boolean);
+  revisarAnios(coleccion, claves);
   if (i >= 0) lista.splice(i, 1, limpio);
   else lista.push(limpio);
-  // Si cambió de año, se suben los dos archivos: el nuevo con el registro y el viejo sin él.
-  cambio([antes && archivoDe(docCrudo(), coleccion, antes), archivoDe(docCrudo(), coleccion, limpio)]);
+  cambio(claves);
   return limpio;
 }
 
@@ -372,6 +398,70 @@ function operaciones(ub) {
 
 const selloRespaldo = (d = new Date()) => `${hoy(d)}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 
+// ---------------------------------------------------------------- Años cargados
+
+const esAnio = (x) => /^\d{4}$/.test(String(x || ''));
+export const anioActual = () => store.hoy.slice(0, 4);
+
+// Año más viejo que se carga de OneDrive: el anterior al actual, o uno más viejo si se abrió en
+// Años anteriores o tiene cambios por subir.
+const desdeDeseado = () => [String(Number(anioActual()) - 1), ...store.anios.abiertos, ...store.sync.pendientes.filter(esAnio)].sort()[0];
+
+// Años que hay en la carpeta de OneDrive (según la última sincronización) o en este dispositivo.
+export const aniosDeLaCarpeta = () => [...new Set(store.carpeta.map((a) => claveDeNombre(a.nombre)).filter(esAnio))].sort();
+export const anioCargado = (anio) => aniosCargados(docCrudo()).includes(String(anio)) || !store.sync.ubicacion;
+export const resumenGuardado = (anio) => {
+  const r = buscar('resumenes', String(anio));
+  return vivo(r) ? toRaw(r) : null;
+};
+
+// Vuelve a calcular las aperturas de los años cargados (después del primero) y los resúmenes de
+// los años pasados; lo que cambió se guarda y se sube con su archivo. Sin OneDrive no hace falta:
+// todos los años están en el dispositivo.
+function actualizarCierres({ forzarResumen = '' } = {}) {
+  if (!store.sync.ubicacion || escrituraBloqueada) return;
+  const doc = docCrudo();
+  const { aperturas, resumenes } = cierresPendientes(doc, indice(), { actual: anioActual() });
+  // "Generar resumen": se guarda de nuevo aunque no haya cambiado.
+  if (forzarResumen && !resumenes[forzarResumen] && anioCargado(forzarResumen) && forzarResumen < anioActual()) {
+    resumenes[forzarResumen] = resumenDelAnio(indice(), forzarResumen, (doc.personas || []).filter(vivo).map((p) => p.id));
+  }
+  const ahora = new Date().toISOString();
+  const anios = Object.keys(aperturas);
+  if (anios.length) {
+    store.doc.aperturas = { ...(doc.aperturas || {}), ...Object.fromEntries(anios.map((a) => [a, { ...aperturas[a], actualizado: ahora }])) };
+    for (const a of anios) {
+      contadores.set(a, (contadores.get(a) || 0) + 1);
+      marcarPendiente(store.sync, a);
+    }
+  }
+  for (const [anio, resumen] of Object.entries(resumenes)) {
+    const limpio = sellar({ ...(resumenGuardado(anio) || {}), ...resumen, id: anio, borrado: false }, store.yo);
+    const lista = store.doc.resumenes;
+    const i = lista.findIndex((r) => r.id === anio);
+    if (i >= 0) lista.splice(i, 1, limpio);
+    else lista.push(limpio);
+    contadores.set(PRINCIPAL, (contadores.get(PRINCIPAL) || 0) + 1);
+    marcarPendiente(store.sync, PRINCIPAL);
+  }
+  if (anios.length || Object.keys(resumenes).length) {
+    persistirLocal();
+    persistirSync();
+  }
+}
+
+// Quita de este dispositivo los años más viejos que `desde` que ya no hacen falta (están en
+// OneDrive, sin cambios por subir y sin abrir).
+function descargarAniosViejos(desde) {
+  if (!desde || store.sync.pendientes.length) return;
+  const sobran = aniosCargados(docCrudo()).filter((a) => a < desde && !store.anios.abiertos.includes(a));
+  if (!sobran.length) return;
+  libro.adoptar(quitarAnios(docCrudo(), sobran));
+  store.sync.cargados = (store.sync.cargados || []).filter((a) => !sobran.includes(a));
+  for (const a of sobran) delete store.sync.archivos[a];
+  store.anios.editar = store.anios.editar.filter((a) => !sobran.includes(a));
+}
+
 export function sincronizar() {
   if (!store.sync.ubicacion || escrituraBloqueada) return Promise.resolve();
   if (enCurso) return enCurso;
@@ -383,7 +473,10 @@ export function sincronizar() {
     store.sync.estado = 'sincronizando';
     try {
       const ub = await conCarpeta();
-      await sincronizarCarpeta({ libro, estado: store.sync, ops: operaciones(ub), sello: selloRespaldo() });
+      actualizarCierres();
+      const r = await sincronizarCarpeta({ libro, estado: store.sync, ops: operaciones(ub), sello: selloRespaldo(), desde: desdeDeseado() });
+      actualizarCierres();
+      descargarAniosViejos(r.desde);
       store.sync.estado = store.sync.pendientes.length ? 'pendiente' : 'ok';
       store.sync.mensaje = '';
       store.sync.codigo = '';
@@ -405,10 +498,54 @@ export function sincronizar() {
   return enCurso;
 }
 
+// Abre un año anterior: lo baja de OneDrive (con los años que falten hasta el actual) para verlo.
+// Se abre uno a la vez; los de en medio se cargan, pero solo el abierto se puede editar.
+export async function abrirAnio(anio) {
+  const a = String(anio);
+  // Sin OneDrive todos los años están en el dispositivo y se editan como siempre.
+  if (Number(a) >= Number(anioActual()) - 1 || !store.sync.ubicacion) return;
+  if (store.anios.abiertos[0] !== a) {
+    store.anios.abiertos = [a];
+    store.anios.editar = store.anios.editar.filter((x) => x === a);
+  }
+  if (anioCargado(a)) return;
+  store.anios.cargando = a;
+  try {
+    await sincronizar();
+    if (!anioCargado(a)) await sincronizar(); // había una pasada en curso con los años de antes
+  } finally {
+    store.anios.cargando = '';
+  }
+  if (!anioCargado(a) && aniosDeLaCarpeta().includes(a)) {
+    throw new Error(store.sync.estado === 'offline' ? `Sin conexión: no se pudo bajar ${a}.` : store.sync.mensaje || `No se pudo bajar ${a}.`);
+  }
+}
+
+// Permite cambiar lo de un año anterior abierto. Al guardar, se recalculan las aperturas siguientes.
+export function editarAnio(anio) {
+  if (!store.anios.editar.includes(String(anio))) store.anios.editar = [...store.anios.editar, String(anio)];
+}
+
+// Cierra los años abiertos: dejan de estar en este dispositivo cuando no tengan cambios por subir.
+export function cerrarAniosAbiertos() {
+  store.anios.abiertos = [];
+  store.anios.editar = [];
+  if (store.sync.ubicacion) sincronizar();
+}
+
+// Vuelve a generar el resumen guardado de un año pasado (baja el año si no está cargado).
+export async function generarResumen(anio) {
+  const a = String(anio);
+  await abrirAnio(a);
+  if (!anioCargado(a)) throw new Error(`No se pudo bajar ${a}.`);
+  actualizarCierres({ forzarResumen: a });
+  if (store.sync.ubicacion) programarSync(500);
+}
+
 async function vincular(ubicacion, archivos = {}) {
   const habiaDatos = !esPristino(docCrudo());
   Object.assign(store.sync, {
-    ubicacion, archivos, pendientes: habiaDatos ? [PRINCIPAL, ...aniosDelDoc(docCrudo())] : [], estado: 'pendiente', mensaje: '', codigo: '',
+    ubicacion, archivos, pendientes: habiaDatos ? [PRINCIPAL, ...aniosDelDoc(docCrudo())] : [], cargados: undefined, estado: 'pendiente', mensaje: '', codigo: '',
   });
   persistirSync();
   await sincronizar();
@@ -435,7 +572,7 @@ export async function usarEnlace(enlace) {
 }
 
 export function desconectar() {
-  Object.assign(store.sync, { ubicacion: null, archivos: {}, pendientes: [], estado: 'local', mensaje: '', codigo: '' });
+  Object.assign(store.sync, { ubicacion: null, archivos: {}, pendientes: [], cargados: undefined, estado: 'local', mensaje: '', codigo: '' });
   store.carpeta = [];
   persistirSync();
   od.cerrarSesion();

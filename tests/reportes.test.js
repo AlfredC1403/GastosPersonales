@@ -51,9 +51,27 @@ test('resumen del mes: plan, pagado, pendiente, fuera del plan y libre', () => {
   cerca(r.ingresoEsperado, 38000);
   cerca(r.ingresoReal, 18800);
   cerca(r.ahorro, 3000);
-  cerca(r.libre, 38000 - r.comprometido - r.fueraDelPlan);
+  // Libre: el pago del 15 cuenta con lo que llegó (18,800, ya sin deducciones) y el del 31, con el neto del salario.
+  cerca(r.ingresoDelMes, 18800 + 19000);
+  cerca(r.libre, 18800 + 19000 - r.comprometido - r.fueraDelPlan);
   cerca(r.gastoReal, 700 + 450 + 300 + 5100 + 2000 + 8400);
   assert.deepEqual(r.pendientes.map((it) => it.nombre), ['Casa', 'internet', 'super']);
+});
+
+test('libre: con los pagos de salario que faltan y los que ya llegaron, más otros ingresos del mes', () => {
+  const ix = hogar();
+  const doc = { ...ix.doc, movimientos: [...ix.doc.movimientos, { id: 'venta', tipo: 'ingreso', periodo: '2026-10', fecha: '2026-10-18', monto: 1000, cuentaId: 'gastos', categoriaId: 'otros-ingresos', personaId: 'ruth' }] };
+  const r = resumenMes(crearIndice(doc, { hoy: '2026-10-20' }), '2026-10');
+  cerca(r.ingresoRecibido, 18800);
+  cerca(r.ingresoPorRecibir, 19000);
+  cerca(r.otrosIngresos, 1000);
+  cerca(r.ingresoDelMes, 38800);
+  cerca(r.libre, 38800 - r.comprometido - r.fueraDelPlan);
+
+  // Sin pagos registrados, todo sale del neto del salario.
+  const sinRecibos = resumenMes(crearIndice({ ...ix.doc, recibos: [] }, { hoy: '2026-10-20' }), '2026-10');
+  cerca(sinRecibos.ingresoDelMes, 38000);
+  cerca(sinRecibos.ingresoRecibido, 0);
 });
 
 test('gasto por grupo y gráfico con los cinco primeros grupos y "Otros grupos"', () => {
@@ -83,7 +101,7 @@ test('filtro por persona: Moises + Ruth + sin responsable suman lo del hogar', (
   const periodo = '2026-10';
   const total = resumenMes(ix, periodo);
   const partes = ['moises', 'ruth', SIN_RESPONSABLE].map((p) => resumenMes(ix, periodo, { personaId: p }));
-  for (const campo of ['comprometido', 'pagado', 'pendiente', 'fueraDelPlan', 'gastoReal', 'ingresoEsperado', 'ingresoReal', 'ahorro']) {
+  for (const campo of ['comprometido', 'pagado', 'pendiente', 'fueraDelPlan', 'gastoReal', 'ingresoEsperado', 'ingresoReal', 'ingresoDelMes', 'libre', 'ahorro']) {
     cerca(partes.reduce((a, r) => a + r[campo], 0), total[campo]);
   }
   const [moises, ruth, sin] = partes;

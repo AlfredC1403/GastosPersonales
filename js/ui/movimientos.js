@@ -1,6 +1,6 @@
 import {
   store, fmt, fmtEntero, fmtMoneda, indice, vivos, buscar, personas, cuentas, categorias, grupos, partidas,
-  nombreCuenta, nombreCategoria, nombrePersona, nombreGrupo, filtro,
+  nombreCuenta, nombreCategoria, nombrePersona, nombreGrupo, filtro, anioCargado, aniosDeLaCarpeta,
 } from '../store.js';
 import { coincidePersona, personaDeMovimiento } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
@@ -56,6 +56,7 @@ export const VistaMovimientos = {
       <button type="button" class="chip-filtro" :class="{ activo: f.todo }" @click="f.todo = !f.todo">Todos los meses</button>
       <button v-if="hayPendientes" type="button" class="chip-filtro" :class="{ activo: f.pendientes }" @click="f.pendientes = !f.pendientes">Deducciones pendientes</button>
     </div>
+    <p v-if="f.todo && aniosFuera.length" class="nota chica">Sin {{ aniosFuera.join(', ') }}: {{ aniosFuera.length === 1 ? 'está' : 'están' }} en OneDrive. Se abren en <a href="#/anios">Años anteriores</a>.</p>
 
     <div class="kpis dos">
       <div class="kpi"><div class="kpi-et">Gastos</div><div class="kpi-val">{{ fmt(totales.gastos) }}</div><div class="kpi-nota">{{ totales.nGastos }} {{ totales.nGastos === 1 ? 'movimiento' : 'movimientos' }}</div></div>
@@ -77,7 +78,7 @@ export const VistaMovimientos = {
       <ul class="lista-mov">
         <li v-for="x in g.filas" :key="x.id" @click="abrir(x)">
           <span class="icono-tipo" :class="x.tipo" :title="tipos[x.tipo]">{{ inicial[x.tipo] }}</span>
-          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub">{{ x.subtitulo }}</span></div>
+          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub"><b v-if="x.quien" class="fila-quien">{{ x.quien + ' ' }}</b>{{ x.subtitulo }}</span></div>
           <div class="derecha">
             <div class="monto" :class="{ positivo: x.signo > 0 }">{{ x.textoMonto }}</div>
             <div v-if="x.textoLempiras" class="dif tenue">{{ x.textoLempiras }}</div>
@@ -98,7 +99,10 @@ export const VistaMovimientos = {
       const ix = indice();
       const out = [];
       const nombreComercio = (m) => (m.comercioId ? ix.comercios.get(m.comercioId)?.nombre || '' : '');
-      for (const m of vivos('movimientos')) {
+      // También los de un año anterior que no está en el dispositivo y cuentan en los años cargados
+      // (una compra a cuotas que se sigue cobrando, un pago de enero hecho en diciembre).
+      const previos = (coleccion) => (ix.previos ? ix.doc[coleccion].filter((r) => ix.previos.has(r.id) && !r.borrado) : []);
+      for (const m of [...vivos('movimientos'), ...previos('movimientos')]) {
         const nombreVinculo = buscar('partidas', m.partidaId)?.nombre || buscar('prestamos', m.prestamoId)?.nombre || '';
         const categoriaId = m.categoriaId || (m.prestamoId && m.tipo === 'gasto' ? 'prestamos' : null);
         const comercio = nombreComercio(m);
@@ -115,6 +119,7 @@ export const VistaMovimientos = {
         if (m.tipo === 'gasto' && m.cuotas && t) {
           // Compra a cuotas: una fila por cuota, en el mes en que se cobra.
           for (const q of t.cuotas.get(m.id) || []) {
+            if (ix.previos?.has(m.id) && q.periodo < ix.apertura.mes) continue;
             out.push({
               ...base, id: `${m.id}:${q.k}`, tipo: 'cuota', fecha: q.fecha, periodo: q.periodo, monto: q.c / 100, moneda: 'L', enL: q.c / 100,
               titulo: `${base.titulo} · ${q.cancelacion ? 'cancelación' : `cuota ${q.k} de ${q.n}`}`, compra: m.fecha, interes: q.interes / 100, comision: q.comision / 100,
@@ -125,7 +130,7 @@ export const VistaMovimientos = {
         const l = m.tipo === 'pago_tarjeta' ? null : ix.montoEnLempiras(m);
         out.push({ ...base, enL: l ? l.c / 100 : 0, estimado: !!l?.estimado && base.moneda === 'USD' });
       }
-      for (const r of vivos('recibos')) {
+      for (const r of [...vivos('recibos'), ...previos('recibos')]) {
         const ingreso = ix.ingresos.get(r.ingresoId);
         const categoriaId = r.tipo === 'decimo13' || r.tipo === 'decimo14' ? 'decimos' : ingreso?.categoriaId || 'salario';
         const nombre = ingreso?.nombre || 'Ingreso';
@@ -153,9 +158,20 @@ export const VistaMovimientos = {
       return out;
     });
 
-    function subtitulo(x) {
+    // Quién pagó (o recibió, o anotó) va al principio de la fila, para verlo sin abrir el movimiento.
+    // `anoto`: quién lo anotó, si fue otra persona; va al final.
+    function quienDe(x) {
+      const verbo = VERBO[x.tipo];
+      if (x.personaAnotada && verbo) {
+        const mismo = x.personaAnotada === x.creadoPor;
+        return { quien: nombrePersona(x.personaAnotada), accion: mismo ? `${verbo} y anotó` : verbo, anoto: !mismo && x.creadoPor ? `anotó ${nombrePersona(x.creadoPor)}` : '' };
+      }
+      return x.creadoPor ? { quien: nombrePersona(x.creadoPor), accion: 'anotó', anoto: '' } : { quien: '', accion: '', anoto: '' };
+    }
+
+    function subtitulo(x, { accion, anoto }) {
       const cuenta = x.tipo === 'transferencia' || x.tipo === 'pago_tarjeta' ? `${nombreCuenta(x.cuentaId)} → ${nombreCuenta(x.cuentaDestinoId)}` : nombreCuenta(x.cuentaId);
-      const partes = [cuenta];
+      const partes = accion ? [accion, cuenta] : [cuenta];
       if (x.tipo === 'cuota') {
         partes.push(`compra del ${fechaCorta(x.compra)}`);
         if (x.interes || x.comision) partes.push(`incluye ${[x.interes ? `intereses ${fmt(x.interes)}` : '', x.comision ? `comisión ${fmt(x.comision)}` : ''].filter(Boolean).join(' y ')}`);
@@ -167,12 +183,7 @@ export const VistaMovimientos = {
       }
       if (x.faltan) partes.push(x.faltan === 1 ? 'falta 1 deducción' : `faltan ${x.faltan} deducciones`);
       if (x.categoriaId && x.titulo !== nombreCategoria(x.categoriaId) && x.tipo !== 'recibo') partes.push(nombreCategoria(x.categoriaId));
-      const verbo = VERBO[x.tipo];
-      if (x.personaAnotada && verbo && x.personaAnotada === x.creadoPor) partes.push(`${verbo} y anotó ${nombrePersona(x.personaAnotada)}`);
-      else {
-        if (x.personaAnotada && verbo) partes.push(`${verbo} ${nombrePersona(x.personaAnotada)}`);
-        if (x.creadoPor) partes.push(`anotó ${nombrePersona(x.creadoPor)}`);
-      }
+      if (anoto) partes.push(anoto);
       return partes.join(' · ');
     }
     const signo = (x) => (x.tipo === 'ingreso' || x.tipo === 'recibo' ? 1 : ES_GASTO.includes(x.tipo) || x.tipo === 'abono' ? -1 : x.tipo === 'ajuste' ? Math.sign(x.monto) : 0);
@@ -198,7 +209,8 @@ export const VistaMovimientos = {
         .map((x) => {
           const s = signo(x);
           const textoLempiras = x.moneda === 'USD' && x.enL ? `${x.estimado ? '≈ ' : ''}${fmt(x.enL)}${x.estimado && ix.esTarjeta(x.cuentaId) ? ' al pagar' : ''}` : '';
-          return { ...x, signo: s, subtitulo: subtitulo(x), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
+          const autor = quienDe(x);
+          return { ...x, signo: s, quien: autor.quien, subtitulo: subtitulo(x, autor), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
         });
     });
 
@@ -262,8 +274,13 @@ export const VistaMovimientos = {
     }
 
     const hayPendientes = computed(() => registros.value.some((x) => x.faltan > 0));
+    // Años de OneDrive que no están en este dispositivo (no salen en Todos los meses).
+    const aniosFuera = computed(() => {
+      void store.rev;
+      return aniosDeLaCarpeta().filter((a) => !anioCargado(a));
+    });
     return {
-      store, prefs, f, verFiltros, masFiltros, alternar, lista, bloques, totales, exportar, definirVista, hayPendientes,
+      store, prefs, f, verFiltros, masFiltros, alternar, lista, bloques, totales, exportar, definirVista, hayPendientes, aniosFuera,
       fmt, fmtEntero, nombrePeriodo, tipos: TIPOS, inicial: INICIAL, agrupar: AGRUPAR, monedas: MONEDAS,
       abrir: (x) => x.abrir(),
       listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaCategorias: computed(categorias),

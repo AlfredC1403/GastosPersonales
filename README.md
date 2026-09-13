@@ -1,6 +1,6 @@
 # Gastos del hogar
 
-Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y recuerda los comercios frecuentes. Puede poner lo que vence en el calendario de Outlook de cada persona, con alarma y sin montos. También tiene metas de ahorro con el aporte sugerido por mes y por quincena, una sugerencia de cómo repartir los gastos según los ingresos, el resumen del año con el patrimonio, la comparación entre años, gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
+Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Lleva las tarjetas de crédito en lempiras y dólares: estado de cuenta de cada corte, membresía y seguros, compras a cuotas y compras en dólares convertidas con la tasa del día en que se pagan. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y recuerda los comercios frecuentes. Puede poner lo que vence en el calendario de Outlook de cada persona, con alarma y sin montos. También tiene metas de ahorro con el aporte sugerido por mes y por quincena, una sugerencia de cómo repartir los gastos según los ingresos, el resumen del año con el patrimonio, la comparación entre años (los años anteriores quedan en OneDrive con un resumen guardado), gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
 
 Los datos se guardan en la carpeta `GastosHogar` de OneDrive (un archivo principal y uno por año, con respaldos) y en una copia en el navegador (IndexedDB). Varias personas pueden usar la misma carpeta, cada una con su cuenta de Microsoft, y cada registro guarda quién lo anotó y quién lo editó. Todas las pantallas se pueden filtrar por persona, y cada dispositivo puede pedir un PIN para abrir la app.
 
@@ -58,18 +58,19 @@ css/app.css       Estilos y variables de color (modo claro y oscuro)
 js/core/          Cálculos sin interfaz: modelo y migración de los datos, archivos por año, asientos,
                   partidas, nómina y deducciones, plan por quincena, avisos, préstamos y bola de nieve,
                   tarjetas (cortes, cuotas, cargos) y dólares, metas, reparto de gastos, recordatorios, reportes
-                  (resumen anual, patrimonio y comparación de años) y filtro por persona
+                  (resumen anual, patrimonio, comparación de años y resúmenes guardados), cierre de cada año
+                  (la apertura del siguiente, en cierres.js) y filtro por persona
 js/ui/            Vistas, menú lateral, formularios (los de tarjetas en formularios-tarjetas.js),
                   comercios, asistente de configuración y gráficos SVG
 js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla, avisos ocultos)
 js/store.js       Estado de la app y guardado de cada cambio
-js/sincronizacion.js  Sincronización de la carpeta de OneDrive (archivo principal y uno por año)
+js/sincronizacion.js  Sincronización de la carpeta de OneDrive (archivo principal y uno por año; baja el año actual y el anterior)
 js/almacen.js     Guardado en el navegador (IndexedDB, o localStorage si no está disponible)
 js/bloqueo.js     PIN del dispositivo (hash PBKDF2, intentos y espera)
 js/onedrive.js    Inicio de sesión con Microsoft, archivos de la carpeta y respaldos
 js/calendario.js  Calendario de Outlook: eventos de los recordatorios (js/recordatorios.js los mantiene al día)
 sw.js             Caché para abrir la app sin conexión
-tests/            Pruebas de js/core, de la sincronización, del PIN y de OneDrive
+tests/            Pruebas de js/core, de la sincronización, del PIN y de OneDrive (datos ficticios de varios años en tests/datos)
 ```
 
 ## Despliegue

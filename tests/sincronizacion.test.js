@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { sincronizarCarpeta, marcarPendiente } from '../js/sincronizacion.js';
 import { docVacio, sellar, COLECCIONES } from '../js/core/modelo.js';
 import { migrar } from '../js/core/migraciones.js';
-import { archivoDe, unirAnios, claveDeNombre, PRINCIPAL } from '../js/core/anios.js';
+import { archivoDe, unirAnios, claveDeNombre, contenidoArchivo, PRINCIPAL } from '../js/core/anios.js';
 
 // Carpeta de OneDrive simulada: eTag nuevo en cada escritura, 412 si el eTag no coincide y
 // 409 al crear un archivo que ya existe. Cada operación espera un turno para que dos
@@ -13,6 +13,7 @@ class Carpeta {
     this.archivos = new Map();
     this.respaldos = new Map();
     this.n = 0;
+    this.registro = []; // [operación, nombre] de cada descarga, subida o creación
   }
   poner(nombre, contenido) {
     const item = { nombre, itemId: `id-${nombre}`, eTag: `"${++this.n}"`, texto: JSON.stringify(contenido) };
@@ -31,16 +32,19 @@ class Carpeta {
       },
       descargar: async (a) => {
         await turno();
+        this.registro.push(['bajar', a.nombre]);
         return this.leer(a.nombre);
       },
       subir: async (a, contenido, eTag) => {
         await turno();
+        this.registro.push(['subir', a.nombre]);
         if (this.archivos.get(a.nombre)?.eTag !== eTag) throw Object.assign(new Error('412'), { status: 412 });
         const { itemId, eTag: nuevo } = this.poner(a.nombre, contenido);
         return { itemId, eTag: nuevo };
       },
       crear: async (nombre, contenido) => {
         await turno();
+        this.registro.push(['crear', nombre]);
         if (this.archivos.has(nombre)) throw Object.assign(new Error('409'), { status: 409 });
         const { itemId, eTag } = this.poner(nombre, contenido);
         return { itemId, eTag };
@@ -83,7 +87,13 @@ function dispositivo(carpeta, persona, opciones) {
       }
       return r;
     },
-    sincronizar: () => sincronizarCarpeta({ libro, estado, ops: carpeta.ops(opciones), sello: '2026-09-20-1000' }),
+    // Apertura recalculada en este dispositivo: se guarda en el documento y se sube con su año.
+    adoptarApertura(clave, apertura) {
+      doc = { ...doc, aperturas: { ...(doc.aperturas || {}), [clave]: apertura } };
+      contadores.set(clave, (contadores.get(clave) || 0) + 1);
+      marcarPendiente(estado, clave);
+    },
+    sincronizar: (desde = null) => sincronizarCarpeta({ libro, estado, ops: carpeta.ops(opciones), sello: '2026-09-20-1000', desde }),
   };
 }
 
@@ -219,4 +229,99 @@ test('un archivo de año con una copia vieja se vuelve a subir limpio', async ()
   await a.sincronizar();
   assert.ok(!carpeta.leer('finanzas-2026.json').movimientos.some((m) => m.id === 'mv'));
   assert.equal(a.doc().movimientos.filter((m) => m.id === 'mv').length, 1);
+});
+
+// Carpeta con 2025, 2026 y 2027. 2026 y 2027 traen su apertura (salvo que se pida lo contrario).
+function carpetaConAnios({ apertura2026 = true } = {}) {
+  const carpeta = new Carpeta();
+  const base = docVacio();
+  base.config = { ...base.config, inicio: '2025-01', actualizado: T };
+  base.personas = [{ id: 'moises', nombre: 'Moises', ...s }];
+  carpeta.poner('finanzas.json', contenidoArchivo(base, PRINCIPAL));
+  const mov = (id, fecha) => ({ id, tipo: 'gasto', fecha, periodo: fecha.slice(0, 7), cuentaId: 'gastos', monto: 100, ...s });
+  const apertura = (anio) => ({
+    version: 1, anio, fecha: `${anio - 1}-12-31`, cuentas: { gastos: -100 * (anio - 2024) * 100 }, tarjetas: {}, prestamos: {}, metas: {}, partidas: {},
+    registros: { movimientos: [], recibos: [] }, actualizado: T,
+  });
+  const anio = (y, ap) => ({ esquema: 2, anio: y, apertura: ap, movimientos: [mov(`m${y}`, `${y}-05-01`)], recibos: [], ajustesPartida: [] });
+  carpeta.poner('finanzas-2025.json', anio(2025, null));
+  carpeta.poner('finanzas-2026.json', anio(2026, apertura2026 ? apertura(2026) : null));
+  carpeta.poner('finanzas-2027.json', anio(2027, apertura(2027)));
+  carpeta.registro = [];
+  return carpeta;
+}
+const nombres = (registro, op) => registro.filter(([o]) => o === op).map(([, n]) => n).sort();
+
+test('con el año anterior como el más viejo, 2025 no se baja ni se sube', async () => {
+  const carpeta = carpetaConAnios();
+  const a = dispositivo(carpeta, 'moises');
+  const r = await a.sincronizar('2026');
+  assert.deepEqual(nombres(carpeta.registro, 'bajar'), ['finanzas-2026.json', 'finanzas-2027.json', 'finanzas.json']);
+  assert.deepEqual([r.anios, r.desde, a.estado.cargados], [['2025', '2026', '2027'], '2026', ['2026', '2027']]);
+  assert.deepEqual(a.doc().movimientos.map((m) => m.id).sort(), ['m2026', 'm2027']);
+  assert.equal(a.doc().aperturas['2026'].anio, 2026);
+
+  // Un cambio de 2027 sube solo ese archivo.
+  carpeta.registro = [];
+  a.guardar('movimientos', { id: 'nuevo', tipo: 'gasto', fecha: '2027-06-01', periodo: '2027-06', cuentaId: 'gastos', monto: 5 });
+  await a.sincronizar('2026');
+  assert.deepEqual(carpeta.registro, [['subir', 'finanzas-2027.json']]);
+  assert.equal(carpeta.leer('finanzas-2027.json').apertura.anio, 2027); // la apertura se conserva
+  assert.deepEqual(carpeta.leer('finanzas-2025.json').movimientos.map((m) => m.id), ['m2025']);
+});
+
+test('si el año más viejo no trae apertura, se baja también el anterior', async () => {
+  const carpeta = carpetaConAnios({ apertura2026: false });
+  const a = dispositivo(carpeta, 'moises');
+  const r = await a.sincronizar('2026');
+  assert.equal(r.desde, '2025');
+  assert.deepEqual(a.estado.cargados, ['2025', '2026', '2027']);
+  assert.ok(nombres(carpeta.registro, 'bajar').includes('finanzas-2025.json'));
+});
+
+test('abrir un año viejo lo baja, y un año con cambios por subir se baja antes de subirlo', async () => {
+  const carpeta = carpetaConAnios();
+  const a = dispositivo(carpeta, 'moises');
+  await a.sincronizar('2026');
+  await a.sincronizar('2025');
+  assert.deepEqual(a.estado.cargados, ['2025', '2026', '2027']);
+  a.guardar('movimientos', { ...a.doc().movimientos.find((m) => m.id === 'm2025'), monto: 250 });
+  await a.sincronizar('2026');
+  assert.equal(carpeta.leer('finanzas-2025.json').movimientos[0].monto, 250);
+
+  // Un dispositivo que tiene 2025 pendiente sin haberlo bajado (no debería pasar) primero lo baja:
+  // lo que ya había en OneDrive no se pierde.
+  const b = dispositivo(carpeta, 'ruth');
+  await b.sincronizar('2026');
+  b.guardar('movimientos', { id: 'viejo', tipo: 'gasto', fecha: '2025-07-01', periodo: '2025-07', cuentaId: 'gastos', monto: 9 });
+  await b.sincronizar('2026');
+  assert.deepEqual(carpeta.leer('finanzas-2025.json').movimientos.map((m) => m.id).sort(), ['m2025', 'viejo']);
+});
+
+test('un año que sigue en el documento se mantiene al día aunque ya no haga falta', async () => {
+  const carpeta = carpetaConAnios();
+  const a = dispositivo(carpeta, 'moises');
+  const b = dispositivo(carpeta, 'ruth');
+  await a.sincronizar('2025');
+  await b.sincronizar('2025');
+  b.guardar('movimientos', { ...b.doc().movimientos.find((m) => m.id === 'm2025'), monto: 777 });
+  await b.sincronizar('2025');
+  carpeta.registro = [];
+  await a.sincronizar('2026');
+  assert.deepEqual(carpeta.registro, [['bajar', 'finanzas-2025.json']]);
+  assert.equal(a.doc().movimientos.find((m) => m.id === 'm2025').monto, 777);
+});
+
+test('la apertura calculada en un dispositivo llega al otro', async () => {
+  const carpeta = carpetaConAnios();
+  const a = dispositivo(carpeta, 'moises');
+  const b = dispositivo(carpeta, 'ruth');
+  await a.sincronizar('2026');
+  await b.sincronizar('2026');
+  const nueva = { ...a.doc().aperturas['2027'], cuentas: { gastos: 123 }, actualizado: '2027-02-01T00:00:00.000Z' };
+  a.adoptarApertura('2027', nueva);
+  await a.sincronizar('2026');
+  assert.deepEqual(carpeta.leer('finanzas-2027.json').apertura, nueva);
+  await b.sincronizar('2026');
+  assert.deepEqual(b.doc().aperturas['2027'], nueva);
 });

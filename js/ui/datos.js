@@ -1,6 +1,6 @@
 import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
-  respaldarAhora, listarRespaldos,
+  respaldarAhora, listarRespaldos, anioCargado,
 } from '../store.js';
 import { hoy } from '../core/util.js';
 import { esPristino } from '../core/modelo.js';
@@ -103,7 +103,8 @@ export const VistaDatos = {
         <button type="button" class="btn" @click="respaldo">Descargar respaldo (JSON)</button>
         <label class="btn">Importar archivo<input type="file" accept=".json,application/json" class="oculto-visual" @change="importarArchivo"></label>
       </div>
-      <p class="nota" style="margin-top: 12px">Importar combina el archivo con lo que ya hay: no borra nada. Los movimientos se exportan a CSV desde su pantalla.</p>
+      <p class="nota" style="margin-top: 12px">Importar combina el archivo con lo que ya hay: no borra nada. Los movimientos se exportan a CSV desde su pantalla.
+        <template v-if="store.sync.ubicacion"> El respaldo lleva los años que están en este dispositivo; los anteriores ya están en OneDrive.</template></p>
       <div class="fila-campos" style="margin-top: 14px">
         <label class="campo"><span>Símbolo de moneda</span><input :value="store.doc.config.moneda" maxlength="4" @change="guardarConfig({ moneda: $event.target.value.trim() || 'L' })"></label>
         <label class="campo"><span>Mes de inicio del registro</span><input :value="store.doc.config.inicio" type="month" @change="$event.target.value && guardarConfig({ inicio: $event.target.value })"></label>
@@ -132,7 +133,7 @@ export const VistaDatos = {
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
       .map((a) => {
         const clave = claveDeNombre(a.nombre);
-        const partes = [clave === PRINCIPAL ? 'configuración y catálogos' : 'movimientos de ' + clave];
+        const partes = [clave === PRINCIPAL ? 'configuración y catálogos' : `movimientos de ${clave}${anioCargado(clave) ? '' : ' (no está en este dispositivo)'}`];
         if (a.modificado) partes.push(fechaHora.format(new Date(a.modificado)));
         if (a.modificadoPor) partes.push(a.modificadoPor);
         return { ...a, detalle: partes.join(' · ') };

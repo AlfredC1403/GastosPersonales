@@ -73,8 +73,16 @@ export function arrastreDe(ix, p, periodo) {
 function calcularArrastre(ix, p, periodo) {
   const inicios = [p.acumulaDesde, p.desde, ix.config.inicio, p.creado ? periodoDe(p.creado) : null].filter(Boolean);
   let mes = inicios.sort().pop();
-  if (!mes || mes >= periodo) return 0;
   let arrastre = 0;
+  // Si la partida viene de años que no están cargados, se sigue con lo que sobraba al empezar el
+  // primer año cargado (guardado en su apertura).
+  const ap = ix.apertura;
+  if (ap && mes && mes < ap.mes && periodo >= ap.mes) {
+    mes = ap.mes;
+    arrastre = ap.partidas?.[p.id] || 0;
+    if (mes === periodo) return arrastre;
+  }
+  if (!mes || mes >= periodo) return 0;
   for (let i = 0; mes < periodo && i < MAX_MESES_ARRASTRE; i++, mes = sumarMeses(mes, 1)) {
     const parte = partesDelMes(p, mes)[0];
     const r = calcular(ix, p, mes, null, parte ? parte.base : 0, arrastre);

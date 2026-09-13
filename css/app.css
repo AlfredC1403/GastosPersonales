@@ -130,6 +130,7 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 .fila-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .fila-titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem; }
 .fila-sub { font-size: 0.77rem; color: var(--tinta3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fila-quien { font-weight: 600; color: var(--tinta2); }
 .fila-sub.envuelve { white-space: normal; display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; }
 .derecha { text-align: right; flex: none; }
 .dif { font-size: 0.74rem; font-variant-numeric: tabular-nums; }

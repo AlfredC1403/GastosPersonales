@@ -1,7 +1,7 @@
 // Resumen anual: ingresos, deducciones, gasto, ahorro, deudas y patrimonio del año, comparados
 // con el año anterior hasta el mismo día.
-import { store, fmt, fmtEntero, fmtCorto, indice, filtro, personaFiltro, nombrePersona, nombreGrupo } from '../store.js';
-import { resumenAnual, mismoDiaEn, diferencia, seriesDeGrupos, colorGrupo } from '../core/reportes.js';
+import { store, fmt, fmtEntero, fmtCorto, indice, filtro, personaFiltro, nombrePersona, nombreGrupo, anioCargado, resumenGuardado } from '../store.js';
+import { resumenAnual, resumenAnualDeGuardado, mismoDiaEn, diferencia, seriesDeGrupos, colorGrupo } from '../core/reportes.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { nombrePeriodo, fechaCorta, periodoDe } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
@@ -111,8 +111,13 @@ export const VistaResumen = {
     const esEsteAnio = computed(() => anio.value === store.hoy.slice(0, 4));
     // En lo que va del año: hasta hoy, y el año anterior hasta el mismo día.
     const hasta = computed(() => (esEsteAnio.value && prefs.corteAnual === 'va' ? store.hoy : ''));
-    const r = computed(() => resumenAnual(ix.value, anio.value, filtro(), { hasta: hasta.value }));
-    const anterior = computed(() => resumenAnual(ix.value, String(Number(anio.value) - 1), filtro(), { hasta: hasta.value ? mismoDiaEn(Number(anio.value) - 1, hasta.value) : '' }));
+    // Un año que no está en el dispositivo sale de su resumen guardado (el año completo).
+    const deAnio = (y, opciones) => {
+      const guardado = !anioCargado(y) && resumenGuardado(y);
+      return guardado ? resumenAnualDeGuardado(ix.value, guardado, filtro()) : resumenAnual(ix.value, y, filtro(), opciones);
+    };
+    const r = computed(() => deAnio(anio.value, { hasta: hasta.value }));
+    const anterior = computed(() => deAnio(String(Number(anio.value) - 1), { hasta: hasta.value ? mismoDiaEn(Number(anio.value) - 1, hasta.value) : '' }));
     const textoCorte = computed(() => (hasta.value
       ? `Del 1 de enero al ${fechaCorta(hasta.value)}; el año anterior, hasta el mismo día.`
       : `Todo ${anio.value}${esEsteAnio.value ? ', con lo registrado hasta hoy' : ''}.`));

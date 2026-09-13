@@ -1,4 +1,6 @@
-import { store, iniciar, sincronizar, soyYo, aviso, personas, buscar, vivos, avisos } from './store.js';
+import {
+  store, iniciar, sincronizar, soyYo, aviso, personas, buscar, vivos, avisos, anioCargado, aniosDeLaCarpeta, abrirAnio, editarAnio, cerrarAniosAbiertos,
+} from './store.js';
 import { nombrePeriodo, sumarMeses, periodoActual, hoy } from './core/util.js';
 import * as od from './onedrive.js';
 import { prefs, alternarMenuContraido } from './tema.js';
@@ -28,6 +30,7 @@ import { VistaReparto } from './ui/reparto.js';
 import { VistaResumen } from './ui/resumen.js';
 import { VistaComparar } from './ui/comparar.js';
 import { VistaRecordatorios } from './ui/recordatorios.js';
+import { VistaAnios } from './ui/anios.js';
 import { iniciarRecordatorios } from './recordatorios.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
@@ -50,6 +53,7 @@ const VISTAS = [
   { id: 'resumen', nombre: 'Resumen anual', componente: VistaResumen, porAnio: true },
   // #/comparar/<año>/<año>
   { id: 'comparar', nombre: 'Comparar años', componente: VistaComparar, conParametros: true },
+  { id: 'anios', nombre: 'Años anteriores', componente: VistaAnios },
   { id: 'personas', nombre: 'Personas', componente: VistaPersonas },
   { id: 'recordatorios', nombre: 'Recordatorios', componente: VistaRecordatorios },
   { id: 'categorias', nombre: 'Categorías y grupos', componente: VistaCategorias },
@@ -131,6 +135,15 @@ const App = {
           ? 'Los datos se guardaron con una versión más nueva de la app. Actualiza para seguir sincronizando.'
           : 'Hay una versión nueva de la app.' }}</p>
         <button type="button" class="btn primario" @click="actualizar">Actualizar</button>
+      </div>
+      <div v-if="anioAbierto" class="aviso-banner ambar" style="margin-bottom: 16px" role="status">
+        <p>{{ editandoAnio ? 'Editando ' + anioAbierto + ': los saldos de los años siguientes se recalculan.' : 'Estás viendo ' + anioAbierto + '.' }}{{ store.anios.cargando ? ' Bajando de OneDrive…' : '' }}</p>
+        <button v-if="!editandoAnio" type="button" class="btn" @click="editarEsteAnio">Editar este año</button>
+        <button type="button" class="btn primario" @click="volverAHoy">Volver a hoy</button>
+      </div>
+      <div v-else-if="anioNoCargado" class="aviso-banner" style="margin-bottom: 16px" role="status">
+        <p>{{ anioNoCargado }} está en OneDrive, no en este dispositivo{{ vista.porAnio ? ': se ve su resumen guardado.' : '.' }}</p>
+        <button type="button" class="btn primario" :disabled="!!store.anios.cargando" @click="abrirAqui(anioNoCargado)">{{ store.anios.cargando ? 'Bajando…' : 'Abrir ' + anioNoCargado }}</button>
       </div>
       <div v-if="preguntarQuien" class="aviso-banner" style="margin-bottom: 16px">
         <p>¿Quién usa este dispositivo? Así cada registro queda firmado.</p>
@@ -218,6 +231,25 @@ const App = {
       return n ? `${n} ${n === 1 ? 'movimiento' : 'movimientos'}` : 'sin registros';
     });
 
+    // Años anteriores: el abierto en modo lectura (o edición) y el de la pantalla, si no está en el dispositivo.
+    const anioAbierto = computed(() => store.anios.abiertos[0] || '');
+    const editandoAnio = computed(() => store.anios.editar.includes(anioAbierto.value));
+    const anioNoCargado = computed(() => {
+      if (!store.sync.ubicacion) return '';
+      const anio = vista.value.porMes ? store.periodo.slice(0, 4) : vista.value.porAnio ? store.anio : '';
+      return anio && !anioCargado(anio) && aniosDeLaCarpeta().includes(anio) ? anio : '';
+    });
+    function editarEsteAnio() {
+      if (confirm(`¿Editar ${anioAbierto.value}? Lo que cambies ahí cambia los saldos de los años siguientes.`)) editarAnio(anioAbierto.value);
+    }
+    // Abre el año de la pantalla sin cambiar de pantalla ni de mes.
+    const abrirAqui = (anio) => abrirAnio(anio).catch((e) => aviso(e.message, 'error', 7000));
+    function volverAHoy() {
+      cerrarAniosAbiertos();
+      store.periodo = actual;
+      store.anio = actual.slice(0, 4);
+    }
+
     const sync = computed(() => {
       const s = store.sync;
       if (!s.ubicacion) return { texto: 'Solo este dispositivo', icono: 'nubeNo', clase: '' };
@@ -263,6 +295,7 @@ const App = {
     return {
       store, prefs, vista, tituloVista, claveVista, parametros, ruta, accesos: ACCESOS, esAcceso, escritorio, menuAbierto, dlgMenu, fueraDelMenu, tocarMenu, alternarMenuContraido,
       listaPersonas, cuentaAvisos, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
+      anioAbierto, editandoAnio, anioNoCargado, editarEsteAnio, volverAHoy, abrirAqui,
       actualizar: () => location.reload(),
       mover: (n) => { store.periodo = sumarMeses(store.periodo, n); },
       anioActual: actual.slice(0, 4),

@@ -23,7 +23,7 @@ export function anioDeRegistro(coleccion, r, anioPorDefecto) {
   return ANIO.test(c) ? c : anioPorDefecto;
 }
 
-const anioPorDefectoDe = (doc) => {
+export const anioPorDefectoDe = (doc) => {
   const a = String(doc.config?.inicio ?? '').slice(0, 4);
   return ANIO.test(a) ? a : '2026';
 };
@@ -35,7 +35,8 @@ export function archivoDe(doc, coleccion, r) {
 
 export const archivoAnioVacio = (anio) => ({ esquema: ESQUEMA, anio: Number(anio), apertura: null, movimientos: [], recibos: [], ajustesPartida: [] });
 
-// Contenido de un archivo, tomado del documento completo.
+// Contenido de un archivo, tomado del documento completo. Un archivo de año lleva su apertura
+// (el cierre del año anterior, ver cierres.js) si ya se calculó.
 export function contenidoArchivo(doc, clave) {
   if (clave === PRINCIPAL) {
     const principal = { esquema: ESQUEMA, config: doc.config };
@@ -44,6 +45,7 @@ export function contenidoArchivo(doc, clave) {
   }
   const porDefecto = anioPorDefectoDe(doc);
   const archivo = archivoAnioVacio(clave);
+  archivo.apertura = doc.aperturas?.[clave] ?? null;
   for (const c of COLECCIONES_ANIO) archivo[c] = (doc[c] || []).filter((r) => anioDeRegistro(c, r, porDefecto) === clave);
   return archivo;
 }

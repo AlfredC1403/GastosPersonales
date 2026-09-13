@@ -153,14 +153,21 @@ export function proximoCobro(cuenta, cargo, desde) {
 
 // Lo que los asientos necesitan de cada tarjeta: cuotas de las compras, cargos generados hasta
 // hoy y la tasa en lempiras de cada cargo en dólares.
-export function prepararTarjetas(doc, { hoy = '', tasaReferencia = 0 } = {}) {
+// Con la `apertura` del año (los años anteriores no están cargados), la tarjeta empieza con lo que
+// debía al cierre del año anterior: `saldoFecha` pasa a ser ese cierre e `inicial`, esa deuda.
+// `previos`: ids de los registros de años anteriores que trae la apertura; lo que hicieron hasta
+// el cierre ya está contado en ella.
+export function prepararTarjetas(doc, { hoy = '', tasaReferencia = 0, apertura = null, previos = null } = {}) {
   const tarjetas = new Map();
   const inicio = doc.config?.inicio ? `${doc.config.inicio}-01` : '';
   const movimientos = (doc.movimientos || []).filter(vivo);
+  const esPrevio = (m) => !!previos?.has(m.id);
   for (const cuenta of doc.cuentas || []) {
     if (!vivo(cuenta) || !esTarjeta(cuenta)) continue;
     const t = cuenta.tarjeta || {};
-    const saldoFecha = fechaSaldoDe(cuenta);
+    const ap = apertura && fechaSaldoDe(cuenta) <= apertura.fecha ? apertura.tarjetas?.[cuenta.id] || null : null;
+    const saldoFecha = ap ? apertura.fecha : fechaSaldoDe(cuenta);
+    const inicial = ap ? { L: ap.deuda.L, USD: ap.deuda.USD } : { L: aCentavos(t.saldoInicial?.L), USD: aCentavos(t.saldoInicial?.USD) };
     const propios = movimientos.filter((m) => m.cuentaId === cuenta.id);
     const pagos = movimientos.filter((m) => m.tipo === 'pago_tarjeta' && m.cuentaDestinoId === cuenta.id).sort(porFecha);
 
@@ -169,18 +176,22 @@ export function prepararTarjetas(doc, { hoy = '', tasaReferencia = 0 } = {}) {
     const desdeCargos = [sumarDias(saldoFecha, 1), inicio].filter(Boolean).sort().pop();
     const cargos = hoy ? cargosDeTarjeta(cuenta, desdeCargos, hoy) : [];
 
-    const conTasa = pagos.filter((p) => aCentavos(p.pagoUSD) > 0 && Number(p.tasa) > 0 && posteriorAlSaldo(cuenta, p.fecha, p.creado));
-    const ultimaTasa = conTasa.length ? Number(conTasa[conTasa.length - 1].tasa) : Number(tasaReferencia) || 0;
+    const conTasa = pagos.filter((p) => !esPrevio(p) && aCentavos(p.pagoUSD) > 0 && Number(p.tasa) > 0 && posteriorAlSaldo(cuenta, p.fecha, p.creado));
+    const ultimaTasa = conTasa.length ? Number(conTasa[conTasa.length - 1].tasa) : Number(ap?.ultimaTasa) || Number(tasaReferencia) || 0;
     const cargosUSD = [];
-    if (aCentavos(t.saldoInicial?.USD) > 0) cargosUSD.push({ clave: `inicial:${cuenta.id}`, fecha: saldoFecha, usd: aCentavos(t.saldoInicial.USD) });
+    if (!ap && aCentavos(t.saldoInicial?.USD) > 0) cargosUSD.push({ clave: `inicial:${cuenta.id}`, fecha: saldoFecha, usd: aCentavos(t.saldoInicial.USD) });
     for (const m of propios) {
       const cargo = (m.tipo === 'gasto' && !m.cuotas) || m.tipo === 'transferencia';
-      if (cargo && m.moneda === 'USD' && posteriorAlSaldo(cuenta, m.fecha, m.creado)) cargosUSD.push({ clave: m.id, fecha: m.fecha, usd: aCentavos(m.monto) });
+      if (cargo && !esPrevio(m) && m.moneda === 'USD' && posteriorAlSaldo(cuenta, m.fecha, m.creado)) cargosUSD.push({ clave: m.id, fecha: m.fecha, usd: aCentavos(m.monto) });
     }
     for (const c of cargos) if (c.moneda === 'USD') cargosUSD.push({ clave: c.clave, fecha: c.fecha, usd: c.c });
-    const tasas = asignarTasas(cargosUSD, conTasa.map((p) => ({ fecha: p.fecha, usd: aCentavos(p.pagoUSD), tasa: Number(p.tasa) })), ultimaTasa);
+    const pagosUSD = conTasa.map((p) => ({ fecha: p.fecha, usd: aCentavos(p.pagoUSD), tasa: Number(p.tasa) }));
+    const semilla = ap ? { pendientes: ap.pendientesUSD || [], aFavor: ap.aFavorUSD || [] } : null;
+    const tasas = asignarTasas(cargosUSD, pagosUSD, ultimaTasa, semilla);
 
-    tarjetas.set(cuenta.id, { cuenta, saldoFecha, cuotas, cargos, ultimaTasa, tasas });
+    // `dolares`: con qué se asignaron las tasas, para saber cómo quedan al cierre de un año (cierres.js).
+    const dolares = { cargos: cargosUSD, pagos: pagosUSD, semilla, ultimaTasa: ap ? Number(ap.ultimaTasa) || null : null };
+    tarjetas.set(cuenta.id, { cuenta, saldoFecha, inicial, cuotas, cargos, ultimaTasa, tasas, dolares });
   }
   return tarjetas;
 }
@@ -190,14 +201,16 @@ export function prepararTarjetas(doc, { hoy = '', tasaReferencia = 0 } = {}) {
 // llega), 'pagado', 'parcial', 'pendiente' o 'vencido'. Montos en lempiras y en dólares por separado.
 // Listas: `compras` (compras, cuotas, cargos y créditos del ciclo), `pagos` (los de este corte)
 // y `despues` (lo cargado después del corte, hasta hoy).
+// Deuda con la que empieza la tarjeta en los datos cargados, en centavos de cada moneda.
+const inicialDe = (ix, cuenta) => ix.tarjetas.get(cuenta.id)?.inicial || { L: aCentavos(cuenta.tarjeta?.saldoInicial?.L), USD: aCentavos(cuenta.tarjeta?.saldoInicial?.USD) };
+
 export function estadoCiclo(ix, cuenta, corte) {
-  const t = cuenta.tarjeta || {};
   const info = ix.tarjetas.get(cuenta.id);
   const eventos = ix.eventosTarjeta.get(cuenta.id) || [];
   const inicio = inicioCiclo(cuenta, corte);
   const limite = limiteDe(cuenta, corte);
   const siguiente = corteSiguiente(cuenta, corte);
-  const alCorte = { L: aCentavos(t.saldoInicial?.L), USD: aCentavos(t.saldoInicial?.USD) };
+  const alCorte = { ...inicialDe(ix, cuenta) };
   const pagado = monedas();
   const pagadoAlLimite = monedas();
   const tasa = info?.ultimaTasa || Number(ix.config.tasaReferencia) || 0;
@@ -254,7 +267,7 @@ export function resumenTarjeta(ix, cuenta) {
   const t = cuenta.tarjeta || {};
   const info = ix.tarjetas.get(cuenta.id);
   const eventos = ix.eventosTarjeta.get(cuenta.id) || [];
-  const deuda = { L: aCentavos(t.saldoInicial?.L), USD: aCentavos(t.saldoInicial?.USD) };
+  const deuda = { ...inicialDe(ix, cuenta) };
   const porCobrar = monedas();
   const extraPorCobrar = monedas();
   for (const e of eventos) {
@@ -263,7 +276,7 @@ export function resumenTarjeta(ix, cuenta) {
   }
   const tasa = info?.ultimaTasa || Number(ix.config.tasaReferencia) || 0;
   const disponible = (moneda) => (Number(t.limite?.[moneda]) > 0 ? deCentavos(aCentavos(t.limite[moneda]) - deuda[moneda] - porCobrar[moneda]) : null);
-  const corteAbierto = corteDe(cuenta, ix.hoy || fechaSaldoDe(cuenta));
+  const corteAbierto = corteDe(cuenta, ix.hoy || info?.saldoFecha || fechaSaldoDe(cuenta));
   return {
     deuda: enUnidades(deuda), deudaEnL: deCentavos(deuda.L + Math.round(deuda.USD * tasa)), tasa,
     porCobrar: enUnidades(porCobrar), extraPorCobrar: enUnidades(extraPorCobrar), disponible: { L: disponible('L'), USD: disponible('USD') },
@@ -276,10 +289,9 @@ export function resumenTarjeta(ix, cuenta) {
 // hechas hasta esa fecha. Antes del saldo con que empezó una tarjeta, no se cuenta.
 export function deudaTarjetasAl(ix, fecha, filtro) {
   let total = 0;
-  for (const { cuenta, saldoFecha, ultimaTasa } of ix.tarjetas.values()) {
+  for (const { cuenta, saldoFecha, ultimaTasa, inicial } of ix.tarjetas.values()) {
     if (!coincidePersona(cuenta.titularId || null, filtro) || fecha < saldoFecha) continue;
-    const t = cuenta.tarjeta || {};
-    const deuda = { L: aCentavos(t.saldoInicial?.L), USD: aCentavos(t.saldoInicial?.USD) };
+    const deuda = { ...inicial };
     for (const e of ix.eventosTarjeta.get(cuenta.id) || []) {
       if (e.fecha <= fecha) deuda[e.moneda] += e.delta;
       else if (e.tipo === 'cuota' && (ix.movimientos.get(e.origen)?.fecha || '9999') <= fecha) deuda.L += e.capital ?? e.delta;
@@ -295,11 +307,11 @@ const ESTADO_ITEM = { abierto: 'pendiente', pendiente: 'pendiente', parcial: 'pa
 // pagos de la quincena y los avisos). Un corte que todavía no llega usa lo acumulado (estimado).
 export function pagosDeTarjetas(ix, desde, hasta, filtro) {
   const items = [];
-  for (const { cuenta } of ix.tarjetas.values()) {
+  for (const { cuenta, saldoFecha } of ix.tarjetas.values()) {
     if (!coincidePersona(cuenta.titularId || null, filtro)) continue;
     for (let corte = corteDe(cuenta, sumarDias(desde, -62)); limiteDe(cuenta, corte) <= hasta; corte = corteSiguiente(cuenta, corte)) {
       const limite = limiteDe(cuenta, corte);
-      if (limite < desde || corte < fechaSaldoDe(cuenta)) continue;
+      if (limite < desde || corte < saldoFecha) continue;
       const e = estadoCiclo(ix, cuenta, corte);
       const abierto = e.situacion === 'abierto';
       const esperado = abierto ? deCentavos(aCentavos(e.alCorte.L) + Math.round(aCentavos(e.alCorte.USD) * e.tasa)) : e.contadoEnL;

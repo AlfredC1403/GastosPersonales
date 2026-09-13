@@ -41,24 +41,24 @@ export function mesesParaPagar(saldo, tasa, pago) {
   return Math.ceil(-Math.log(x) / Math.log(1 + r) - 1e-6);
 }
 
-// Saldo estimado a partir del último saldo conocido y de los pagos registrados después.
-// `pagos`: [{ tipo: 'cuota' | 'abono', periodo, fecha, monto, creado }].
-// Las cuotas se suman por mes: el interés y el seguro se cobran una sola vez aunque la
-// cuota se pague en dos partes (por ejemplo, la mitad en cada quincena).
-export function estadoPrestamo(p, pagos = []) {
+// Recorre los pagos desde el último saldo conocido. Las cuotas se suman por mes: el interés y el
+// seguro se cobran una sola vez aunque la cuota se pague en dos partes (por ejemplo, la mitad en
+// cada quincena). Los pagos van por mes y, dentro del mes, por fecha: la cuota de diciembre pagada
+// el 2 de enero se aplica antes que un abono del 1 de enero.
+// `inicio`: cómo estaba el préstamo al cierre de un año (la apertura del año siguiente); desde ahí
+// solo cuentan los pagos de los meses posteriores. Devuelve los valores sin redondear.
+export function recorrerPrestamo(p, pagos = [], inicio = null) {
   const r = tasaMensual(p.tasa);
   const seguro = seguroDe(p);
-  const pagoPI = Math.max(0, p.cuota - seguro);
-  let saldo = Number(p.saldo) || 0;
-  let ultimoPeriodo = p.saldoPeriodo;
-  let interesPagado = 0;
-  let capitalPagado = 0;
-  let cuotasPagadas = 0;
-  const parciales = [];
+  const desdeInicio = !!inicio && inicio.periodo >= p.saldoPeriodo;
+  const s = desdeInicio
+    ? { saldo: inicio.saldo, ultimoPeriodo: inicio.ultimoPeriodo, interesPagado: inicio.interesPagado, capitalPagado: inicio.capitalPagado, cuotasPagadas: inicio.cuotasPagadas, parciales: [...(inicio.parciales || [])] }
+    : { saldo: Number(p.saldo) || 0, ultimoPeriodo: p.saldoPeriodo, interesPagado: 0, capitalPagado: 0, cuotasPagadas: 0, parciales: [] };
+  const despuesDe = desdeInicio ? inicio.periodo : p.saldoPeriodo;
 
   const porMes = new Map();
   for (const x of pagos) {
-    if (x.tipo !== 'cuota' || !(x.periodo > p.saldoPeriodo)) continue;
+    if (x.tipo !== 'cuota' || !(x.periodo > despuesDe)) continue;
     const g = porMes.get(x.periodo) || { tipo: 'cuota', periodo: x.periodo, fecha: x.fecha, c: 0 };
     g.c += aCentavos(x.monto);
     if (x.fecha > g.fecha) g.fecha = x.fecha;
@@ -67,8 +67,11 @@ export function estadoPrestamo(p, pagos = []) {
   // Un abono cuenta si es posterior al saldo conocido; si es del mismo día, si se anotó
   // después de registrar ese saldo.
   const abonoPosterior = (x) => x.fecha > p.fechaSaldo || (x.fecha === p.fechaSaldo && (x.creado || '') > (p.saldoRegistrado || ''));
-  const abonos = pagos.filter((x) => x.tipo === 'abono' && abonoPosterior(x)).map((x) => ({ ...x, c: aCentavos(x.monto) }));
-  const eventos = [...porMes.values(), ...abonos].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  const abonos = pagos
+    .filter((x) => x.tipo === 'abono' && abonoPosterior(x) && !(desdeInicio && x.periodo <= despuesDe))
+    .map((x) => ({ ...x, c: aCentavos(x.monto) }));
+  const eventos = [...porMes.values(), ...abonos].sort((a, b) => (a.periodo < b.periodo ? -1 : a.periodo > b.periodo ? 1 : 0)
+    || (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
 
   for (const e of eventos) {
     const monto = deCentavos(e.c);
@@ -76,21 +79,30 @@ export function estadoPrestamo(p, pagos = []) {
     if (e.tipo === 'abono') {
       aCapital = monto;
     } else {
-      const interes = saldo * r;
+      const interes = s.saldo * r;
       const sinSeguro = Math.max(0, monto - seguro);
-      interesPagado += Math.min(interes, sinSeguro);
+      s.interesPagado += Math.min(interes, sinSeguro);
       aCapital = Math.max(0, sinSeguro - interes);
-      if (e.c >= aCentavos(p.cuota)) cuotasPagadas++;
-      else parciales.push(e.periodo);
-      if (e.periodo > ultimoPeriodo) ultimoPeriodo = e.periodo;
+      if (e.c >= aCentavos(p.cuota)) s.cuotasPagadas++;
+      else s.parciales.push(e.periodo);
+      if (e.periodo > s.ultimoPeriodo) s.ultimoPeriodo = e.periodo;
     }
-    aCapital = Math.min(aCapital, saldo);
-    saldo -= aCapital;
-    capitalPagado += aCapital;
+    aCapital = Math.min(aCapital, s.saldo);
+    s.saldo -= aCapital;
+    s.capitalPagado += aCapital;
   }
+  return s;
+}
 
-  const pagado = saldo < RESIDUO;
-  saldo = pagado ? 0 : redondear(saldo);
+// Saldo estimado a partir del último saldo conocido (o de `inicio`) y de los pagos registrados después.
+// `pagos`: [{ tipo: 'cuota' | 'abono', periodo, fecha, monto, creado }].
+export function estadoPrestamo(p, pagos = [], inicio = null) {
+  const seguro = seguroDe(p);
+  const pagoPI = Math.max(0, p.cuota - seguro);
+  const r = tasaMensual(p.tasa);
+  const { saldo: crudo, ultimoPeriodo, interesPagado, capitalPagado, cuotasPagadas, parciales } = recorrerPrestamo(p, pagos, inicio);
+  const pagado = crudo < RESIDUO;
+  const saldo = pagado ? 0 : redondear(crudo);
   const restantes = pagado ? 0 : mesesParaPagar(saldo, p.tasa, pagoPI);
   return {
     saldo,
@@ -110,18 +122,22 @@ export function estadoPrestamo(p, pagos = []) {
 
 const pagosDe = (ix, id) => ix.pagosPrestamo.get(id) || [];
 
+// Cómo estaba el préstamo al cierre del año anterior a los datos cargados, si hace falta.
+const inicioDe = (ix, p) => ix.apertura?.prestamos?.[p.id] || null;
+const pagosHasta = (ix, p, hasta) => (hasta ? pagosDe(ix, p.id).filter((x) => x.periodo <= hasta) : pagosDe(ix, p.id));
+
 // Estado de un préstamo con los pagos hasta `hasta` (o todos). Se guarda en el índice para
 // no recalcularlo en cada pantalla.
 export function estadoDe(ix, p, hasta = '') {
   ix.estadosPrestamo ??= new WeakMap();
   let porCorte = ix.estadosPrestamo.get(p);
   if (!porCorte) ix.estadosPrestamo.set(p, (porCorte = new Map()));
-  if (!porCorte.has(hasta)) {
-    const pagos = pagosDe(ix, p.id);
-    porCorte.set(hasta, estadoPrestamo(p, hasta ? pagos.filter((x) => x.periodo <= hasta) : pagos));
-  }
+  if (!porCorte.has(hasta)) porCorte.set(hasta, estadoPrestamo(p, pagosHasta(ix, p, hasta), inicioDe(ix, p)));
   return porCorte.get(hasta);
 }
+
+// Lo mismo sin redondear, para guardarlo en la apertura del año siguiente.
+export const estadoCrudoDe = (ix, p, hasta) => recorrerPrestamo(p, pagosHasta(ix, p, hasta), inicioDe(ix, p));
 
 // Un préstamo sigue activo en `periodo` si no pasó su última cuota ni se terminó de pagar antes.
 export function prestamoActivoEn(ix, p, periodo) {

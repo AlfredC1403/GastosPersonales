@@ -43,7 +43,15 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
   const auditoria = textoAuditoria(original);
   // `mensaje` puede ser un texto o una función que recibe el registro guardado.
   function terminar(r, { mensaje, deshacer = false, cerrar = true } = {}) {
-    const guardado = guardar(coleccion, r);
+    let guardado;
+    try {
+      guardado = guardar(coleccion, r);
+    } catch (e) {
+      // Un año anterior cerrado: el formulario queda abierto con el motivo.
+      if (e.codigo !== 'anio_cerrado') throw e;
+      error.value = e.message;
+      return null;
+    }
     const texto = (typeof mensaje === 'function' ? mensaje(guardado) : mensaje) || (existe ? 'Cambios guardados.' : 'Guardado.');
     const accion = deshacer && !existe ? { texto: 'Deshacer', fn: () => borrar(coleccion, guardado.id) } : null;
     aviso(texto, 'ok', accion ? 6000 : 2500, accion);

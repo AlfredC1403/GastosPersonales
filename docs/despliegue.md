@@ -165,7 +165,7 @@ Hay tres copias posibles:
 
 - **Historial de versiones de OneDrive.** En `https://onedrive.live.com`, abre la carpeta `GastosHogar`, haz clic derecho en `finanzas.json` o en el archivo del año y elige **Historial de versiones**.
 - **Carpeta `GastosHogar\respaldos`.** La app guarda ahí una copia antes de cambiar el formato de los datos, y otra cada vez que tocas **Menú** > **Datos y OneDrive** > **Guardar respaldo ahora**. Se conservan las 10 más recientes.
-- **Copia propia.** **Menú** > **Datos y OneDrive** > **Descargar respaldo (JSON)** descarga todos los datos en un solo archivo, que se puede volver a cargar con **Importar archivo**.
+- **Copia propia.** **Menú** > **Datos y OneDrive** > **Descargar respaldo (JSON)** descarga en un solo archivo los datos que están en el dispositivo, que se pueden volver a cargar con **Importar archivo**. Con OneDrive conectado son el año actual y el anterior; los demás años están en sus archivos de la carpeta.
 
 ### Actualizar a la versión con grupos y abonos
 
@@ -190,6 +190,23 @@ Cada persona los activa en su celular, con su cuenta de Microsoft:
 3. Toca **Probar la alarma**. En 10 minutos debe sonar la alarma del evento de prueba. Después tócalo en **Borrar la prueba**.
 
 La app crea el calendario **Gastos del hogar** con lo que vence en los próximos 60 días: partidas con día, cuotas, pagos anuales y pagos de tarjeta. Los eventos no llevan montos, se actualizan cuando cambia algo y se borran cuando se registra el pago. **Apagar y borrar** quita todos sus eventos.
+
+### Años anteriores
+
+Con OneDrive conectado, cada dispositivo tiene el año actual y el anterior. Los años más viejos quedan en su archivo de la carpeta (`finanzas-2025.json`, por ejemplo), y la app guarda dos cosas para no tener que bajarlos:
+
+- **La apertura de cada año**, dentro del archivo de ese año: cómo quedaron al 31 de diciembre las cuentas, las tarjetas (con los dólares sin pagar), los préstamos, las metas y las partidas que acumulan. Con ella los saldos dan lo mismo que con todos los años cargados.
+- **El resumen de cada año pasado**, en `finanzas.json`: los totales de cada mes, del hogar y de cada persona.
+
+La app los vuelve a calcular sola cuando cambia algo. En **Menú** > **Años anteriores** están todos los años con su gasto, ingresos, ahorro y deuda al cierre:
+
+- **Abrir** baja el archivo del año y muestra su resumen anual con la franja **Estás viendo 2025**. Se puede recorrer mes a mes.
+- **Editar este año** permite cambiar lo de ese año. Al guardar, se recalculan las aperturas de los años siguientes.
+- **Volver a hoy** regresa al mes actual. El año abierto deja el dispositivo cuando no tiene cambios por subir.
+- **Comparar con este año** usa el resumen guardado: compara por meses completos. **Cargar detalle** baja el año para comparar con todos sus movimientos.
+- **Generar resumen** vuelve a calcular el resumen de un año a mano.
+
+Sin OneDrive, todos los años están en el dispositivo y se editan como siempre.
 
 ### Actualizar la app en los celulares
 

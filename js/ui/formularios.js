@@ -83,8 +83,10 @@ export const MovimientoForm = {
     </template>
 
     <label v-if="usaComercio" class="campo"><span>Comercio</span>
-      <input v-model="comercioTexto" list="lista-comercios" maxlength="60" autocomplete="off" placeholder="Opcional: dónde se compró" @input="aplicarComercio"></label>
-    <datalist id="lista-comercios"><option v-for="x in listaComercios" :key="x.id" :value="x.nombre"></option></datalist>
+      <input v-model="comercioTexto" maxlength="60" autocomplete="off" placeholder="Opcional: dónde se compró" @input="aplicarComercio"></label>
+    <div v-if="usaComercio && sugerenciasComercio.length" class="chips-filtro" style="margin-top: -4px" role="group" aria-label="Comercios guardados">
+      <button v-for="x in sugerenciasComercio" :key="x.id" type="button" class="chip-filtro" @click="elegirComercio(x)">{{ x.nombre }}</button>
+    </div>
 
     <div class="fila-campos">
       <label class="campo"><span>Fecha</span><input v-model="m.fecha" type="date" required></label>
@@ -283,6 +285,21 @@ export const MovimientoForm = {
       const p = buscar('partidas', x.partidaId);
       if (p && p.tipo === 'gasto' && partidaActivaEn(p, periodoMov.value)) m.partidaId = p.id;
     }
+    // Comercios guardados como botones (la lista del navegador no se ve en todos los celulares): con el
+    // campo vacío, los más usados; al escribir, los que empiezan así y después los que lo contienen.
+    const sugerenciasComercio = computed(() => {
+      const texto = slug(comercioTexto.value);
+      const lista = comercios();
+      if (!texto) return lista.slice(0, 8);
+      if (comercioPorNombre(comercioTexto.value)) return [];
+      const empiezan = lista.filter((x) => slug(x.nombre).startsWith(texto));
+      const contienen = lista.filter((x) => !slug(x.nombre).startsWith(texto) && slug(x.nombre).includes(texto));
+      return [...empiezan, ...contienen].slice(0, 8);
+    });
+    function elegirComercio(x) {
+      comercioTexto.value = x.nombre;
+      aplicarComercio();
+    }
 
     // Compra a cuotas: solo con tarjeta y en lempiras.
     const puedeCuotas = computed(() => m.tipo === 'gasto' && origenEsTarjeta.value && monedaOrigen.value === 'L' && !esCuota.value && !m.parte);
@@ -410,10 +427,10 @@ export const MovimientoForm = {
       m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
       listaMetas, esRetiroDeMeta,
       montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
-      usaComercio, comercioTexto, aplicarComercio, puedeCuotas, aCuotas, q, cortesPosibles, vistaCuotas, tiposFinanciamiento: TIPOS_FINANCIAMIENTO,
+      usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, puedeCuotas, aCuotas, q, cortesPosibles, vistaCuotas, tiposFinanciamiento: TIPOS_FINANCIAMIENTO,
       saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
       fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
-      listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')), listaComercios: computed(comercios),
+      listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),
       categoriasGasto: computed(() => categoriasPorGrupo('gasto')), categoriasIngreso: computed(() => categoriasPorGrupo('ingreso')), ...f,
     };
   },

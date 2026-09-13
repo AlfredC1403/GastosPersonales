@@ -241,7 +241,8 @@ export const VistaTarjeta = {
       return c && !c.borrado && c.tipo === 'tarjeta' ? c : null;
     });
     const datos = computed(() => datosTarjeta(ix.value, cuenta.value, store.hoy));
-    const fechaSaldo = computed(() => fechaSaldoDe(cuenta.value));
+    // Con los años anteriores en OneDrive, la tarjeta empieza en el cierre del año anterior al primero cargado.
+    const fechaSaldo = computed(() => (cuenta.value && ix.value.tarjetas.get(cuenta.value.id)?.saldoFecha) || fechaSaldoDe(cuenta.value));
     // Cortes que se pueden ver: del primero después del saldo inicial al que está abierto.
     const primero = computed(() => corteDe(cuenta.value, sumarDias(fechaSaldo.value, 1)));
     const abierto = computed(() => corteDe(cuenta.value, store.hoy));

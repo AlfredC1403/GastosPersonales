@@ -1,8 +1,11 @@
 // Comparar años: ingresos, deducciones, gasto, ahorro, deuda y patrimonio de dos años lado a lado,
 // con el gasto por grupo (y sus categorías y partidas) y mes a mes.
-import { store, fmtEntero, fmtCorto, indice, filtro, personaFiltro, nombrePersona, nombreGrupo, nombreCategoria, nombrePartida } from '../store.js';
+import {
+  store, fmtEntero, fmtCorto, indice, filtro, personaFiltro, nombrePersona, nombreGrupo, nombreCategoria, nombrePartida, aviso,
+  anioCargado, aniosDeLaCarpeta, resumenGuardado, abrirAnio,
+} from '../store.js';
 import { compararAnios } from '../core/reportes.js';
-import { aniosDelDoc } from '../core/anios.js';
+import { aniosCargados } from '../core/cierres.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { nombrePeriodo, fechaCorta } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
@@ -27,7 +30,16 @@ export const VistaComparar = {
     </div>
     <p class="nota chica">{{ textoCorte }}{{ personaFiltro() ? ' Solo lo de ' + nombrePersona(personaFiltro()) + '.' : '' }}</p>
 
-    <div v-if="c.sinDatosA || c.sinDatosB" class="aviso-banner ambar">
+    <div v-for="y in delResumen" :key="'r' + y" class="aviso-banner">
+      <p>{{ y }} sale de su resumen guardado: se compara por meses completos y sin el detalle de sus movimientos.</p>
+      <button type="button" class="btn" :disabled="!!store.anios.cargando" @click="cargar(y)">{{ store.anios.cargando === y ? 'Bajando…' : 'Cargar detalle' }}</button>
+    </div>
+    <div v-for="y in sinResumen" :key="'s' + y" class="aviso-banner ambar">
+      <p>{{ y }} está en OneDrive y no tiene resumen guardado.</p>
+      <button type="button" class="btn" :disabled="!!store.anios.cargando" @click="cargar(y)">{{ store.anios.cargando === y ? 'Bajando…' : 'Cargar ' + y }}</button>
+    </div>
+
+    <div v-if="(c.sinDatosA && !sinResumen.includes(a)) || (c.sinDatosB && !sinResumen.includes(b))" class="aviso-banner ambar">
       <p>No hay registros de {{ [c.sinDatosA ? a : '', c.sinDatosB ? b : ''].filter(Boolean).join(' ni de ') }}{{ personaFiltro() ? ' de ' + nombrePersona(personaFiltro()) : '' }}: sus totales no se comparan.</p>
     </div>
 
@@ -90,8 +102,12 @@ export const VistaComparar = {
     const actual = store.hoy.slice(0, 4);
     const a = ref(esAnio(props.params[0]) ? props.params[0] : actual);
     const b = ref(esAnio(props.params[1]) ? props.params[1] : String(Number(a.value) - 1));
-    // Los años con registros, este año y el anterior (y los elegidos en el enlace).
-    const anios = computed(() => [...new Set([...aniosDelDoc(store.doc), actual, String(Number(actual) - 1), a.value, b.value])].filter(esAnio).sort().reverse());
+    // Los años cargados, los de OneDrive, los que tienen resumen guardado, este año y el anterior
+    // (y los elegidos en el enlace).
+    const anios = computed(() => [...new Set([
+      ...aniosCargados(store.doc), ...aniosDeLaCarpeta(), ...(store.doc.resumenes || []).filter((r) => !r.borrado).map((r) => r.id),
+      actual, String(Number(actual) - 1), a.value, b.value,
+    ])].filter(esAnio).sort().reverse());
     watch([a, b], ([x, y]) => {
       if (x === y) b.value = String(Number(x) - 1);
       history.replaceState(null, '', `#/comparar/${a.value}/${b.value}`);
@@ -102,10 +118,23 @@ export const VistaComparar = {
     });
 
     const ix = computed(indice);
-    const c = computed(() => compararAnios(ix.value, a.value, b.value, { modo: prefs.corteAnual, hoy: store.hoy, filtro: filtro() }));
-    const textoCorte = computed(() => (c.value.modo === 'va'
-      ? `Del 1 de enero al ${fechaCorta(c.value.corteA)} de cada año.`
-      : 'Los dos años completos (el actual, con lo registrado hasta hoy).'));
+    // Los años que no están en el dispositivo se comparan con su resumen guardado.
+    const guardados = computed(() => {
+      void ix.value;
+      return Object.fromEntries([a.value, b.value].filter((y) => !anioCargado(y) && resumenGuardado(y)).map((y) => [y, resumenGuardado(y)]));
+    });
+    const delResumen = computed(() => Object.keys(guardados.value).sort());
+    const sinResumen = computed(() => {
+      void ix.value;
+      return [...new Set([a.value, b.value])].filter((y) => !anioCargado(y) && !resumenGuardado(y) && aniosDeLaCarpeta().includes(y)).sort();
+    });
+    const cargar = (y) => abrirAnio(y).catch((e) => aviso(e.message, 'error', 7000));
+    const c = computed(() => compararAnios(ix.value, a.value, b.value, { modo: prefs.corteAnual, hoy: store.hoy, filtro: filtro(), guardados: guardados.value }));
+    const textoCorte = computed(() => {
+      if (c.value.modo === 'va') return `Del 1 de enero al ${fechaCorta(c.value.corteA)} de cada año.`;
+      if (prefs.corteAnual === 'va') return 'En enero todavía no hay meses completos para comparar con un resumen guardado: se comparan los años completos.';
+      return 'Los dos años completos (el actual, con lo registrado hasta hoy).';
+    });
     const abierto = ref(null);
     const maximo = computed(() => Math.max(1, ...c.value.grupos.flatMap((g) => [g.A, g.B])));
     const ancho = (v) => `${Math.max(0, Math.min(100, (v / maximo.value) * 100))}%`;
@@ -123,7 +152,7 @@ export const VistaComparar = {
     })));
 
     return {
-      prefs, definirVista, anios, a, b, c, textoCorte, abierto, ancho, textoDif, clase, meses,
+      prefs, definirVista, anios, a, b, c, textoCorte, abierto, ancho, textoDif, clase, meses, store, delResumen, sinResumen, cargar,
       fmtEntero, fmtCorto, nombreGrupo, nombreCategoria, nombrePartida, nombrePersona, personaFiltro, SIN_GRUPO,
     };
   },

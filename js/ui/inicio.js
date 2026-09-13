@@ -57,9 +57,10 @@ export const VistaInicio = {
     <div>
       <p class="etiqueta">{{ r.libre < 0 ? 'Faltan este mes' : 'Libre este mes' }}</p>
       <p class="hero-num xl" :class="{ negativo: r.libre < 0 }">{{ fmt(Math.abs(r.libre)) }}</p>
-      <p v-if="!r.ingresoEsperado" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>
-      <p v-else-if="r.libre >= 0" class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos quedan {{ fmt(r.libre) }} después del plan y de lo gastado fuera del plan.</p>
-      <p v-else class="hero-texto">De {{ fmt(r.ingresoEsperado) }} de ingresos faltan {{ fmt(-r.libre) }} para cubrir el plan y lo gastado fuera del plan.</p>
+      <p v-if="!r.ingresoEsperado && !r.ingresoDelMes" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>
+      <p v-else-if="r.libre >= 0" class="hero-texto">De {{ fmt(r.ingresoDelMes) }} de ingresos quedan {{ fmt(r.libre) }} después del plan y de lo gastado fuera del plan.</p>
+      <p v-else class="hero-texto">De {{ fmt(r.ingresoDelMes) }} de ingresos faltan {{ fmt(-r.libre) }} para cubrir el plan y lo gastado fuera del plan.</p>
+      <p v-if="textoIngresos" class="nota chica" style="margin-top: 6px">{{ textoIngresos }}</p>
       <p v-if="sinResponsable" class="nota chica" style="margin-top: 6px">No incluye {{ fmt(sinResponsable) }} del hogar sin responsable.</p>
       <barra-segmentos :segmentos="flujo" style="margin-top: 14px"/>
       <div class="leyenda">
@@ -279,6 +280,13 @@ export const VistaInicio = {
       const s = resumenMes(ix.value, store.periodo, { personaId: SIN_RESPONSABLE });
       return redondear(s.comprometido + s.fueraDelPlan);
     });
+    // De dónde salen los ingresos: lo que ya llegó (neto) y lo que falta, con el neto de cada salario.
+    const textoIngresos = computed(() => {
+      const { ingresoRecibido, otrosIngresos, ingresoPorRecibir } = r.value;
+      if (!ingresoPorRecibir) return '';
+      if (!ingresoRecibido && !otrosIngresos) return 'Los ingresos son el neto de cada salario: lo que llega a la cuenta, ya sin deducciones.';
+      return `Ya llegaron ${fmt(redondear(ingresoRecibido + otrosIngresos))} y faltan ${fmt(ingresoPorRecibir)} según el neto de cada salario.`;
+    });
     const plan = computed(() => r.value.plan.filter((it) => it.esperado > 0 || it.real > 0));
     const pct = computed(() => (r.value.comprometido ? Math.min(100, (r.value.pagado / r.value.comprometido) * 100) : 0));
     const avanceTexto = computed(() => {
@@ -451,7 +459,7 @@ export const VistaInicio = {
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
       variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
-      avisosHoy, totalAvisos, tramo, descontado, ejecutarAccionAviso, completarDeducciones, fechaCorta,
+      avisosHoy, totalAvisos, tramo, descontado, textoIngresos, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),
       abrir: (it) => abrirItem(it, store.periodo),

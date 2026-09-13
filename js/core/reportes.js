@@ -1,6 +1,6 @@
 // Reportes: resumen del mes, gasto por grupo, categoría, medio o persona, historial y saldos.
 import { vivo } from './modelo.js';
-import { sumarMeses, periodoDe, aCentavos, deCentavos, redondear } from './util.js';
+import { sumarMeses, periodoDe, fechaEnMes, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
 import { estadoPartidas, ingresosDelMes, partidasDelMes, usoDelPlan } from './presupuesto.js';
 import { cuotasDelMes, deudaAl, costoDePrestamos } from './prestamos.js';
@@ -76,17 +76,28 @@ export function resumenMes(ix, periodo, filtro) {
     const plan = [...cuotas.filter((it) => !it.planilla), ...partidas.filter((it) => it.parte !== 'pagar')];
     const enPlan = partidasDelMes(ix, periodo);
 
-    const c = { comprometido: 0, pagado: 0, pendiente: 0, ingresoEsperado: 0, ingresoReal: 0, fueraDelPlan: 0, ahorro: 0, abonos: 0 };
+    const c = {
+      comprometido: 0, pagado: 0, pendiente: 0, ingresoEsperado: 0, ingresoReal: 0, ingresoRecibido: 0, ingresoPorRecibir: 0, otrosIngresos: 0,
+      fueraDelPlan: 0, ahorro: 0, abonos: 0,
+    };
     for (const it of plan) {
       c.comprometido += aCentavos(usoDelPlan(it));
       c.pagado += aCentavos(it.real);
       c.pendiente += aCentavos(it.queda);
     }
-    for (const it of ingresos) c.ingresoEsperado += aCentavos(it.esperado);
+    // Un pago de salario ya registrado cuenta con el neto que llegó (ya sin las deducciones de ese
+    // pago); uno que falta, con el neto configurado en el salario.
+    for (const it of ingresos) {
+      c.ingresoEsperado += aCentavos(it.esperado);
+      if (it.hecho) c.ingresoRecibido += aCentavos(it.real);
+      else c.ingresoPorRecibir += aCentavos(it.esperado);
+    }
     for (const a of ix.porPeriodo.get(periodo) || []) {
       if (!coincidePersona(a.personaId, filtro)) continue;
-      if (a.clase === 'ingreso') c.ingresoReal += a.c;
-      else if (a.clase === 'ahorro') c.ahorro += a.c;
+      if (a.clase === 'ingreso') {
+        c.ingresoReal += a.c;
+        if (!a.ingresoId) c.otrosIngresos += a.c; // ingresos que no son pagos de un salario
+      } else if (a.clase === 'ahorro') c.ahorro += a.c;
       else if (a.clase === 'prestamo' && a.tipoPago === 'abono') c.abonos += a.c;
       else if (a.clase === 'gasto' && !a.prestamoId && !(a.partidaId && enPlan.has(`${a.partidaId}|${a.parte || ''}`))) c.fueraDelPlan += a.c;
     }
@@ -94,7 +105,8 @@ export function resumenMes(ix, periodo, filtro) {
     const gasto = gastoDelMes(ix, periodo, filtro);
     const r = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, deCentavos(v)]));
     r.descontado = descontadoDelMes(ix, periodo, filtro);
-    r.libre = deCentavos(c.ingresoEsperado - c.comprometido - c.fueraDelPlan);
+    r.ingresoDelMes = deCentavos(c.ingresoRecibido + c.ingresoPorRecibir + c.otrosIngresos);
+    r.libre = deCentavos(c.ingresoRecibido + c.ingresoPorRecibir + c.otrosIngresos - c.comprometido - c.fueraDelPlan);
     r.gastoReal = gasto.total;
     r.gasto = gasto;
     r.partidas = partidas;
@@ -139,8 +151,10 @@ export function colorGrupo(ix, grupoId) {
 export function saldosCuentas(ix, hasta) {
   return memo(ix, `saldos|${hasta || ''}`, () => {
     const c = {};
-    // Las tarjetas no tienen saldo a favor: su deuda está en tarjetas.js.
-    for (const cuenta of ix.doc.cuentas || []) if (vivo(cuenta) && cuenta.tipo !== 'tarjeta') c[cuenta.id] = aCentavos(cuenta.saldoInicial);
+    // Las tarjetas no tienen saldo a favor: su deuda está en tarjetas.js. Con la apertura del primer
+    // año cargado, cada cuenta empieza con lo que se movió en los años anteriores.
+    const previo = ix.apertura?.cuentas || {};
+    for (const cuenta of ix.doc.cuentas || []) if (vivo(cuenta) && cuenta.tipo !== 'tarjeta') c[cuenta.id] = aCentavos(cuenta.saldoInicial) + (previo[cuenta.id] || 0);
     for (const a of ix.saldos) {
       if (hasta && a.fecha > hasta) continue;
       if (a.cuentaId in c) c[a.cuentaId] += a.delta;
@@ -183,16 +197,20 @@ export function mismoDiaEn(anio, fecha) {
 const TIPOS_SALIDA = ['gasto', 'abono', 'pago_tarjeta'];
 const totalesVacios = () => ({ bruto: 0, neto: 0, deducciones: 0, gasto: 0, ahorro: 0, cuotas: 0, abonos: 0, salidas: 0, porGrupo: {} });
 
-// Resumen de un año, completo o hasta `hasta` (una fecha de ese año): ingresos bruto y neto,
+// Montos en lempiras, sin las claves que suman cero.
+const aLempirasSinCeros = (obj) => Object.fromEntries(Object.entries(obj).filter(([, c]) => c !== 0).map(([k, c]) => [k, deCentavos(c)]));
+
+// Resumen de un año, completo, hasta `hasta` (una fecha de ese año) o hasta el final del mes
+// `hastaMes` (por meses completos, como los resúmenes guardados): ingresos bruto y neto,
 // deducciones por concepto y por persona, gasto por grupo, categoría, partida, medio y persona,
 // ahorro, pagos a deudas, salidas de dinero (por fecha de pago) y cada mes. También la deuda de
 // préstamos al empezar y al corte (con los intereses y seguros pagados) y el patrimonio.
 // `sinDatos`: el año no tiene registros (con el filtro, de esa persona).
-export function resumenAnual(ix, anio, filtro, { hasta = '' } = {}) {
+export function resumenAnual(ix, anio, filtro, { hasta = '', hastaMes = '' } = {}) {
   const y = String(anio);
-  return memo(ix, `anual|${y}|${hasta}|${claveFiltro(filtro)}`, () => {
-    const corteMes = hasta ? periodoDe(hasta) : `${y}-12`;
-    const fin = hasta || `${y}-12-31`;
+  return memo(ix, `anual|${y}|${hasta}|${hastaMes}|${claveFiltro(filtro)}`, () => {
+    const corteMes = hastaMes || (hasta ? periodoDe(hasta) : `${y}-12`);
+    const fin = hasta || fechaEnMes(corteMes, 31);
     const meses = Array.from({ length: 12 }, (_, i) => ({ periodo: `${y}-${String(i + 1).padStart(2, '0')}`, ...totalesVacios() }));
     const t = {
       ...totalesVacios(), porCategoria: {}, porPartida: {}, porMedio: {}, porPersona: {}, ingresosPorPersona: {}, deduccionesPorConcepto: {},
@@ -246,12 +264,13 @@ export function resumenAnual(ix, anio, filtro, { hasta = '' } = {}) {
     const anterior = `${Number(y) - 1}-12`;
     const deuda = { inicio: deudaAl(ix, anterior, filtro), fin: deudaAl(ix, corteMes, filtro), ...costoDePrestamos(ix, `${y}-01`, corteMes, filtro) };
     deuda.baja = redondear(deuda.inicio - deuda.fin);
-    const aL = (obj) => aLempiras(obj);
+    const aL = aLempirasSinCeros;
     return {
-      anio: y, hasta, corteMes, sinDatos: !registros,
+      anio: y, hasta, hastaMes, corteMes, sinDatos: !registros,
       ingresos: {
         bruto: deCentavos(t.bruto), neto: deCentavos(t.neto), incompletos: t.incompletos,
-        porPersona: Object.fromEntries(Object.entries(t.ingresosPorPersona).map(([id, x]) => [id, { bruto: deCentavos(x.bruto), neto: deCentavos(x.neto) }])),
+        porPersona: Object.fromEntries(Object.entries(t.ingresosPorPersona).filter(([, x]) => x.bruto || x.neto)
+          .map(([id, x]) => [id, { bruto: deCentavos(x.bruto), neto: deCentavos(x.neto) }])),
       },
       deducciones: { total: deCentavos(t.deducciones), porConcepto: aL(t.deduccionesPorConcepto), porPersona: aL(t.deduccionesPorPersona) },
       gasto: {
@@ -277,12 +296,158 @@ export function diferencia(a, b) {
   return { dif, pct: aCentavos(b) ? Math.round(((aCentavos(a) - aCentavos(b)) / Math.abs(aCentavos(b))) * 1000) / 10 : null };
 }
 
+// ---------------------------------------------------------------- Resúmenes guardados
+
+// Un año que no está cargado se consulta con su resumen guardado (colección `resumenes`): los
+// totales de cada mes en centavos, para el hogar ('') y para cada persona. El gasto por grupo no se
+// guarda: sale del gasto por categoría con los grupos de hoy.
+export const VERSION_RESUMEN = 1;
+const doce = () => Array(12).fill(0);
+const sumarMes = (obj, clave, i, c) => { (obj[clave] ??= doce())[i] += c; };
+const conClavesOrdenadas = (obj) => Object.fromEntries(Object.keys(obj).sort().map((k) => [k, obj[k]]));
+const trioPatrimonio = (p) => [aCentavos(p.cuentas), aCentavos(p.tarjetas), aCentavos(p.prestamos)];
+
+function varianteDelAnio(ix, y, filtro) {
+  const v = {
+    registros: doce(), bruto: doce(), neto: doce(), incompletos: doce(), deducciones: doce(), gasto: doce(), estimado: doce(),
+    ahorro: doce(), cuotas: doce(), abonos: doce(), salidas: doce(),
+    porCategoria: {}, porPartida: {}, porMedio: {}, porPersona: {}, ingresosPorPersona: {}, deduccionesPorConcepto: {}, deduccionesPorPersona: {},
+    deudaInicio: aCentavos(deudaAl(ix, `${Number(y) - 1}-12`, filtro)), deuda: doce(), intereses: doce(), seguros: doce(),
+    patrimonioInicio: trioPatrimonio(patrimonioAl(ix, `${Number(y) - 1}-12-31`, filtro)), patrimonio: [],
+  };
+  for (let i = 0; i < 12; i++) {
+    const periodo = `${y}-${String(i + 1).padStart(2, '0')}`;
+    for (const a of ix.porPeriodo.get(periodo) || []) {
+      if (!coincidePersona(a.personaId, filtro)) continue;
+      v.registros[i]++;
+      const persona = a.personaId || 'sin';
+      if (a.clase === 'gasto') {
+        v.gasto[i] += a.c;
+        sumarMes(v.porCategoria, a.categoriaId || 'sin', i, a.c);
+        sumarMes(v.porMedio, a.medioId || 'sin', i, a.c);
+        sumarMes(v.porPersona, persona, i, a.c);
+        if (a.partidaId) sumarMes(v.porPartida, a.partidaId, i, a.c);
+        if (a.estimado) v.estimado[i] = 1;
+      } else if (a.clase === 'ingreso') {
+        v.neto[i] += a.c;
+        v.bruto[i] += a.bruto ?? a.c;
+        const x = (v.ingresosPorPersona[persona] ??= { bruto: doce(), neto: doce() });
+        x.neto[i] += a.c;
+        x.bruto[i] += a.bruto ?? a.c;
+        if (a.completo === false) v.incompletos[i]++;
+      } else if (a.clase === 'deduccion') {
+        v.deducciones[i] += a.c;
+        sumarMes(v.deduccionesPorConcepto, a.nombre, i, a.c);
+        sumarMes(v.deduccionesPorPersona, persona, i, a.c);
+      } else if (a.clase === 'ahorro') {
+        v.ahorro[i] += a.c;
+      } else if (a.clase === 'prestamo') {
+        if (a.tipoPago === 'abono') v.abonos[i] += a.c;
+        else v.cuotas[i] += a.c;
+      }
+    }
+    v.deuda[i] = aCentavos(deudaAl(ix, periodo, filtro));
+    const costo = costoDePrestamos(ix, `${y}-01`, periodo, filtro);
+    v.intereses[i] = aCentavos(costo.intereses);
+    v.seguros[i] = aCentavos(costo.seguros);
+    v.patrimonio.push(trioPatrimonio(patrimonioAl(ix, fechaEnMes(periodo, 31), filtro)));
+  }
+  const tasa = Number(ix.config.tasaReferencia) || 0;
+  for (const a of ix.saldos) {
+    if (a.delta >= 0 || a.fecha < `${y}-01-01` || a.fecha > `${y}-12-31` || !coincidePersona(a.personaId, filtro)) continue;
+    if (!TIPOS_SALIDA.includes(ix.movimientos.get(a.origen)?.tipo)) continue;
+    v.salidas[Number(a.fecha.slice(5, 7)) - 1] += a.moneda === 'USD' ? Math.round(-a.delta * tasa) : -a.delta;
+  }
+  for (const k of ['porCategoria', 'porPartida', 'porMedio', 'porPersona', 'ingresosPorPersona', 'deduccionesPorConcepto', 'deduccionesPorPersona']) {
+    v[k] = conClavesOrdenadas(v[k]);
+  }
+  return v;
+}
+
+// Resumen para guardar de un año cargado (con el año siguiente también cargado, si existe: sus
+// pagos pueden ser de meses de este año). `personas`: ids de las personas del hogar.
+export function resumenDelAnio(ix, anio, personas = []) {
+  const y = String(anio);
+  const variantes = {};
+  for (const personaId of ['', ...[...personas].sort()]) variantes[personaId] = varianteDelAnio(ix, y, personaId ? { personaId } : null);
+  return { version: VERSION_RESUMEN, anio: Number(y), variantes };
+}
+
+// Lo mismo que resumenAnual, a partir de un resumen guardado: el año completo o hasta el final
+// de `hastaMes`. Una persona sin variante (se agregó después) sale sin datos.
+export function resumenAnualDeGuardado(ix, guardado, filtro, { hastaMes = '' } = {}) {
+  const y = String(guardado.anio);
+  const corteMes = hastaMes || `${y}-12`;
+  const n = Math.min(12, Math.max(1, Number(corteMes.slice(5, 7)) || 12));
+  const v = guardado.variantes?.[filtro?.personaId || ''] || varianteVacia();
+  const suma = (arr, hasta = n) => (arr || []).slice(0, hasta).reduce((a, x) => a + x, 0);
+  const porClave = (obj) => aLempirasSinCeros(Object.fromEntries(Object.entries(obj || {}).map(([k, arr]) => [k, suma(arr)])));
+  const grupos = (porCategoria, i = null) => {
+    const out = {};
+    for (const [cat, arr] of Object.entries(porCategoria || {})) sumarEn(out, ix.grupoDe(cat === 'sin' ? null : cat), i === null ? suma(arr) : arr[i]);
+    return aLempirasSinCeros(out);
+  };
+  const patrimonio = ([cuentas, tarjetas, prestamos]) => ({
+    cuentas: deCentavos(cuentas), tarjetas: deCentavos(tarjetas), prestamos: deCentavos(prestamos), total: deCentavos(cuentas - tarjetas - prestamos),
+  });
+  const deuda = { inicio: deCentavos(v.deudaInicio), fin: deCentavos(v.deuda[n - 1]), intereses: deCentavos(v.intereses[n - 1]), seguros: deCentavos(v.seguros[n - 1]) };
+  deuda.baja = redondear(deuda.inicio - deuda.fin);
+  return {
+    anio: y, hasta: '', hastaMes, corteMes, sinDatos: !suma(v.registros),
+    ingresos: {
+      bruto: deCentavos(suma(v.bruto)), neto: deCentavos(suma(v.neto)), incompletos: suma(v.incompletos),
+      porPersona: Object.fromEntries(Object.entries(v.ingresosPorPersona || {}).map(([id, x]) => [id, { bruto: suma(x.bruto), neto: suma(x.neto) }])
+        .filter(([, x]) => x.bruto || x.neto).map(([id, x]) => [id, { bruto: deCentavos(x.bruto), neto: deCentavos(x.neto) }])),
+    },
+    deducciones: { total: deCentavos(suma(v.deducciones)), porConcepto: porClave(v.deduccionesPorConcepto), porPersona: porClave(v.deduccionesPorPersona) },
+    gasto: {
+      total: deCentavos(suma(v.gasto)), estimado: suma(v.estimado) > 0, porGrupo: grupos(v.porCategoria), porCategoria: porClave(v.porCategoria),
+      porPartida: porClave(v.porPartida), porMedio: porClave(v.porMedio), porPersona: porClave(v.porPersona),
+    },
+    ahorro: deCentavos(suma(v.ahorro)),
+    pagosDeuda: { cuotas: deCentavos(suma(v.cuotas)), abonos: deCentavos(suma(v.abonos)), total: deCentavos(suma(v.cuotas) + suma(v.abonos)) },
+    salidas: deCentavos(suma(v.salidas)),
+    meses: Array.from({ length: 12 }, (_, i) => {
+      const incluido = i < n;
+      const de = (arr) => (incluido ? arr[i] : 0);
+      return {
+        periodo: `${y}-${String(i + 1).padStart(2, '0')}`, incluido, bruto: deCentavos(de(v.bruto)), neto: deCentavos(de(v.neto)), deducciones: deCentavos(de(v.deducciones)),
+        gasto: deCentavos(de(v.gasto)), ahorro: deCentavos(de(v.ahorro)), pagosDeuda: deCentavos(de(v.cuotas) + de(v.abonos)), salidas: deCentavos(de(v.salidas)),
+        porGrupo: incluido ? grupos(v.porCategoria, i) : {},
+      };
+    }),
+    deuda,
+    patrimonio: { inicio: patrimonio(v.patrimonioInicio), fin: patrimonio(v.patrimonio[n - 1]) },
+  };
+}
+
+function varianteVacia() {
+  return {
+    registros: doce(), bruto: doce(), neto: doce(), incompletos: doce(), deducciones: doce(), gasto: doce(), estimado: doce(), ahorro: doce(),
+    cuotas: doce(), abonos: doce(), salidas: doce(), deudaInicio: 0, deuda: doce(), intereses: doce(), seguros: doce(),
+    patrimonioInicio: [0, 0, 0], patrimonio: Array.from({ length: 12 }, () => [0, 0, 0]),
+  };
+}
+
 // Compara dos años. `modo`: 'va' (en lo que va del año: los dos cortan el mismo día que `hoy`)
 // o 'completo'. `sentido` de cada fila: 1 si subir es bueno, -1 si subir es malo.
-export function compararAnios(ix, anioA, anioB, { modo = 'va', hoy = ix.hoy, filtro } = {}) {
-  const corte = (anio) => (modo === 'va' ? mismoDiaEn(anio, hoy) : '');
-  const A = resumenAnual(ix, anioA, filtro, { hasta: corte(anioA) });
-  const B = resumenAnual(ix, anioB, filtro, { hasta: corte(anioB) });
+// `guardados`: resúmenes guardados de los años que no están cargados ({ '2025': resumen }). Si
+// uno de los dos años sale de un resumen, "en lo que va del año" corta los dos al final del mes
+// anterior al de `hoy` (en enero, que no tiene meses completos, se compara el año completo).
+export function compararAnios(ix, anioA, anioB, { modo = 'va', hoy = ix.hoy, filtro, guardados = {} } = {}) {
+  const guardadoDe = (anio) => guardados[String(anio)] || null;
+  const conResumen = !!(guardadoDe(anioA) || guardadoDe(anioB));
+  const mesAnterior = Number(String(hoy).slice(5, 7)) - 1;
+  const modoReal = modo === 'va' && conResumen && mesAnterior < 1 ? 'completo' : modo;
+  const opciones = (anio) => {
+    if (modoReal !== 'va') return {};
+    return conResumen ? { hastaMes: `${anio}-${String(mesAnterior).padStart(2, '0')}` } : { hasta: mismoDiaEn(anio, hoy) };
+  };
+  const resumen = (anio) => (guardadoDe(anio)
+    ? resumenAnualDeGuardado(ix, guardadoDe(anio), filtro, opciones(anio))
+    : resumenAnual(ix, anio, filtro, opciones(anio)));
+  const A = resumen(anioA);
+  const B = resumen(anioB);
   const fila = (clave, nombre, sentido, valor) => ({ clave, nombre, sentido, A: valor(A), B: valor(B), ...diferencia(valor(A), valor(B)) });
   const filas = [
     fila('bruto', 'Ingresos brutos', 1, (r) => r.ingresos.bruto),
@@ -300,12 +465,12 @@ export function compararAnios(ix, anioA, anioB, { modo = 'va', hoy = ix.hoy, fil
   const grupoDePartida = (id) => ix.grupoDe(ix.partidas.get(id)?.categoriaId);
   const orden = [...ix.ordenGrupos, 'sin-grupo'];
   const grupos = [...new Set([...ids(A.gasto.porGrupo), ...ids(B.gasto.porGrupo)])]
-    .sort((x, y) => orden.indexOf(x) - orden.indexOf(y))
+    .sort((x, y) => orden.indexOf(x) - orden.indexOf(y) || x.localeCompare(y))
     .map((id) => {
       const detalle = (clave, pertenece) => [...new Set([...ids(A.gasto[clave]), ...ids(B.gasto[clave])])]
         .filter(pertenece)
         .map((x) => ({ id: x, A: A.gasto[clave][x] || 0, B: B.gasto[clave][x] || 0, ...diferencia(A.gasto[clave][x] || 0, B.gasto[clave][x] || 0) }))
-        .sort((x, y) => Math.max(y.A, y.B) - Math.max(x.A, x.B));
+        .sort((x, y) => Math.max(y.A, y.B) - Math.max(x.A, x.B) || x.id.localeCompare(y.id));
       return {
         id, A: A.gasto.porGrupo[id] || 0, B: B.gasto.porGrupo[id] || 0, ...diferencia(A.gasto.porGrupo[id] || 0, B.gasto.porGrupo[id] || 0),
         categorias: detalle('porCategoria', (c) => ix.grupoDe(c === 'sin' ? null : c) === id),
@@ -313,5 +478,9 @@ export function compararAnios(ix, anioA, anioB, { modo = 'va', hoy = ix.hoy, fil
       };
     });
   const meses = A.meses.map((m, i) => ({ mes: i + 1, A: m.incluido ? m.gasto : null, B: B.meses[i].incluido ? B.meses[i].gasto : null }));
-  return { anioA: String(anioA), anioB: String(anioB), modo, corteA: A.hasta, corteB: B.hasta, A, B, sinDatosA: A.sinDatos, sinDatosB: B.sinDatos, filas, grupos, meses };
+  const corte = (r) => r.hasta || (r.hastaMes ? fechaEnMes(r.hastaMes, 31) : '');
+  return {
+    anioA: String(anioA), anioB: String(anioB), modo: modoReal, corteA: corte(A), corteB: corte(B), A, B, sinDatosA: A.sinDatos, sinDatosB: B.sinDatos,
+    resumenA: !!guardadoDe(anioA), resumenB: !!guardadoDe(anioB), filas, grupos, meses,
+  };
 }

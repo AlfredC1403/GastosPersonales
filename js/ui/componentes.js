@@ -44,6 +44,7 @@ const TRAZOS = {
   balanza: 'M12 3v18M7 21h10M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z',
   barras: 'M5 20v-9M10 20V5M15 20v-6M20 20V9M3 20h18',
   comparar: 'M4 20v-7M8 20V8M14 20v-5M18 20V6M2 20h20',
+  archivo: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
 };
 
 export const Icono = {

@@ -28,10 +28,11 @@ export function medidaPorCuenta(ix, meta) {
 // Movimientos marcados con la meta hasta `hasta` (fecha), en centavos de lempira. Aporte: una
 // transferencia (salvo la que sale de la cuenta de la meta) o un ingreso. Retiro: una
 // transferencia desde la cuenta de la meta o un gasto.
+// Los de años anteriores que trae la apertura no cuentan: ya están sumados en ella.
 export function movimientosDeMeta(ix, meta, hasta = '') {
   const lista = [];
   for (const m of ix.doc.movimientos || []) {
-    if (!vivo(m) || m.metaId !== meta.id || (hasta && m.fecha > hasta)) continue;
+    if (!vivo(m) || m.metaId !== meta.id || (hasta && m.fecha > hasta) || ix.previos?.has(m.id)) continue;
     let signo = 0;
     if (m.tipo === 'transferencia') signo = meta.cuentaId && m.cuentaId === meta.cuentaId ? -1 : 1;
     else if (m.tipo === 'ingreso') signo = 1;
@@ -41,9 +42,25 @@ export function movimientosDeMeta(ix, meta, hasta = '') {
   return lista;
 }
 
-function ahorradoAl(ix, meta, fecha, porCuenta) {
-  if (porCuenta) return aCentavos(enLempirasAprox(ix, meta.cuentaId, saldosCuentas(ix, fecha)[meta.cuentaId] || 0));
-  return aCentavos(meta.saldoInicial) + movimientosDeMeta(ix, meta, fecha).reduce((a, x) => a + x.c, 0);
+// Mes desde el que se mide el ritmo de una meta: el mes en que se creó, o el inicio del registro si es después.
+export const inicioDeMeta = (ix, meta) => [meta.creado ? periodoDe(meta.creado) : '', ix.config.inicio].filter(esPeriodo).sort().pop() || periodoDe(ix.hoy);
+
+// Lo ahorrado al final de `fecha`, en centavos de lempira. Con la apertura del primer año cargado,
+// se parte de lo que había al cierre del año anterior; antes de ese cierre solo se sabe lo guardado
+// para el día antes de que empezara la meta (`alInicio`).
+export function ahorradoAl(ix, meta, fecha, porCuenta) {
+  const ap = ix.apertura;
+  const previo = ap && fecha < ap.fecha ? ap.metas?.[meta.id]?.alInicio : null;
+  const alInicio = previo?.fecha === fecha ? previo : null;
+  if (porCuenta) {
+    const saldo = alInicio
+      ? deCentavos(aCentavos(ix.cuentas.get(meta.cuentaId)?.saldoInicial) + alInicio.cuenta)
+      : saldosCuentas(ix, fecha)[meta.cuentaId] || 0;
+    return aCentavos(enLempirasAprox(ix, meta.cuentaId, saldo));
+  }
+  if (alInicio) return aCentavos(meta.saldoInicial) + alInicio.movimientos;
+  const base = ap && fecha >= ap.fecha ? ap.metas?.[meta.id]?.movimientos || 0 : 0;
+  return aCentavos(meta.saldoInicial) + base + movimientosDeMeta(ix, meta, fecha).reduce((a, x) => a + x.c, 0);
 }
 
 // Pagos de salario al mes de quien aporta: 2 si cobra por quincena. Una meta del hogar usa el
@@ -76,7 +93,7 @@ export function estadoMeta(ix, meta) {
   const aportePorPago = aporteMensual && pagos > 1 ? Math.ceil(aporteMensual / pagos) : null;
 
   // El ritmo parejo empieza el mes en que se creó la meta, o al inicio del registro si es después.
-  const inicio = [meta.creado ? periodoDe(meta.creado) : '', ix.config.inicio].filter(esPeriodo).sort().pop() || actual;
+  const inicio = inicioDeMeta(ix, meta);
   const antesDelInicio = sumarDias(`${inicio}-01`, -1);
   const finMesAnterior = sumarDias(`${actual}-01`, -1);
   const esteMes = ahorrado - ahorradoAl(ix, meta, finMesAnterior, porCuenta);
