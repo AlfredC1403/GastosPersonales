@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sumarMeses, mesesEntre, dinero, dineroCorto, duracion, fechaEnMes, ultimoDia, aCentavos, deCentavos } from '../js/core/util.js';
+import { sumarMeses, mesesEntre, dinero, dineroCorto, duracion, fechaEnMes, ultimoDia, aCentavos, deCentavos, slug } from '../js/core/util.js';
 
 test('periodos y formato', () => {
   assert.equal(sumarMeses('2026-09', 4), '2027-01');
@@ -26,4 +26,10 @@ test('centavos sin residuos', () => {
   assert.equal(aCentavos(3333.33) + aCentavos(2666.67), aCentavos(6000));
   assert.equal(deCentavos(aCentavos(1450.35)), 1450.35);
   assert.equal(aCentavos('abc'), 0);
+});
+
+test('slug para ids', () => {
+  assert.equal(slug('Súper La Colonia'), 'super-la-colonia');
+  assert.equal(slug('  Pizza Hut #12 '), 'pizza-hut-12');
+  assert.equal(slug('Ñandú'), 'nandu');
 });

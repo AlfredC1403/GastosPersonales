@@ -37,6 +37,8 @@ const TRAZOS = {
   expandir: 'M13 17l5-5-5-5M6 17l5-5-5-5',
   campana: 'M6 9a6 6 0 1 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9zM10.2 20.5a2 2 0 0 0 3.6 0',
   billete: 'M3 7h18v10H3zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6.5 10v.01M17.5 14v.01',
+  tarjeta: 'M3 6h18v12H3zM3 10h18M7 14.5h4',
+  tienda: 'M4 9l1.5-5h13L20 9M4 9h16M5 9v11h14V9M10 20v-5h4v5',
 };
 
 export const Icono = {

@@ -1,8 +1,9 @@
-import { store, fmtEntero, indice, vivos, cuentas, buscar, filtro, bloquear, avisos } from '../store.js';
+import { store, fmtEntero, indice, vivos, cuentasDinero, tarjetas, buscar, filtro, bloquear, avisos } from '../store.js';
 import { saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
+import { resumenTarjeta } from '../core/tarjetas.js';
 import { VERSION } from '../version.js';
 import { Icono } from './componentes.js';
 
@@ -18,6 +19,7 @@ export const GRUPOS_MENU = [
   ] },
   { nombre: 'Dinero', items: [
     { id: 'cuentas', nombre: 'Cuentas', icono: 'banco', valor: 'cuentas' },
+    { id: 'tarjetas', nombre: 'Tarjetas', icono: 'tarjeta', valor: 'tarjetas' },
     { id: 'prestamos', nombre: 'Préstamos', icono: 'tendencia', valor: 'deuda' },
   ] },
   { nombre: 'Planificar', items: [
@@ -28,6 +30,7 @@ export const GRUPOS_MENU = [
     { id: 'configurar', nombre: 'Revisar configuración', icono: 'check' },
     { id: 'salarios', nombre: 'Salarios y deducciones', icono: 'billete' },
     { id: 'categorias', nombre: 'Categorías y grupos', icono: 'etiqueta' },
+    { id: 'comercios', nombre: 'Comercios', icono: 'tienda' },
     { id: 'personas', nombre: 'Personas', icono: 'personas' },
     { id: 'seguridad', nombre: 'Seguridad', icono: 'candado' },
     { id: 'datos', nombre: 'Datos y OneDrive', icono: 'nube' },
@@ -93,11 +96,13 @@ export const MenuLateral = {
       const f = filtro();
       const ix = indice();
       const saldos = saldosCuentas(ix);
-      const lista = cuentas().filter((c) => coincidePersona(c.titularId || null, f));
+      const lista = cuentasDinero().filter((c) => coincidePersona(c.titularId || null, f));
+      const deTarjetas = tarjetas().filter((c) => coincidePersona(c.titularId || null, f)).reduce((a, c) => a + resumenTarjeta(ix, c).deudaEnL, 0);
       const deuda = vivos('prestamos').length ? deudaAl(ix, '9999-12', f) : 0;
       return {
         cuentas: lista.length ? fmtEntero(lista.reduce((a, c) => a + enLempirasAprox(ix, c.id, saldos[c.id] || 0), 0)) : '',
         deuda: deuda ? fmtEntero(deuda) : '',
+        tarjetas: deTarjetas > 0 ? fmtEntero(deTarjetas) : '',
         presupuesto: `${fmtEntero(presupuestoMensual(ix, store.periodo, f).egresos)}/mes`,
         avisos: avisos().length ? String(avisos().length) : '',
       };

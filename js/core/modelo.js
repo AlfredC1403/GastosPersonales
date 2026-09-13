@@ -15,6 +15,7 @@ export const TIPOS_MOVIMIENTO = {
   transferencia: 'Transferencia',
   abono: 'Abono a capital',
   ajuste: 'Ajuste de saldo',
+  pago_tarjeta: 'Pago de tarjeta',
 };
 
 export const TIPOS_CUENTA = {
@@ -24,6 +25,7 @@ export const TIPOS_CUENTA = {
   ahorro: 'Ahorro',
   emergencias: 'Emergencias',
   reservas: 'Reservas',
+  tarjeta: 'Tarjeta de crédito',
   otra: 'Otra',
 };
 

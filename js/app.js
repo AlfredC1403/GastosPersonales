@@ -21,6 +21,8 @@ import { VistaApariencia } from './ui/apariencia.js';
 import { VistaConfigurar } from './ui/configurar.js';
 import { VistaAvisos } from './ui/avisos.js';
 import { VistaSalarios } from './ui/salarios.js';
+import { VistaTarjetas, VistaTarjeta } from './ui/tarjetas.js';
+import { VistaComercios } from './ui/comercios.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
 
@@ -31,11 +33,15 @@ const VISTAS = [
   { id: 'avisos', nombre: 'Avisos', componente: VistaAvisos },
   { id: 'salarios', nombre: 'Salarios y deducciones', componente: VistaSalarios },
   { id: 'cuentas', nombre: 'Cuentas', componente: VistaCuentas },
+  { id: 'tarjetas', nombre: 'Tarjetas', componente: VistaTarjetas },
+  // #/tarjeta/<id>/<corte>: el estado de cuenta de una tarjeta; en el menú se marca Tarjetas.
+  { id: 'tarjeta', nombre: 'Tarjeta', componente: VistaTarjeta, conParametros: true, menu: 'tarjetas', titulo: ([id]) => buscar('cuentas', id)?.nombre },
   { id: 'prestamos', nombre: 'Préstamos', componente: VistaPrestamos },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: VistaPresupuesto },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: VistaPlanDeudas },
   { id: 'personas', nombre: 'Personas', componente: VistaPersonas },
   { id: 'categorias', nombre: 'Categorías y grupos', componente: VistaCategorias },
+  { id: 'comercios', nombre: 'Comercios', componente: VistaComercios },
   { id: 'configurar', nombre: 'Revisar configuración', componente: VistaConfigurar },
   { id: 'seguridad', nombre: 'Seguridad', componente: VistaSeguridad },
   { id: 'datos', nombre: 'Datos y OneDrive', componente: VistaDatos },
@@ -51,8 +57,11 @@ const ACCESOS = [
   { id: 'movimientos', nombre: 'Movimientos', icono: 'flechas' },
 ];
 
+const partesRuta = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('/').map((x) => decodeURIComponent(x));
+const parametrosActuales = () => partesRuta().slice(1).filter(Boolean);
+
 const rutaActual = () => {
-  const id = location.hash.replace(/^#\/?/, '').split(/[?/]/)[0];
+  const id = partesRuta()[0];
   if (REDIRECCIONES[id]) {
     history.replaceState(null, '', `#/${REDIRECCIONES[id]}`);
     return REDIRECCIONES[id];
@@ -67,7 +76,7 @@ const App = {
   <p v-else-if="!store.listo" class="cargando">Cargando…</p>
   <div v-else class="marco" :class="{ 'con-menu-fijo': escritorio, 'menu-contraido': escritorio && prefs.menuContraido }">
     <aside v-if="escritorio" class="menu-fijo">
-      <menu-lateral fijo :contraido="prefs.menuContraido" :ruta="ruta" @nuevo="nuevo" @contraer="alternarMenuContraido"/>
+      <menu-lateral fijo :contraido="prefs.menuContraido" :ruta="vista.menu || ruta" @nuevo="nuevo" @contraer="alternarMenuContraido"/>
     </aside>
 
     <header class="cabecera">
@@ -83,7 +92,7 @@ const App = {
           <button type="button" class="btn-icono" aria-label="Mes siguiente" @click="mover(1)"><icono n="der" :t="20"/></button>
           <button v-if="store.periodo !== actual" type="button" class="btn-hoy" @click="store.periodo = actual">Hoy</button>
         </template>
-        <span v-else class="cab-titulo">{{ vista.nombre }}</span>
+        <span v-else class="cab-titulo">{{ tituloVista }}</span>
         <span class="cab-espacio"></span>
         <a href="#/avisos" class="btn-persona campana" :class="{ activo: ruta === 'avisos' }" :aria-label="cuentaAvisos ? cuentaAvisos + ' avisos' : 'Avisos'">
           <icono n="campana" :t="17"/><span v-if="cuentaAvisos" class="insignia">{{ cuentaAvisos > 9 ? '9+' : cuentaAvisos }}</span>
@@ -107,7 +116,7 @@ const App = {
         <button v-for="p in listaPersonas" :key="p.id" type="button" class="btn" @click="soyYo(p.id)">{{ p.nombre }}</button>
       </div>
       <franja-persona/>
-      <component :is="vista.componente" :key="vista.id"/>
+      <component :is="vista.componente" :key="claveVista" v-bind="vista.conParametros ? { params: parametros } : {}"/>
     </main>
 
     <nav v-if="!escritorio" class="navbar" aria-label="Accesos rápidos">
@@ -127,7 +136,7 @@ const App = {
     </nav>
 
     <dialog v-if="!escritorio" ref="dlgMenu" class="menu-panel" aria-label="Menú" @cancel.prevent="menuAbierto = false" @close="menuAbierto = false" @click="fueraDelMenu">
-      <menu-lateral v-if="menuAbierto" :ruta="ruta" @cerrar="menuAbierto = false"/>
+      <menu-lateral v-if="menuAbierto" :ruta="vista.menu || ruta" @cerrar="menuAbierto = false"/>
     </dialog>
 
     <modal-host/>
@@ -135,10 +144,12 @@ const App = {
   <avisos/>`,
   setup() {
     const ruta = ref(rutaActual());
+    const parametros = ref(parametrosActuales());
     const menuAbierto = ref(false);
     const dlgMenu = ref(null);
     window.addEventListener('hashchange', () => {
       ruta.value = rutaActual();
+      parametros.value = parametrosActuales();
       menuAbierto.value = false;
       window.scrollTo(0, 0);
     });
@@ -166,6 +177,9 @@ const App = {
     };
 
     const vista = computed(() => VISTAS.find((v) => v.id === ruta.value));
+    const tituloVista = computed(() => vista.value.titulo?.(parametros.value) || vista.value.nombre);
+    // Una vista con parámetros se vuelve a crear solo si cambia el primero (por ejemplo, otra tarjeta).
+    const claveVista = computed(() => (vista.value.conParametros ? `${vista.value.id}/${parametros.value[0] || ''}` : vista.value.id));
     const esAcceso = computed(() => ACCESOS.some((a) => a?.id === ruta.value));
     const listaPersonas = computed(personas);
     const cuentaAvisos = computed(() => avisos().length);
@@ -226,7 +240,7 @@ const App = {
     });
 
     return {
-      store, prefs, vista, ruta, accesos: ACCESOS, esAcceso, escritorio, menuAbierto, dlgMenu, fueraDelMenu, tocarMenu, alternarMenuContraido,
+      store, prefs, vista, tituloVista, claveVista, parametros, ruta, accesos: ACCESOS, esAcceso, escritorio, menuAbierto, dlgMenu, fueraDelMenu, tocarMenu, alternarMenuContraido,
       listaPersonas, cuentaAvisos, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
       actualizar: () => location.reload(),
       mover: (n) => { store.periodo = sumarMeses(store.periodo, n); },

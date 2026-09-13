@@ -1,9 +1,10 @@
 import { store, fmt, indice, nombrePersona, nombreCuenta, filtro, personaFiltro } from '../store.js';
 import { resumenMes, colorGrupo } from '../core/reportes.js';
 import { tramosDePago } from '../core/quincena.js';
+import { pagosDeTarjetas } from '../core/tarjetas.js';
 import { SIN_RESPONSABLE } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
-import { nombrePeriodo, fechaCorta, redondear, periodoDe } from '../core/util.js';
+import { nombrePeriodo, fechaCorta, redondear, periodoDe, fechaEnMes } from '../core/util.js';
 import { prefs, definirOrdenMes } from '../tema.js';
 import { Icono } from './componentes.js';
 import { marcarItem, abrirItem } from './formularios.js';
@@ -45,7 +46,15 @@ export const FilaItem = {
       const it = props.it;
       const partes = [];
       if (it.estado === 'omitida') partes.push('Omitida este mes');
-      else if (it.tipoItem === 'ingreso') {
+      else if (it.tipoItem === 'tarjeta') {
+        partes.push(`Corte del ${fechaCorta(it.corte)}`);
+        if (it.situacion === 'abierto') partes.push(`abierto, se paga hasta el ${fechaCorta(it.limite)}`);
+        else if (it.hecho) partes.push(it.estadoCuenta.tarde ? 'pagado tarde' : 'pagado');
+        else {
+          if (it.real > 0) partes.push(`pagado ${fmt(it.real)}`);
+          partes.push(`${it.situacion === 'vencido' ? 'venció' : 'vence'} el ${fechaCorta(it.limite)}`);
+        }
+      } else if (it.tipoItem === 'ingreso') {
         if (!it.hecho) partes.push(`${nombrePersona(it.responsableId)} · se espera el ${fechaCorta(it.fecha)}`);
         else {
           const r = it.recibos[0];
@@ -74,6 +83,10 @@ export const FilaItem = {
     const nota = computed(() => {
       const it = props.it;
       if (props.parte !== null && props.parte !== it.esperado) return { texto: `mitad de ${fmt(it.esperado)}`, clase: 'tenue' };
+      if (it.tipoItem === 'tarjeta') {
+        if (it.estado === 'parcial') return { texto: `quedan ${fmt(it.queda)}`, clase: it.situacion === 'vencido' ? 'negativo' : 'tenue' };
+        return it.estimado && !it.hecho ? { texto: it.situacion === 'abierto' ? 'lo que va' : '≈ con la última tasa', clase: 'tenue' } : null;
+      }
       if (it.tipoItem === 'ingreso') {
         const d = it.hecho && it.esperado ? redondear(it.real - it.esperado) : 0;
         return d ? { texto: `${d > 0 ? '+' : ''}${fmt(d)}`, clase: d > 0 ? 'positivo' : 'negativo' } : null;
@@ -167,6 +180,13 @@ export const VistaMes = {
         </div>
         <icono n="der" :t="20"/>
       </a>
+      <a v-if="pagosTarjeta.total" class="tarjeta enlace-tarjeta" href="#/tarjetas">
+        <div class="fila-info">
+          <span style="font-weight: 600">Pagos de tarjeta: {{ fmt(pagosTarjeta.total) }}</span>
+          <span class="fila-sub envuelve">{{ pagosTarjeta.texto }}</span>
+        </div>
+        <icono n="der" :t="20"/>
+      </a>
       <a v-if="r.fueraDelPlan" class="tarjeta enlace-tarjeta" href="#/movimientos">
         <div class="fila-info">
           <span style="font-weight: 600">Fuera del plan: {{ fmt(r.fueraDelPlan) }}</span>
@@ -235,10 +255,17 @@ export const VistaMes = {
       return d.incompletos.length ? `${conceptos}. Faltan deducciones en ${d.incompletos.length} ${d.incompletos.length === 1 ? 'pago' : 'pagos'}.` : conceptos;
     });
     const antesDelInicio = computed(() => store.periodo < store.doc.config.inicio);
+    // Pagos de tarjeta con fecha límite en el mes: son salida de dinero, no gasto del mes.
+    const pagosTarjeta = computed(() => {
+      const items = pagosDeTarjetas(indice(), `${store.periodo}-01`, fechaEnMes(store.periodo, 31), filtro());
+      const total = redondear(items.reduce((a, it) => a + (it.hecho ? it.real : it.esperado), 0));
+      const texto = items.map((it) => `${it.tarjeta.nombre} ${it.hecho ? 'pagada' : `vence el ${fechaCorta(it.limite)}`}`).join(' · ');
+      return { total, texto: `${texto}. Las compras ya cuentan como gasto en su mes; esto es el dinero que sale de la cuenta.` };
+    });
 
     return {
       store, r, tramos, elegido, tramo, etiqueta, orden, ordenes: ORDENES, definirOrdenMes, sinResponsable, secciones, pct, avanceTexto, textoDescontado,
-      antesDelInicio, fmt, nombrePeriodo, fechaCorta, periodoDe,
+      antesDelInicio, pagosTarjeta, fmt, nombrePeriodo, fechaCorta, periodoDe,
     };
   },
 };

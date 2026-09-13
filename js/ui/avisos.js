@@ -6,6 +6,7 @@ import { posponerAviso, descartarAviso, mostrarAviso } from '../tema.js';
 import {
   ReciboForm, itemsDelMes, marcarItem, abrirDetalle, completarDeducciones, cerrarPartidaDelMes, pasarAlSiguiente,
 } from './formularios.js';
+import { pagarTarjeta } from './formularios-tarjetas.js';
 
 const { computed } = Vue;
 
@@ -18,6 +19,10 @@ export function ejecutarAccionAviso(accion) {
   if (accion.tipo === 'registrarRecibo') {
     const ingreso = buscar('ingresos', accion.ingresoId);
     if (ingreso) abrirModal(`Registrar: ${ingreso.nombre}`, ReciboForm, { inicial: reciboSugerido(indice(), ingreso, accion.pago, { hoy: store.hoy }) });
+    return;
+  }
+  if (accion.tipo === 'pagarTarjeta') {
+    pagarTarjeta(accion.tarjetaId);
     return;
   }
   if (accion.tipo === 'completarDeducciones') {

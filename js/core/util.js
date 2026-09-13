@@ -10,6 +10,9 @@ export function hoy(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Texto sin tildes ni símbolos, para ids: slug('Súper La Colonia') → 'super-la-colonia'.
+export const slug = (texto) => String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
 export const periodoDe = (fecha) => String(fecha).slice(0, 7);
 export const periodoActual = () => periodoDe(hoy());
 export const mesDe = (periodo) => Number(periodo.slice(5, 7));

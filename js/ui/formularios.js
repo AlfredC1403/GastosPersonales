@@ -1,5 +1,5 @@
 import {
-  store, guardar, borrar, aviso, abrirModal, cerrarModal, indice, personas, cuentas, grupos, categoriasPorGrupo, vivos, buscar,
+  store, guardar, borrar, aviso, abrirModal, cerrarModal, indice, personas, cuentas, cuentasDinero, tarjetas, comercios, grupos, categoriasPorGrupo, vivos, buscar,
   nombreCuenta, nombrePersona, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
 } from '../store.js';
 import { TIPOS_MOVIMIENTO, TIPOS_CUENTA, TIPOS_PARTIDA, FORMAS, FRECUENCIAS, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
@@ -10,76 +10,23 @@ import {
 import { seguroEstimado, cuotasRestantes } from '../core/prestamos.js';
 import { saldosCuentas, resumenMes } from '../core/reportes.js';
 import { parteDe } from '../core/asientos.js';
-import { hoy, periodoDe, periodoActual, nombrePeriodo, nombreMes, fechaCorta, sumarMeses, redondear } from '../core/util.js';
+import { corteDe, corteSiguiente, cuotasDeCompra, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
+import { hoy, periodoDe, periodoActual, nombrePeriodo, nombreMes, fechaCorta, sumarMeses, redondear, slug } from '../core/util.js';
+import { copia, hayValor, PIE, opcionesCategoria, usarFormulario } from './formulario-base.js';
+import { editarTarjeta, pagarTarjeta, editarPagoTarjeta } from './formularios-tarjetas.js';
 
 const { reactive, ref, computed, watch, nextTick } = Vue;
 
-const copia = (x) => JSON.parse(JSON.stringify(x ?? {}));
 const TIPOS_CORTOS = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferir', abono: 'Abono', ajuste: 'Ajuste' };
-const quien = (id) => buscar('personas', id)?.nombre || 'alguien';
-const fechaHora = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const hayValor = (v) => v !== null && v !== undefined && v !== '';
-
-export function textoAuditoria(r) {
-  if (!r?.creado) return '';
-  let t = `Registrado por ${quien(r.creadoPor)} el ${fechaHora.format(new Date(r.creado))}`;
-  if (r.actualizado && r.actualizado !== r.creado) {
-    t += ` · editado por ${quien(r.actualizadoPor)} el ${fechaHora.format(new Date(r.actualizado))}`;
-  }
-  return t;
-}
-
-const PIE = `
-  <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-if="auditoria" class="meta">{{ auditoria }}</p>
-  <div class="acciones">
-    <button v-if="existe" type="button" class="btn peligro" @click="eliminar">Eliminar</button>
-    <span class="espacio"></span>
-    <button type="button" class="btn" @click="$emit('listo')">Cancelar</button>
-    <button type="submit" class="btn primario">Guardar</button>
-  </div>`;
-
-// Opciones de un selector de categoría agrupadas; `lista` es una expresión con categoriasPorGrupo(tipo).
-const opcionesCategoria = (lista) => `
-  <option :value="null">Sin categoría</option>
-  <optgroup v-for="g in ${lista}" :key="g.grupo.id" :label="g.grupo.nombre">
-    <option v-for="c in g.categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option>
-  </optgroup>`;
-
-// Helpers comunes a todos los formularios de edición. `que`: "este movimiento", "esta cuenta"…
-function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}) {
-  const error = ref('');
-  const existe = !!original.id;
-  const auditoria = textoAuditoria(original);
-  // `mensaje` puede ser un texto o una función que recibe el registro guardado.
-  function terminar(r, { mensaje, deshacer = false, cerrar = true } = {}) {
-    const guardado = guardar(coleccion, r);
-    const texto = (typeof mensaje === 'function' ? mensaje(guardado) : mensaje) || (existe ? 'Cambios guardados.' : 'Guardado.');
-    const accion = deshacer && !existe ? { texto: 'Deshacer', fn: () => borrar(coleccion, guardado.id) } : null;
-    aviso(texto, 'ok', accion ? 6000 : 2500, accion);
-    if (cerrar) emit('listo');
-    return guardado;
-  }
-  function eliminar() {
-    if (!confirm(`¿Eliminar ${que}?`)) return;
-    if (alBorrar && alBorrar() === false) return;
-    borrar(coleccion, original.id);
-    aviso('Eliminado.', 'info', 6000, {
-      texto: 'Deshacer',
-      fn: () => guardar(coleccion, { ...buscar(coleccion, original.id), borrado: false }),
-    });
-    emit('listo');
-  }
-  return { error, existe, auditoria, terminar, eliminar };
-}
 
 // Estado de una partida en un mes, sin contar el movimiento que se está editando.
 function estadoSinEste(partidaId, parte, periodo, movimientoId) {
   if (!partidaId || !periodo) return null;
   const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
   if (!it) return null;
-  const propio = it.pagos.find((p) => p.id === movimientoId);
-  const real = redondear(it.real - (propio ? Number(propio.monto) || 0 : 0));
+  // Lo que este movimiento aporta en ese mes (en lempiras; en una compra a cuotas, su cuota).
+  const propio = (indice().pagosPartida.get(`${partidaId}|${periodo}`) || []).filter((x) => x.m.id === movimientoId).reduce((a, x) => a + x.c, 0);
+  const real = redondear(it.real - propio / 100);
   return { ...it, realSinEste: real, quedaSinEste: redondear(Math.max(0, it.esperado - real)) };
 }
 
@@ -104,6 +51,7 @@ export const MovimientoForm = {
       <div class="segmentos" role="group" aria-label="Tipo de movimiento">
         <button type="button" :class="{ activo: m.tipo === 'gasto' }" :aria-pressed="m.tipo === 'gasto'" @click="m.tipo = 'gasto'; verMas = false">Gasto</button>
         <button v-if="!existe" type="button" title="Registrar un pago de salario" @click="nuevaQuincena">Quincena</button>
+        <button v-if="!existe && hayTarjetas" type="button" title="Registrar un pago de tarjeta de crédito" @click="pagoDeTarjeta">Pago de tarjeta</button>
         <button type="button" :class="{ activo: m.tipo === 'transferencia' }" :aria-pressed="m.tipo === 'transferencia'" @click="m.tipo = 'transferencia'; verMas = false">Transferir</button>
         <button type="button" :class="{ activo: otroTipo }" :aria-expanded="verMas" @click="verMas = !verMas">{{ otroTipo ? tipos[m.tipo] : 'Más' }}</button>
       </div>
@@ -114,8 +62,16 @@ export const MovimientoForm = {
     <p v-else class="nota">{{ textoVinculo }}</p>
 
     <template v-if="m.tipo !== 'ajuste'">
-      <label class="campo"><span>Monto{{ monedaOrigen === 'USD' ? ' (' + simboloDe('USD') + ')' : '' }}</span>
-        <input ref="campoMonto" v-model.number="m.monto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+      <div class="fila-campos">
+        <label class="campo"><span>{{ aCuotas ? 'Monto total de la compra' : 'Monto' }}{{ monedaOrigen === 'USD' ? ' (' + simboloDe('USD') + ')' : '' }}</span>
+          <input ref="campoMonto" v-model.number="m.monto" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+        <div v-if="origenEsTarjeta" class="campo" style="flex: 0 1 140px">
+          <span>Moneda</span>
+          <div class="segmentos" role="group" aria-label="Moneda de la compra">
+            <button v-for="(n, k) in { L: simboloDe('L'), USD: simboloDe('USD') }" :key="k" type="button" :class="{ activo: monedaOrigen === k }" :aria-pressed="monedaOrigen === k" @click="m.moneda = k">{{ n }}</button>
+          </div>
+        </div>
+      </div>
       <div v-if="montosRapidos.length" class="chips-filtro" style="margin-top: -4px">
         <button v-for="x in montosRapidos" :key="x.texto" type="button" class="chip-filtro" :class="{ activo: Number(m.monto) === x.valor }" @click="m.monto = x.valor">{{ x.texto }}</button>
       </div>
@@ -126,21 +82,54 @@ export const MovimientoForm = {
       <p class="nota">En la app: {{ fmtMoneda(saldoSinEste, monedaOrigen) }} → ajuste de {{ fmtMoneda(diferencia, monedaOrigen) }}</p>
     </template>
 
+    <label v-if="usaComercio" class="campo"><span>Comercio</span>
+      <input v-model="comercioTexto" list="lista-comercios" maxlength="60" autocomplete="off" placeholder="Opcional: dónde se compró" @input="aplicarComercio"></label>
+    <datalist id="lista-comercios"><option v-for="x in listaComercios" :key="x.id" :value="x.nombre"></option></datalist>
+
     <div class="fila-campos">
       <label class="campo"><span>Fecha</span><input v-model="m.fecha" type="date" required></label>
       <label class="campo"><span>{{ etiquetaCuenta }}</span>
-        <select v-model="m.cuentaId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option></select></label>
+        <select v-model="m.cuentaId"><option v-for="c in listaOrigen" :key="c.id" :value="c.id">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option></select></label>
       <label v-if="m.tipo === 'transferencia'" class="campo"><span>Hacia</span>
         <select v-model="m.cuentaDestinoId">
           <option :value="null" disabled>Elige…</option>
-          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === m.cuentaId">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option>
+          <option v-for="c in listaDestino" :key="c.id" :value="c.id" :disabled="c.id === m.cuentaId">{{ c.nombre }}{{ c.moneda === 'USD' ? ' (US$)' : '' }}</option>
         </select></label>
     </div>
 
     <label v-if="m.tipo === 'transferencia' && monedasDistintas" class="campo"><span>Llega a {{ nombreCuenta(m.cuentaDestinoId) }} ({{ simboloDe(monedaDestino) }})</span>
       <input v-model.number="m.montoDestino" type="number" inputmode="decimal" step="0.01" min="0"></label>
+    <p v-else-if="origenEsTarjeta && monedaOrigen === 'USD' && m.tipo !== 'ajuste'" class="nota chica">En lempiras cuenta con la tasa del día en que se pague la tarjeta. Mientras tanto se estima con la última tasa usada.</p>
     <label v-else-if="(m.tipo === 'gasto' || m.tipo === 'ingreso') && monedaOrigen === 'USD'" class="campo"><span>Tasa de cambio de ese día (opcional)</span>
       <input v-model.number="m.tasa" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65"></label>
+
+    <template v-if="puedeCuotas">
+      <label class="casilla"><input v-model="aCuotas" type="checkbox"> Compra a cuotas</label>
+      <div v-if="aCuotas" class="caja-cuotas">
+        <div class="segmentos" role="group" aria-label="Tipo de financiamiento">
+          <button v-for="(n, k) in tiposFinanciamiento" :key="k" type="button" :class="{ activo: q.tipo === k }" :aria-pressed="q.tipo === k" @click="q.tipo = k">{{ n }}</button>
+        </div>
+        <p class="nota chica" style="margin-top: -4px">{{ q.tipo === 'extra' ? 'Crédito aparte, fuera del límite: no baja el disponible de la tarjeta.' : 'Dentro del límite: la compra completa baja el disponible, que se libera con cada cuota.' }}</p>
+        <div class="fila-campos">
+          <label class="campo"><span>Cuotas</span><input v-model.number="q.n" type="number" inputmode="numeric" min="2" max="60"></label>
+          <label class="campo"><span>Primera cuota</span>
+            <select v-model="q.primerCorte"><option v-for="c in cortesPosibles" :key="c.valor || 'compra'" :value="c.valor">{{ c.texto }}</option></select></label>
+        </div>
+        <div class="fila-campos">
+          <label class="campo"><span>Tasa anual (%)</span><input v-model.number="q.tasaAnual" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0 = tasa cero"></label>
+          <label class="campo"><span>Cuota del banco (opcional)</span><input v-model.number="q.cuotaBanco" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Sin la comisión"></label>
+        </div>
+        <div class="fila-campos">
+          <label class="campo"><span>Comisión</span><input v-model.number="q.comision.valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0 si no cobran"></label>
+          <label class="campo" style="flex: 0 1 96px"><span>En</span>
+            <select v-model="q.comision.unidad" aria-label="La comisión es"><option value="porcentaje">%</option><option value="monto">{{ simboloDe('L') }}</option></select></label>
+          <label class="campo"><span>Se cobra</span>
+            <select v-model="q.comision.cobro"><option value="unica">Una vez</option><option value="mensual">En cada cuota</option></select></label>
+        </div>
+        <label v-if="existe" class="campo"><span>Si se canceló antes, ¿cuándo? (opcional)</span><input v-model="q.canceladaEl" type="date"></label>
+        <p v-if="vistaCuotas" class="nota">{{ vistaCuotas }}</p>
+      </div>
+    </template>
 
     <label v-if="m.tipo === 'abono'" class="campo"><span>Préstamo</span>
       <select v-model="m.prestamoId"><option :value="null" disabled>Elige…</option>
@@ -155,7 +144,7 @@ export const MovimientoForm = {
       <select v-model="m.partidaId"><option :value="null">Ninguno</option>
         <option v-for="p in partidasAporte" :key="p.id" :value="p.id">{{ p.texto }}</option></select></label>
 
-    <label v-if="enPartida && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
+    <label v-if="enPartida && !aCuotas && monedaOrigen === 'L' && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
       <input v-model="m.cierra" type="checkbox"> Cierra la partida: sobran {{ fmt(estado.quedaSinEste - m.monto) }}{{ estado.acumula ? ' para el mes siguiente' : '' }}
     </label>
 
@@ -183,8 +172,8 @@ export const MovimientoForm = {
   setup(props, { emit }) {
     const original = copia(props.inicial);
     const m = reactive({
-      tipo: 'gasto', fecha: store.hoy, monto: null, cuentaId: cuentas()[0]?.id || 'gastos', cuentaDestinoId: null, montoDestino: null, tasa: null,
-      categoriaId: null, personaId: store.yo, nota: '', prestamoId: null, partidaId: null, parte: null, periodo: null, cierra: false,
+      tipo: 'gasto', fecha: store.hoy, monto: null, moneda: null, cuentaId: cuentasDinero()[0]?.id || 'gastos', cuentaDestinoId: null, montoDestino: null, tasa: null,
+      categoriaId: null, personaId: store.yo, nota: '', prestamoId: null, partidaId: null, parte: null, periodo: null, cierra: false, comercioId: null,
       ...original,
     });
     const campoMonto = ref(null);
@@ -243,15 +232,82 @@ export const MovimientoForm = {
     const montosRapidos = computed(() => {
       const it = estado.value;
       const abonos = props.sugerirMontos || partida.value?.forma === 'abonos';
-      if (!enPartida.value || !it || !abonos || !(it.quedaSinEste > 0)) return [];
+      if (!enPartida.value || !it || !abonos || !(it.quedaSinEste > 0) || monedaOrigen.value !== 'L') return [];
       const lista = [1000, 2000].filter((v) => v < it.quedaSinEste).map((v) => ({ texto: fmt(v).replace('.00', ''), valor: v }));
       lista.push({ texto: `Lo que queda (${fmt(it.quedaSinEste)})`, valor: it.quedaSinEste });
       return lista;
     });
 
-    const monedaOrigen = computed(() => monedaDeCuenta(m.cuentaId));
+    // Cuentas y tarjetas. Un abono o un ajuste es de una cuenta; a una tarjeta se le paga con
+    // "Pago de tarjeta", no con una transferencia.
+    const conActual = (lista, id) => (id && !lista.some((c) => c.id === id) && buscar('cuentas', id) ? [...lista, buscar('cuentas', id)] : lista);
+    const soloCuentas = computed(() => m.tipo === 'abono' || m.tipo === 'ajuste');
+    const listaOrigen = computed(() => conActual(soloCuentas.value ? cuentasDinero() : cuentas(), original.cuentaId));
+    const listaDestino = computed(() => conActual(cuentasDinero(), original.cuentaDestinoId));
+    watch(soloCuentas, (solo) => {
+      if (solo && buscar('cuentas', m.cuentaId)?.tipo === 'tarjeta') m.cuentaId = cuentasDinero()[0]?.id || 'gastos';
+    }, { immediate: true });
+    const origenEsTarjeta = computed(() => buscar('cuentas', m.cuentaId)?.tipo === 'tarjeta');
+    const monedaOrigen = computed(() => (origenEsTarjeta.value ? (m.moneda === 'USD' ? 'USD' : 'L') : monedaDeCuenta(m.cuentaId)));
     const monedaDestino = computed(() => monedaDeCuenta(m.cuentaDestinoId));
     const monedasDistintas = computed(() => !!m.cuentaDestinoId && monedaOrigen.value !== monedaDestino.value);
+    const hayTarjetas = computed(() => tarjetas().length > 0);
+    const pagoDeTarjeta = () => pagarTarjeta(origenEsTarjeta.value ? m.cuentaId : null);
+
+    // Comercio: al elegir uno conocido se llenan su categoría, partida, medio y moneda.
+    const usaComercio = computed(() => m.tipo === 'gasto' && !esCuota.value && !m.parte);
+    const comercioTexto = ref(buscar('comercios', m.comercioId)?.nombre || '');
+    const comercioPorNombre = (nombre) => {
+      const clave = nombre.trim().toLowerCase();
+      return clave ? vivos('comercios').find((x) => x.nombre.trim().toLowerCase() === clave) : null;
+    };
+    function aplicarComercio() {
+      const x = comercioPorNombre(comercioTexto.value);
+      if (!x || original.id) return;
+      const cuenta = buscar('cuentas', x.medioPagoId);
+      if (cuenta && !cuenta.borrado) m.cuentaId = cuenta.id;
+      if (x.moneda && cuenta?.tipo === 'tarjeta') m.moneda = x.moneda;
+      if (x.categoriaId) m.categoriaId = x.categoriaId;
+      const p = buscar('partidas', x.partidaId);
+      if (p && p.tipo === 'gasto' && partidaActivaEn(p, periodoMov.value)) m.partidaId = p.id;
+    }
+
+    // Compra a cuotas: solo con tarjeta y en lempiras.
+    const puedeCuotas = computed(() => m.tipo === 'gasto' && origenEsTarjeta.value && monedaOrigen.value === 'L' && !esCuota.value && !m.parte);
+    const aCuotas = ref(!!original.cuotas);
+    const q = reactive({ n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, ...(original.cuotas || {}) });
+    q.comision = { valor: null, unidad: 'porcentaje', cobro: 'unica', ...(original.cuotas?.comision || {}) };
+    const cortesPosibles = computed(() => {
+      const cuenta = buscar('cuentas', m.cuentaId);
+      if (!cuenta?.tarjeta || !m.fecha) return [{ valor: null, texto: 'En el corte de la compra' }];
+      const primero = corteDe(cuenta, m.fecha);
+      const siguiente = corteSiguiente(cuenta, primero);
+      const lista = [{ valor: null, texto: `Corte del ${fechaCorta(primero)}` }, { valor: siguiente, texto: `Corte del ${fechaCorta(siguiente)}` }];
+      if (q.primerCorte && ![null, siguiente].includes(q.primerCorte)) lista.push({ valor: q.primerCorte, texto: `Corte del ${fechaCorta(corteDe(cuenta, q.primerCorte))}` });
+      return lista;
+    });
+    const cuotasPrevias = computed(() => {
+      const cuenta = buscar('cuentas', m.cuentaId);
+      const n = Math.round(Number(q.n));
+      if (!aCuotas.value || !cuenta?.tarjeta || !(Number(m.monto) > 0) || !(n >= 2) || !m.fecha) return [];
+      return cuotasDeCompra(cuenta, { monto: m.monto, fecha: m.fecha, cuotas: { ...q, n } });
+    });
+    // "L1,000.00 × 12, sep 2026–ago 2027. En total: comisión L360.00 (con la primera cuota). Usa L12,000.00 del límite."
+    const vistaCuotas = computed(() => {
+      const lista = cuotasPrevias.value;
+      if (!lista.length) return '';
+      const primera = lista[0];
+      const ultima = lista[lista.length - 1];
+      const tipica = lista[1] || primera;
+      const suma = (campo) => lista.reduce((a, x) => a + x[campo], 0);
+      const rango = `${nombrePeriodo(primera.periodo, true)}–${nombrePeriodo(ultima.periodo, true)}`;
+      const residuo = lista.length > 2 && ultima.c !== tipica.c ? ` (la última, ${fmt(ultima.c / 100)})` : '';
+      const costos = [];
+      if (suma('interes')) costos.push(`intereses ${fmt(suma('interes') / 100)}`);
+      if (suma('comision')) costos.push(`comisión ${fmt(suma('comision') / 100)}${q.comision.cobro === 'mensual' ? '' : ' (con la primera cuota)'}`);
+      const limite = q.tipo === 'extra' ? 'No usa el límite de la tarjeta.' : `Usa ${fmt(suma('capital') / 100)} del límite.`;
+      return `${fmt(tipica.c / 100)} × ${lista.length}${residuo}, ${rango}. ${costos.length ? `En total: ${costos.join(' y ')}.` : 'Sin intereses ni comisión.'} ${limite}`;
+    });
 
     const saldos = computed(() => saldosCuentas(indice()));
     const saldoSinEste = computed(() => {
@@ -260,8 +316,21 @@ export const MovimientoForm = {
     });
     const saldoReal = ref(original.tipo === 'ajuste' && original.creado ? redondear(saldos.value[original.cuentaId] || 0) : null);
     const diferencia = computed(() => redondear((Number(saldoReal.value) || 0) - saldoSinEste.value));
-    const etiquetaCuenta = computed(() => ({ gasto: 'Pagado desde', ingreso: 'Entra a', transferencia: 'Desde', abono: 'Pagado desde', ajuste: 'Cuenta' })[m.tipo]);
+    const etiquetaCuenta = computed(() => ({ gasto: 'Pagado con', ingreso: 'Entra a', transferencia: 'Desde', abono: 'Pagado desde', ajuste: 'Cuenta' })[m.tipo]);
     const f = usarFormulario('movimientos', original, emit, { que: 'este movimiento' });
+
+    // Comercio escrito: el existente, o uno nuevo con lo de este gasto.
+    function comercioDe(r) {
+      const nombre = comercioTexto.value.trim();
+      if (!nombre) return null;
+      const existente = comercioPorNombre(nombre);
+      if (existente) return existente.id;
+      const id = slug(nombre) ? `comercio-${slug(nombre)}` : undefined;
+      const borrado = id ? buscar('comercios', id) : null;
+      return guardar('comercios', {
+        ...(borrado || {}), id, nombre, categoriaId: r.categoriaId || null, partidaId: r.partidaId || null, medioPagoId: r.cuentaId, moneda: r.moneda, borrado: false,
+      }).id;
+    }
 
     function enviar(otro) {
       f.error.value = '';
@@ -277,33 +346,60 @@ export const MovimientoForm = {
       if (r.tipo === 'transferencia' && (!r.cuentaDestinoId || r.cuentaDestinoId === r.cuentaId)) return (f.error.value = 'Elige una cuenta de destino distinta.');
       if (r.tipo === 'transferencia' && monedasDistintas.value && !(Number(r.montoDestino) > 0)) return (f.error.value = `Escribe cuánto llega en ${simboloDe(monedaDestino.value)}.`);
       if (r.tipo === 'abono' && !r.prestamoId) return (f.error.value = 'Elige el préstamo.');
+      const conCuotas = puedeCuotas.value && aCuotas.value;
+      if (conCuotas) {
+        const n = Number(q.n);
+        if (!Number.isInteger(n) || n < 2 || n > 60) return (f.error.value = 'Escribe el número de cuotas (de 2 a 60).');
+        if (hayValor(q.tasaAnual) && !(Number(q.tasaAnual) >= 0)) return (f.error.value = 'Revisa la tasa anual.');
+        if (Number(q.cuotaBanco) > 0 && Number(q.cuotaBanco) * n < Number(r.monto)) return (f.error.value = 'Con esa cuota no se paga la compra: revisa la cuota o el número de cuotas.');
+        if (hayValor(q.comision.valor) && !(Number(q.comision.valor) >= 0 && (q.comision.unidad === 'monto' || Number(q.comision.valor) <= 100))) return (f.error.value = 'Revisa la comisión.');
+        if (q.canceladaEl && q.canceladaEl < r.fecha) return (f.error.value = 'La cancelación no puede ser antes de la compra.');
+      }
 
       r.monto = redondear(Number(r.monto));
       r.moneda = monedaOrigen.value;
       r.periodo = periodoMov.value;
       if (r.tipo !== 'transferencia') r.cuentaDestinoId = null;
       r.montoDestino = r.tipo === 'transferencia' && monedasDistintas.value ? redondear(Number(r.montoDestino)) : null;
-      r.tasa = (r.tipo === 'gasto' || r.tipo === 'ingreso') && monedaOrigen.value === 'USD' && Number(r.tasa) > 0 ? Number(r.tasa) : null;
+      r.tasa = (r.tipo === 'gasto' || r.tipo === 'ingreso') && monedaOrigen.value === 'USD' && !origenEsTarjeta.value && Number(r.tasa) > 0 ? Number(r.tasa) : null;
       if (r.tipo !== 'gasto' && r.tipo !== 'ingreso') r.categoriaId = null;
       if (r.tipo !== 'abono' && !esCuota.value) r.prestamoId = null;
       if (!(r.tipo === 'gasto' || r.tipo === 'transferencia')) r.partidaId = null;
       if (!r.partidaId) r.parte = null;
-      r.cierra = enPartida.value && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
+      r.cierra = enPartida.value && !conCuotas && r.moneda === 'L' && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
       if (r.tipo === 'ajuste') r.personaId = null;
+      r.cuotas = conCuotas
+        ? {
+          n: Number(q.n), tipo: q.tipo, tasaAnual: Number(q.tasaAnual) > 0 ? Number(q.tasaAnual) : null,
+          cuotaBanco: Number(q.cuotaBanco) > 0 ? redondear(Number(q.cuotaBanco)) : null, primerCorte: q.primerCorte || null, canceladaEl: q.canceladaEl || null,
+          comision: Number(q.comision.valor) > 0
+            ? { valor: q.comision.unidad === 'monto' ? redondear(Number(q.comision.valor)) : Number(q.comision.valor), unidad: q.comision.unidad, cobro: q.comision.cobro }
+            : null,
+        }
+        : null;
+      r.comercioId = usaComercio.value ? comercioDe(r) : null;
 
-      const mensaje = r.partidaId ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'} ${textoDePartida(g.partidaId, parteDe(g), g.periodo)}` : undefined;
+      const textoCuotas = conCuotas ? ` ${Number(q.n)} cuotas.` : '';
+      const mensaje = r.partidaId
+        ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'}${textoCuotas} ${textoDePartida(g.partidaId, parteDe(g), conCuotas ? periodoDe(cuotasPrevias.value[0]?.fecha || g.fecha) : g.periodo)}`
+        : conCuotas ? `${f.existe ? 'Cambios guardados.' : 'Guardado.'}${textoCuotas}` : undefined;
       f.terminar(r, { deshacer: true, cerrar: !otro, mensaje });
       if (otro) {
-        Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null });
+        Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null, comercioId: null });
+        comercioTexto.value = '';
+        aCuotas.value = false;
+        Object.assign(q, { tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, comision: { valor: null, unidad: 'porcentaje', cobro: 'unica' } });
         nextTick(() => campoMonto.value?.focus());
       }
     }
 
     return {
       m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
-      montosRapidos, monedaOrigen, monedaDestino, monedasDistintas, saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
+      montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
+      usaComercio, comercioTexto, aplicarComercio, puedeCuotas, aCuotas, q, cortesPosibles, vistaCuotas, tiposFinanciamiento: TIPOS_FINANCIAMIENTO,
+      saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
       fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
-      listaCuentas: computed(cuentas), listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),
+      listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')), listaComercios: computed(comercios),
       categoriasGasto: computed(() => categoriasPorGrupo('gasto')), categoriasIngreso: computed(() => categoriasPorGrupo('ingreso')), ...f,
     };
   },
@@ -363,14 +459,15 @@ export const PartidaForm = {
     </template>
 
     <div class="fila-campos">
-      <label class="campo"><span>Sale de</span>
-        <select v-model="p.medioPagoId"><option v-for="c in listaCuentas" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
+      <label class="campo"><span>{{ p.tipo === 'gasto' ? 'Se paga con' : 'Sale de' }}</span>
+        <select v-model="p.medioPagoId"><option v-for="c in (p.tipo === 'gasto' ? listaCuentas : listaDestinos)" :key="c.id" :value="c.id">{{ c.nombre }}</option></select></label>
       <label v-if="p.tipo !== 'gasto'" class="campo"><span>{{ p.tipo === 'aporte' ? 'Va a' : 'Se aparta en' }}</span>
         <select v-model="p.cuentaDestinoId"><option :value="null" disabled>Elige…</option>
-          <option v-for="c in listaCuentas" :key="c.id" :value="c.id" :disabled="c.id === p.medioPagoId">{{ c.nombre }}</option></select></label>
+          <option v-for="c in listaDestinos" :key="c.id" :value="c.id" :disabled="c.id === p.medioPagoId">{{ c.nombre }}</option></select></label>
     </div>
 
-    <label v-if="hayQuincenas" class="campo"><span>Con qué pago se cubre</span>
+    <p v-if="conTarjeta" class="nota chica">Con tarjeta, el gasto cuenta en el mes de la compra y el dinero sale de la cuenta cuando se paga la tarjeta.</p>
+    <label v-if="hayQuincenas && !conTarjeta" class="campo"><span>Con qué pago se cubre</span>
       <select v-model="p.sePagaCon">
         <option value="auto">{{ p.dia ? 'Con el pago que corre ese día' : 'Mitad con cada pago del mes' }}</option>
         <option value="q1">Con el primer pago del mes</option>
@@ -438,9 +535,13 @@ export const PartidaForm = {
 
     // Solo tiene sentido elegir el pago si algún salario es quincenal.
     const hayQuincenas = computed(() => vivos('ingresos').some((i) => i.activo !== false && i.frecuencia === 'quincenal'));
+    const conTarjeta = computed(() => p.tipo === 'gasto' && buscar('cuentas', p.medioPagoId)?.tipo === 'tarjeta');
+    watch(() => p.tipo, (tipo) => {
+      if (tipo !== 'gasto' && buscar('cuentas', p.medioPagoId)?.tipo === 'tarjeta') p.medioPagoId = cuentasDinero()[0]?.id || 'gastos';
+    });
     return {
-      p, todos, alternarMes, cambiarTipo, formas, enviar, fmt, nombreMes, nombreCuenta, tipos: TIPOS_PARTIDA, ayudaForma: AYUDA_FORMA, hayQuincenas,
-      lista: computed(() => categoriasPorGrupo('gasto')), listaPersonas: computed(personas), listaCuentas: computed(cuentas), ...f,
+      p, todos, alternarMes, cambiarTipo, formas, enviar, fmt, nombreMes, nombreCuenta, tipos: TIPOS_PARTIDA, ayudaForma: AYUDA_FORMA, hayQuincenas, conTarjeta,
+      lista: computed(() => categoriasPorGrupo('gasto')), listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaDestinos: computed(cuentasDinero), ...f,
     };
   },
 };
@@ -559,7 +660,7 @@ export const IngresoForm = {
       r.netoEsperado = redondear(Number(r.netoEsperado));
       f.terminar(r);
     }
-    return { i, cambiarFrecuencia, enviar, frecuencias: FRECUENCIAS, listaPersonas: computed(personas), listaCuentas: computed(cuentas), ...f };
+    return { i, cambiarFrecuencia, enviar, frecuencias: FRECUENCIAS, listaPersonas: computed(personas), listaCuentas: computed(cuentasDinero), ...f };
   },
 };
 
@@ -675,7 +776,7 @@ export const ReciboForm = {
     }
     return {
       r, ingreso, anteriores, hayGuia, filas, opciones, claveActual, elegir, descripcion, estado, textoPie, guia, ayuda, copiarAnterior, usarAnteriores, enviar,
-      listaCuentas: computed(cuentas), ...f,
+      listaCuentas: computed(cuentasDinero), ...f,
     };
   },
 };
@@ -777,7 +878,7 @@ export const DeduccionForm = {
     }
     return {
       d, existe, error, aplicarSugerencia, quincenal, textoCuota, enviar, eliminar, sugerencias: DEDUCCIONES_SUGERIDAS, naturalezas: NATURALEZAS, aplicaEn: APLICA_EN,
-      lista: computed(() => categoriasPorGrupo('gasto')), listaPrestamos: computed(() => vivos('prestamos')), listaCuentas: computed(cuentas),
+      lista: computed(() => categoriasPorGrupo('gasto')), listaPrestamos: computed(() => vivos('prestamos')), listaCuentas: computed(cuentasDinero),
     };
   },
 };
@@ -848,7 +949,7 @@ export const PrestamoForm = {
       f.terminar(r);
     }
 
-    return { p, seguroTexto, estimado, restantes, enviar, fmt, listaPersonas: computed(personas), listaCuentas: computed(cuentas), ...f };
+    return { p, seguroTexto, estimado, restantes, enviar, fmt, listaPersonas: computed(personas), listaCuentas: computed(cuentasDinero), ...f };
   },
 };
 
@@ -903,7 +1004,9 @@ export const CuentaForm = {
         borrar('metas', metaActual.id);
       }
     }
-    return { c, meta, cambioMoneda, enviar, simboloDe, tipos: TIPOS_CUENTA, monedas: MONEDAS, listaPersonas: computed(personas), ...f };
+    // Las tarjetas se crean y editan con su propio formulario.
+    const tipos = Object.fromEntries(Object.entries(TIPOS_CUENTA).filter(([k]) => k !== 'tarjeta'));
+    return { c, meta, cambioMoneda, enviar, simboloDe, tipos, monedas: MONEDAS, listaPersonas: computed(personas), ...f };
   },
 };
 
@@ -1118,7 +1221,7 @@ export function itemsDelMes(periodo) {
 
 export const nuevoMovimiento = (base = {}) =>
   abrirModal(base.tipo === 'ajuste' ? 'Ajustar saldo' : base.tipo === 'abono' ? 'Abono a capital' : 'Nuevo movimiento', MovimientoForm, { inicial: base });
-export const editarMovimiento = (m) => abrirModal('Editar movimiento', MovimientoForm, { inicial: m });
+export const editarMovimiento = (m) => (m.tipo === 'pago_tarjeta' ? editarPagoTarjeta(m) : abrirModal('Editar movimiento', MovimientoForm, { inicial: m }));
 export const editarRecibo = (r) => abrirModal('Pago recibido', ReciboForm, { inicial: r });
 export const registrarRecibo = (it) => abrirModal(`Registrar: ${it.nombre}`, ReciboForm, { inicial: reciboSugerido(indice(), it.ingreso, it.pago, { hoy: store.hoy }) });
 export const completarDeducciones = (r) => abrirModal('Completar deducciones', ReciboForm, { inicial: r, soloPendientes: true });
@@ -1174,6 +1277,7 @@ export const abrirDetalle = (it, periodo) => abrirModal(`${it.nombre} · ${nombr
 // de deshacer); lo variable abre el formulario con el monto sugerido y "Cierra la partida"
 // marcada; lo que se paga en abonos abre el formulario vacío con montos rápidos.
 export function marcarItem(it, periodo) {
+  if (it.tipoItem === 'tarjeta') return it.hecho ? abrirItem(it, periodo) : pagarTarjeta(it.tarjeta.id, { corte: it.corte });
   if (it.tipoItem === 'ingreso') return it.hecho ? abrirDetalle(it, periodo) : registrarRecibo(it);
   if (it.hecho || it.planilla) return abrirDetalle(it, periodo);
   const variable = it.forma === 'variable' || it.parte === 'pagar';
@@ -1188,6 +1292,10 @@ export function marcarItem(it, periodo) {
 // Toque en el nombre: el detalle del mes (pagos, "solo este mes", editar). Un ingreso sin
 // nada recibido abre directo el formulario para registrarlo.
 export function abrirItem(it, periodo) {
+  if (it.tipoItem === 'tarjeta') {
+    location.hash = `#/tarjeta/${it.tarjeta.id}/${it.corte}`;
+    return undefined;
+  }
   if (it.tipoItem === 'ingreso' && !it.recibos.length) return registrarRecibo(it);
   return abrirDetalle(it, periodo);
 }
@@ -1195,7 +1303,7 @@ export function abrirItem(it, periodo) {
 export const editarPartida = (p = {}) => abrirModal(p.id ? 'Editar partida' : 'Nueva partida', PartidaForm, { inicial: p });
 export const editarIngreso = (i = {}) => abrirModal(i.id ? 'Editar ingreso' : 'Nuevo ingreso', IngresoForm, { inicial: i });
 export const editarPrestamo = (p = {}) => abrirModal(p.id ? 'Editar préstamo' : 'Nuevo préstamo', PrestamoForm, { inicial: p });
-export const editarCuenta = (c = {}) => abrirModal(c.id ? 'Editar cuenta' : 'Nueva cuenta', CuentaForm, { inicial: c });
+export const editarCuenta = (c = {}) => (c.tipo === 'tarjeta' ? editarTarjeta(c) : abrirModal(c.id ? 'Editar cuenta' : 'Nueva cuenta', CuentaForm, { inicial: c }));
 export const editarPersona = (p = {}) => abrirModal(p.id ? 'Editar persona' : 'Nueva persona', PersonaForm, { inicial: p });
 export const editarGrupo = (g = {}) => abrirModal(g.id ? 'Editar grupo' : 'Nuevo grupo', GrupoForm, { inicial: g });
 export const editarCategoria = (c = {}) => abrirModal(c.id ? 'Editar categoría' : 'Nueva categoría', CategoriaForm, { inicial: c });

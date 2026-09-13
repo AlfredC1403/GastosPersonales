@@ -4,6 +4,7 @@ import { periodoDe, sumarMeses, sumarDias, fechaEnMes, aCentavos, deCentavos } f
 import { coincidePersona } from './filtro.js';
 import { usoDelPlan, partidasDelMes } from './presupuesto.js';
 import { resumenMes } from './reportes.js';
+import { pagosDeTarjetas } from './tarjetas.js';
 
 // Pagos de distintas personas con esta diferencia de días o menos forman un solo tramo.
 const JUNTAR_DIAS = 3;
@@ -49,7 +50,8 @@ export function tramosDePago(ix, periodo, filtro) {
   const tramoDe = (fecha) => tramos.find((t) => t.inicio <= fecha && fecha <= t.fin) || null;
 
   // 2. Lo que sale: partidas y cuotas de los tres meses, sin los pagos anuales (salen de lo
-  // apartado) ni las cuotas por planilla (ya vienen descontadas del salario).
+  // apartado), las cuotas por planilla (ya vienen descontadas del salario) ni lo que se paga con
+  // tarjeta: eso sale de caja cuando se paga la tarjeta, en su fecha límite.
   const asignar = (tramo, it, periodoItem, porcion, parte) => {
     if (!tramo) return;
     const monto = (v) => {
@@ -65,7 +67,7 @@ export function tramosDePago(ix, periodo, filtro) {
     const r = resumenes.get(p);
     const delMes = tramos.filter((t) => !t.sinPago && periodoDe(t.inicio) === p);
     const items = [...r.cuotas.filter((it) => !it.planilla), ...r.partidas.filter((it) => it.parte !== 'pagar')]
-      .filter((it) => it.esperado > 0 || it.real > 0);
+      .filter((it) => (it.esperado > 0 || it.real > 0) && !ix.esTarjeta(it.medioId));
     for (const it of items) {
       const regla = it.partida?.sePagaCon || 'auto';
       if (it.dia && regla === 'auto') asignar(tramoDe(fechaEnMes(p, it.dia)), it, p, 1);
@@ -76,6 +78,9 @@ export function tramosDePago(ix, periodo, filtro) {
         asignar(delMes[delMes.length - 1], it, p, 0.5, 2);
       } else asignar(delMes[0] || tramoDe(`${p}-01`), it, p, 1);
     }
+  }
+  for (const it of pagosDeTarjetas(ix, tramos[0].inicio, tramos[tramos.length - 1].fin, filtro)) {
+    asignar(tramoDe(it.limite), it, periodoDe(it.limite), 1);
   }
 
   // 3. Totales. Lo gastado fuera del plan cuenta por la fecha del gasto.
@@ -91,7 +96,7 @@ export function tramosDePago(ix, periodo, filtro) {
       let fuera = 0;
       for (const p of periodos) {
         for (const a of ix.porPeriodo.get(p) || []) {
-          if (a.clase !== 'gasto' || a.fecha < t.inicio || a.fecha > t.fin || !coincidePersona(a.personaId, filtro) || a.prestamoId) continue;
+          if (a.clase !== 'gasto' || a.fecha < t.inicio || a.fecha > t.fin || !coincidePersona(a.personaId, filtro) || a.prestamoId || ix.esTarjeta(a.medioId)) continue;
           if (a.partidaId && enPlan.get(p)?.has(`${a.partidaId}|${a.parte || ''}`)) continue;
           fuera += a.c;
         }

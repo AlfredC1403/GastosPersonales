@@ -1,9 +1,10 @@
 // Asientos: los registros tal como la persona los escribió se convierten en movimientos
-// de saldo, gasto, ingreso, pago de préstamo y ahorro. Todos los saldos, reportes y
-// filtros leen de aquí. Los montos van en centavos enteros.
+// de saldo, deuda de tarjeta, gasto, ingreso, deducción, pago de préstamo y ahorro. Todos los
+// saldos, reportes y filtros leen de aquí. Los montos van en centavos enteros.
 import { vivo } from './modelo.js';
 import { periodoDe, aCentavos, deCentavos } from './util.js';
 import { personaDeMovimiento } from './filtro.js';
+import { prepararTarjetas, posteriorAlSaldo } from './tarjetas.js';
 
 export const SIN_GRUPO = 'sin-grupo';
 
@@ -30,41 +31,104 @@ export function expandir(doc, ix) {
     if (!vivo(m)) continue;
     const periodo = m.periodo || periodoDe(m.fecha);
     const monto = Number(m.monto) || 0;
-    const moneda = ix.monedaDe(m.cuentaId);
+    // En una tarjeta cada movimiento dice su moneda; en una cuenta, es la de la cuenta.
+    const tarjeta = ix.tarjetas.get(m.cuentaId);
+    const moneda = ix.monedaDeMovimiento(m);
     const base = { origen: m.id, fecha: m.fecha, periodo, personaId: personaDeMovimiento(m, ix.cuentas) };
-    const saldo = (cuentaId, delta) => out.push({ ...base, clase: 'saldo', cuentaId, moneda: ix.monedaDe(cuentaId), delta: aCentavos(delta) });
-    const { c, estimado } = ix.enLempiras(monto, moneda, m.tasa);
+    const saldo = (cuentaId, delta) => out.push({ ...base, clase: 'saldo', cuentaId, moneda: ix.monedaDe(cuentaId), delta });
+    // Lo que se debe en una tarjeta, en su moneda (solo lo posterior a su saldo inicial).
+    const deuda = (t, delta, monedaDeuda, tipo, extra = {}) => {
+      if (posteriorAlSaldo(t.cuenta, extra.fecha || m.fecha, m.creado)) {
+        out.push({ ...base, ...extra, clase: 'tarjeta', cuentaId: t.cuenta.id, moneda: monedaDeuda, delta, tipo });
+      }
+    };
+    const { c, estimado } = ix.montoEnLempiras(m);
 
     if (m.tipo === 'gasto') {
-      saldo(m.cuentaId, -monto);
       const categoriaId = m.categoriaId || (m.prestamoId ? 'prestamos' : null);
-      out.push({
-        ...base, clase: 'gasto', c, estimado, categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: m.partidaId || null,
-        parte: parteDe(m), medioId: m.cuentaId, prestamoId: m.prestamoId || null,
+      const gasto = (extra) => out.push({
+        ...base, clase: 'gasto', categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: m.partidaId || null, parte: parteDe(m),
+        medioId: m.cuentaId, prestamoId: m.prestamoId || null, comercioId: m.comercioId || null, ...extra,
       });
-      if (m.prestamoId) out.push({ ...base, clase: 'prestamo', prestamoId: m.prestamoId, tipoPago: 'cuota', c, creado: m.creado || '' });
+      if (tarjeta && m.cuotas) {
+        // Compra a cuotas: cada cuota es deuda y gasto en el ciclo en que se cobra. El capital va a
+        // la categoría de la compra; los intereses y la comisión, a los cargos de tarjeta.
+        for (const q of tarjeta.cuotas.get(m.id) || []) {
+          const enCuota = { fecha: q.fecha, periodo: q.periodo, cuota: q.k, cuotas: q.n };
+          deuda(tarjeta, q.c, 'L', 'cuota', { ...enCuota, intra: q.intra, capital: q.capital, interes: q.interes, comision: q.comision });
+          gasto({ ...enCuota, c: q.capital, estimado: false });
+          for (const [c, nombre] of [[q.interes, 'Intereses de cuotas'], [q.comision, 'Comisión de cuotas']]) {
+            if (!(c > 0)) continue;
+            out.push({
+              ...base, ...enCuota, clase: 'gasto', c, estimado: false, categoriaId: 'cargos-tarjeta', grupoId: ix.grupoDe('cargos-tarjeta'),
+              partidaId: null, parte: null, medioId: m.cuentaId, prestamoId: null, comercioId: null, nombre,
+            });
+          }
+        }
+      } else {
+        if (tarjeta) deuda(tarjeta, aCentavos(monto), moneda, 'compra');
+        else saldo(m.cuentaId, -aCentavos(monto));
+        gasto({ c, estimado });
+        if (m.prestamoId) out.push({ ...base, clase: 'prestamo', prestamoId: m.prestamoId, tipoPago: 'cuota', c, creado: m.creado || '' });
+      }
     } else if (m.tipo === 'ingreso') {
-      saldo(m.cuentaId, monto);
+      if (tarjeta) deuda(tarjeta, -aCentavos(monto), moneda, 'credito');
+      else saldo(m.cuentaId, aCentavos(monto));
       const categoriaId = m.categoriaId || null;
       out.push({ ...base, clase: 'ingreso', c, bruto: c, estimado, categoriaId, grupoId: ix.grupoDe(categoriaId), medioId: m.cuentaId, ingresoId: null });
     } else if (m.tipo === 'transferencia') {
-      saldo(m.cuentaId, -monto);
-      const monedaDestino = ix.monedaDe(m.cuentaDestinoId);
+      if (tarjeta) deuda(tarjeta, aCentavos(monto), moneda, 'avance');
+      else saldo(m.cuentaId, -aCentavos(monto));
+      const destino = ix.tarjetas.get(m.cuentaDestinoId);
+      const monedaDestino = destino ? 'L' : ix.monedaDe(m.cuentaDestinoId);
       let llega = monto;
       if (tieneValor(m.montoDestino)) llega = Number(m.montoDestino) || 0;
       else if (moneda !== monedaDestino) {
         const tasa = Number(m.tasa) || tasaReferencia;
         llega = !tasa ? 0 : moneda === 'USD' ? monto * tasa : monto / tasa;
       }
-      saldo(m.cuentaDestinoId, llega);
+      if (destino) deuda(destino, -aCentavos(llega), 'L', 'pago');
+      else saldo(m.cuentaDestinoId, aCentavos(llega));
       if (m.metaId || ix.partidas.get(m.partidaId)?.tipo === 'aporte') {
         out.push({ ...base, clase: 'ahorro', c, estimado, partidaId: m.partidaId || null, metaId: m.metaId || null, cuentaId: m.cuentaDestinoId });
       }
     } else if (m.tipo === 'abono') {
-      saldo(m.cuentaId, -monto);
+      if (tarjeta) deuda(tarjeta, aCentavos(monto), moneda, 'compra');
+      else saldo(m.cuentaId, -aCentavos(monto));
       if (m.prestamoId) out.push({ ...base, clase: 'prestamo', prestamoId: m.prestamoId, tipoPago: 'abono', c, creado: m.creado || '' });
     } else if (m.tipo === 'ajuste') {
-      saldo(m.cuentaId, monto);
+      if (tarjeta) deuda(tarjeta, aCentavos(monto), moneda, 'ajuste');
+      else saldo(m.cuentaId, aCentavos(monto));
+    } else if (m.tipo === 'pago_tarjeta') {
+      // Pago de tarjeta: sale de la cuenta lo pagado en lempiras más los dólares a la tasa del
+      // día, y baja la deuda en cada moneda. No es gasto.
+      const destino = ix.tarjetas.get(m.cuentaDestinoId);
+      const pagoL = aCentavos(m.pagoL);
+      const pagoUSD = aCentavos(m.pagoUSD);
+      const tasa = Number(m.tasa) || 0;
+      const salida = ix.monedaDe(m.cuentaId) === 'USD'
+        ? pagoUSD + (tasa ? Math.round(pagoL / tasa) : 0)
+        : pagoL + Math.round(pagoUSD * tasa);
+      saldo(m.cuentaId, -salida);
+      if (destino) {
+        if (pagoL) deuda(destino, -pagoL, 'L', 'pago');
+        if (pagoUSD) deuda(destino, -pagoUSD, 'USD', 'pago', { tasa });
+      }
+    }
+  }
+
+  // Cargos de las tarjetas (membresía, seguros) en los cortes que ya pasaron.
+  for (const t of ix.tarjetas.values()) {
+    for (const cargo of t.cargos) {
+      const base = { origen: cargo.clave, fecha: cargo.fecha, periodo: cargo.periodo, personaId: t.cuenta.titularId || null };
+      out.push({ ...base, clase: 'tarjeta', cuentaId: t.cuenta.id, moneda: cargo.moneda, delta: cargo.c, tipo: 'cargo', nombre: cargo.cargo.nombre });
+      const lps = cargo.moneda === 'USD'
+        ? t.tasas.get(cargo.clave) || { c: Math.round(cargo.c * t.ultimaTasa), estimado: true }
+        : { c: cargo.c, estimado: false };
+      out.push({
+        ...base, clase: 'gasto', c: lps.c, estimado: lps.estimado, categoriaId: 'cargos-tarjeta', grupoId: ix.grupoDe('cargos-tarjeta'),
+        partidaId: null, parte: null, medioId: t.cuenta.id, prestamoId: null, comercioId: null, nombre: cargo.cargo.nombre,
+      });
     }
   }
 
@@ -124,6 +188,7 @@ export function crearIndice(doc, { hoy = '' } = {}) {
     ingresos: mapa(doc.ingresos),
     prestamos: mapa(doc.prestamos),
     metas: mapa(doc.metas),
+    comercios: mapa(doc.comercios),
     movimientos: mapa(doc.movimientos),
   };
   const tasaReferencia = Number(ix.config.tasaReferencia) || 0;
@@ -144,12 +209,26 @@ export function crearIndice(doc, { hoy = '' } = {}) {
     return { c: aCentavos((Number(monto) || 0) * t), estimado: !Number(tasa) };
   };
 
+  ix.tarjetas = prepararTarjetas(doc, { hoy, tasaReferencia });
+  ix.esTarjeta = (cuentaId) => ix.tarjetas.has(cuentaId);
+  ix.monedaDeMovimiento = (m) => (ix.tarjetas.has(m.cuentaId) ? (m.moneda === 'USD' ? 'USD' : 'L') : ix.monedaDe(m.cuentaId));
+  // Lempiras de un movimiento. Una compra en dólares con tarjeta usa la tasa de los pagos que la
+  // cubren (del cargo más antiguo al más nuevo); mientras no se paga, la última tasa usada.
+  ix.montoEnLempiras = (m) => {
+    const t = ix.tarjetas.get(m.cuentaId);
+    if (!t || m.moneda !== 'USD') return ix.enLempiras(m.monto, ix.monedaDeMovimiento(m), m.tasa);
+    const asignada = t.tasas.get(m.id);
+    return asignada ? { c: asignada.c, estimado: asignada.estimado } : { c: Math.round(aCentavos(m.monto) * t.ultimaTasa), estimado: true };
+  };
+
   ix.asientos = expandir(doc, ix);
   ix.saldos = [];
   ix.porPeriodo = new Map();
   ix.pagosPrestamo = new Map();
+  ix.eventosTarjeta = new Map();
   for (const a of ix.asientos) {
     if (a.clase === 'saldo') ix.saldos.push(a);
+    else if (a.clase === 'tarjeta') agregar(ix.eventosTarjeta, a.cuentaId, a);
     else agregar(ix.porPeriodo, a.periodo, a);
     if (a.clase === 'prestamo') {
       agregar(ix.pagosPrestamo, a.prestamoId, {
@@ -158,12 +237,20 @@ export function crearIndice(doc, { hoy = '' } = {}) {
     }
   }
 
-  // Pagos de cada partida por mes: `${partidaId}|${periodo}` → [{ m, c }]
+  // Pagos de cada partida por mes: `${partidaId}|${periodo}` → [{ m, c }]. Una compra a cuotas
+  // cuenta en cada mes en que se cobra una cuota.
   ix.pagosPartida = new Map();
+  ix.usoComercios = new Map(); // comercioId → veces que se usó
   for (const m of doc.movimientos || []) {
-    if (!vivo(m) || !m.partidaId) continue;
-    const { c } = ix.enLempiras(m.monto, ix.monedaDe(m.cuentaId), m.tasa);
-    agregar(ix.pagosPartida, `${m.partidaId}|${m.periodo || periodoDe(m.fecha)}`, { m, c });
+    if (!vivo(m)) continue;
+    if (m.comercioId) ix.usoComercios.set(m.comercioId, (ix.usoComercios.get(m.comercioId) || 0) + 1);
+    if (!m.partidaId) continue;
+    const t = ix.tarjetas.get(m.cuentaId);
+    if (t && m.cuotas && m.tipo === 'gasto') {
+      for (const q of t.cuotas.get(m.id) || []) agregar(ix.pagosPartida, `${m.partidaId}|${q.periodo}`, { m, c: q.capital });
+      continue;
+    }
+    agregar(ix.pagosPartida, `${m.partidaId}|${m.periodo || periodoDe(m.fecha)}`, { m, c: ix.montoEnLempiras(m).c });
   }
   for (const lista of ix.pagosPartida.values()) lista.sort((a, b) => porFecha(a.m, b.m) || (a.m.creado || '').localeCompare(b.m.creado || ''));
 

@@ -138,7 +138,8 @@ export function colorGrupo(ix, grupoId) {
 export function saldosCuentas(ix, hasta) {
   return memo(ix, `saldos|${hasta || ''}`, () => {
     const c = {};
-    for (const cuenta of ix.doc.cuentas || []) if (vivo(cuenta)) c[cuenta.id] = aCentavos(cuenta.saldoInicial);
+    // Las tarjetas no tienen saldo a favor: su deuda está en tarjetas.js.
+    for (const cuenta of ix.doc.cuentas || []) if (vivo(cuenta) && cuenta.tipo !== 'tarjeta') c[cuenta.id] = aCentavos(cuenta.saldoInicial);
     for (const a of ix.saldos) {
       if (hasta && a.fecha > hasta) continue;
       if (a.cuentaId in c) c[a.cuentaId] += a.delta;

@@ -1,4 +1,4 @@
-import { store, fmt, fmtMoneda, indice, cuentas, vivos, filtro, personaFiltro, nombrePersona } from '../store.js';
+import { store, fmt, fmtMoneda, indice, cuentasDinero, tarjetas, vivos, filtro, personaFiltro, nombrePersona } from '../store.js';
 import { saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { coincidePersona } from '../core/filtro.js';
@@ -37,13 +37,14 @@ export const VistaCuentas = {
     <p v-if="!lista.length && personaFiltro()" class="vacio">{{ nombrePersona(personaFiltro()) }} no tiene cuentas a su nombre. Las del hogar se ven en "Todo el hogar".</p>
     <button type="button" class="btn-punteado" @click="editarCuenta({ titularId: personaFiltro() })">+ Nueva cuenta</button>
     <p class="nota chica">Si usan el fondo de emergencia, regístrenlo como transferencia de Emergencias a Gastos, o como gasto pagado desde Emergencias.</p>
+    <p class="nota chica">Las tarjetas de crédito están en <a href="#/tarjetas">Tarjetas</a>{{ hayTarjetas ? '' : ', donde se pueden agregar' }}.</p>
   </section>`,
   setup() {
     const ix = computed(indice);
     const saldos = computed(() => saldosCuentas(ix.value));
     // El fondo de emergencia se calcula con los gastos de todo el hogar.
     const esenciales = computed(() => presupuestoMensual(ix.value, store.periodo).esenciales);
-    const lista = computed(() => cuentas().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
+    const lista = computed(() => cuentasDinero().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
       const saldo = saldos.value[c.id] || 0;
       const moneda = c.moneda || 'L';
       const meta = vivos('metas').find((m) => m.cuentaId === c.id && m.activo !== false);
@@ -70,7 +71,7 @@ export const VistaCuentas = {
       : 'El total no incluye las cuentas en dólares: define la tasa de referencia en Datos y OneDrive.'));
     const total = computed(() => redondear(lista.value.reduce((a, x) => a + enLempirasAprox(ix.value, x.c.id, x.saldo), 0)));
     return {
-      lista, total, hayDolares, notaDolares, fmt, fmtMoneda, editarCuenta, tipos: TIPOS_CUENTA, personaFiltro, nombrePersona,
+      lista, total, hayDolares, notaDolares, fmt, fmtMoneda, editarCuenta, tipos: TIPOS_CUENTA, personaFiltro, nombrePersona, hayTarjetas: computed(() => tarjetas().length > 0),
       transferir: (c) => nuevoMovimiento({ tipo: 'transferencia', cuentaId: c.id }),
       ajustar: (c) => nuevoMovimiento({ tipo: 'ajuste', cuentaId: c.id }),
     };

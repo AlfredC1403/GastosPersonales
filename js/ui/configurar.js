@@ -1,18 +1,20 @@
 // Asistente para revisar la configuración después de una actualización grande. El avance
 // se guarda en config.asistente.completados, así no vuelve a aparecer en ningún dispositivo.
-import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos, categorias, vivos, nombrePersona, fmt } from '../store.js';
+import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos, categorias, vivos, tarjetas, nombrePersona, fmt } from '../store.js';
 import { FORMAS, FRECUENCIAS } from '../core/modelo.js';
 import { hoy } from '../core/util.js';
 import { Icono, descargar } from './componentes.js';
 import { editarIngreso } from './formularios.js';
+import { editarTarjeta } from './formularios-tarjetas.js';
 
-const { ref, computed } = Vue;
+const { ref, computed, watch, nextTick } = Vue;
 
 export const PASOS_ASISTENTE = [
   { id: 'e2-respaldo', titulo: 'Respaldo y novedades' },
   { id: 'e2-grupos', titulo: 'Grupos y categorías' },
   { id: 'e2-partidas', titulo: 'Cómo se paga cada partida' },
   { id: 'e2-ingresos', titulo: 'Salarios y deducciones' },
+  { id: 'e2-tarjetas', titulo: 'Tarjetas de crédito' },
 ];
 
 // Partidas que suelen pagarse en partes.
@@ -80,6 +82,31 @@ export const VistaConfigurar = {
       <p v-if="!listaPartidas.length" class="vacio">No hay partidas de gasto.</p>
     </article>
 
+    <article v-else-if="paso.id === 'e2-tarjetas'" class="tarjeta">
+      <h2>Tarjetas de crédito</h2>
+      <ul class="lista-puntos">
+        <li>Cada tarjeta tiene su día de corte y su fecha límite: la app avisa 3 días antes y si queda algo sin pagar.</li>
+        <li>Una compra con tarjeta es gasto en el mes de la compra; el pago de la tarjeta es el dinero que sale de la cuenta, en su fecha.</li>
+        <li>Las compras en dólares se ven en dólares. En lempiras cuentan con la tasa del día en que se pagan, empezando por las más antiguas.</li>
+        <li>La membresía y los seguros se suman solos en cada corte.</li>
+        <li>Una compra a cuotas cuenta una cuota por mes, con sus intereses y comisión. El intrafinanciamiento usa el límite de la tarjeta; el extrafinanciamiento, no.</li>
+      </ul>
+      <ul v-if="listaTarjetas.length" class="lista" style="margin-top: 12px">
+        <li v-for="c in listaTarjetas" :key="c.id" class="fila clic" @click="editarTarjeta(c)">
+          <div class="fila-info">
+            <span class="fila-titulo" style="font-size: 0.93rem">{{ c.nombre }}</span>
+            <span class="fila-sub">{{ nombrePersona(c.titularId) }} · corte el {{ c.tarjeta?.diaCorte }} · pago hasta el {{ c.tarjeta?.diaPago }}</span>
+          </div>
+          <span class="btn-link">Editar</span>
+        </li>
+      </ul>
+      <p v-else class="nota" style="margin-top: 12px">Todavía no hay tarjetas. Si usan alguna, agréguenla con lo que se debe hoy.</p>
+      <div class="botones">
+        <button type="button" class="btn" @click="editarTarjeta({})">Agregar tarjeta</button>
+        <a v-if="listaTarjetas.length" class="btn" href="#/tarjetas">Ver tarjetas</a>
+      </div>
+    </article>
+
     <article v-else class="tarjeta">
       <h2>Salarios y deducciones</h2>
       <p class="nota" style="margin: 4px 0 6px">Si les pagan por quincena, cámbienlo aquí para que Mes muestre cada pago. En Salarios y deducciones agreguen el IHSS, el ISR y los préstamos que se descuentan por planilla: esos préstamos quedan pagados al registrar la quincena.</p>
@@ -108,6 +135,8 @@ export const VistaConfigurar = {
     const primeroPendiente = PASOS_ASISTENTE.findIndex((p) => !completados.value.includes(p.id));
     const actual = ref(primeroPendiente < 0 ? 0 : primeroPendiente);
     const paso = computed(() => PASOS_ASISTENTE[actual.value]);
+    // En el celular la fila de pasos se desplaza: el paso elegido queda a la vista.
+    watch(actual, () => nextTick(() => document.querySelector('.pasos li.activo')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })));
     const ocupado = ref(false);
 
     function completar() {
@@ -136,7 +165,7 @@ export const VistaConfigurar = {
 
     return {
       store, pasos: PASOS_ASISTENTE, actual, paso, hecho, completar, cambiar, ocupado, respaldarEnOneDrive, fmt, nombrePersona,
-      formas: FORMAS, frecuencias: FRECUENCIAS, editarIngreso,
+      formas: FORMAS, frecuencias: FRECUENCIAS, editarIngreso, editarTarjeta, listaTarjetas: computed(tarjetas),
       sugerida: (p) => p.forma !== 'abonos' && EN_ABONOS.test(p.nombre),
       bajarRespaldo: () => descargar(`gastos-respaldo-${hoy()}.json`, exportar(), 'application/json'),
       listaGrupos: computed(() => grupos().map((grupo) => ({ grupo, categorias: categorias().filter((c) => c.grupoId === grupo.id) }))),

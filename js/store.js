@@ -76,6 +76,14 @@ export const fmtCorto = (n) => dineroCorto(n, simbolo());
 export const fmtMoneda = (n, moneda) => dinero(n, { simbolo: simboloDe(moneda) });
 export const personas = () => vivos('personas').sort((a, b) => a.nombre.localeCompare(b.nombre));
 export const cuentas = () => vivos('cuentas');
+// Cuentas con saldo (sin las tarjetas de crédito, que tienen deuda) y tarjetas.
+export const cuentasDinero = () => cuentas().filter((c) => c.tipo !== 'tarjeta');
+export const tarjetas = () => cuentas().filter((c) => c.tipo === 'tarjeta');
+// Comercios, del más usado al menos usado.
+export const comercios = () => {
+  const uso = indice().usoComercios;
+  return vivos('comercios').sort((a, b) => (uso.get(b.id) || 0) - (uso.get(a.id) || 0) || a.nombre.localeCompare(b.nombre));
+};
 export const categorias = () => vivos('categorias').sort((a, b) => a.nombre.localeCompare(b.nombre));
 export const grupos = () => vivos('grupos').sort((a, b) => (Number(a.orden) || 99) - (Number(b.orden) || 99) || a.nombre.localeCompare(b.nombre));
 export const partidas = () => vivos('partidas').sort((a, b) => a.nombre.localeCompare(b.nombre));

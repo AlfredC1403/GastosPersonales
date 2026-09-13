@@ -1,6 +1,7 @@
 import {
-  store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro, avisos,
+  store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentasDinero, tarjetas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro, avisos,
 } from '../store.js';
+import { resumenTarjeta } from '../core/tarjetas.js';
 import { tramoDeFecha } from '../core/quincena.js';
 import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
@@ -14,6 +15,8 @@ import { Icono } from './componentes.js';
 import { marcarItem, abrirItem, completarDeducciones } from './formularios.js';
 import { PASOS_ASISTENTE } from './configurar.js';
 import { ejecutarAccionAviso } from './avisos.js';
+import { pagarTarjeta, dosMonedas } from './formularios-tarjetas.js';
+import { cuandoVence } from './tarjetas.js';
 
 const { computed } = Vue;
 
@@ -29,7 +32,7 @@ export const VistaInicio = {
       <a class="btn primario" href="#/datos">Ir a Datos y OneDrive</a>
     </div>
     <div v-else-if="asistentePendiente" class="aviso-banner">
-      <p>La app ahora agrupa los gastos por grupos y permite pagar partidas en abonos. Revisa en {{ pasosAsistente }} pasos cómo quedaron tus datos.</p>
+      <p>Hay novedades en la app. Revisa {{ pasosAsistente === 1 ? 'un paso' : 'en ' + pasosAsistente + ' pasos' }} cómo quedaron tus datos.</p>
       <a class="btn primario" href="#/configurar">Revisar</a>
     </div>
     <div v-else-if="faltan.length" class="aviso-banner ambar">
@@ -199,6 +202,26 @@ export const VistaInicio = {
       </div>
     </article>
 
+    <article v-if="listaTarjetas.length" class="tarjeta">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Tarjetas</h2>
+        <a class="btn-link" href="#/tarjetas">Ver tarjetas</a>
+      </div>
+      <ul class="lista" style="margin-top: 8px">
+        <li v-for="x in listaTarjetas" :key="x.id" class="fila">
+          <a class="fila-info enlace-fila" :href="'#/tarjeta/' + x.id">
+            <span class="fila-titulo" style="font-size: 0.93rem">{{ x.nombre }}</span>
+            <span class="fila-sub" :class="{ 'texto-aviso': x.urgente }">{{ x.sub }}</span>
+          </a>
+          <div class="derecha">
+            <div class="monto">{{ fmtMoneda(x.deuda.L, 'L') }}</div>
+            <div v-if="x.deuda.USD" class="dif tenue">{{ fmtMoneda(x.deuda.USD, 'USD') }}</div>
+          </div>
+          <button v-if="x.pagar" type="button" class="btn" @click="pagarTarjeta(x.id, { corte: x.corte })">Pagar</button>
+        </li>
+      </ul>
+    </article>
+
     <article class="tarjeta">
       <div class="tarjeta-cab centro pegada">
         <h2>Cuentas</h2>
@@ -344,7 +367,7 @@ export const VistaInicio = {
 
     const saldos = computed(() => saldosCuentas(ix.value));
     const esenciales = computed(() => presupuestoMensual(ix.value, store.periodo).esenciales);
-    const listaCuentas = computed(() => cuentas().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
+    const listaCuentas = computed(() => cuentasDinero().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
       const saldo = saldos.value[c.id] || 0;
       const meta = vivos('metas').find((m) => m.cuentaId === c.id && m.activo !== false);
       let objetivo = meta?.montoObjetivo || null;
@@ -362,6 +385,16 @@ export const VistaInicio = {
       return { id: c.id, nombre: c.nombre, moneda: c.moneda || 'L', saldo, nota, pct: pctMeta };
     }));
     const totalCuentas = computed(() => redondear(listaCuentas.value.reduce((a, c) => a + enLempirasAprox(ix.value, c.id, c.saldo), 0)));
+    // Tarjetas: lo que se debe y el pago del último corte mientras no esté pagado.
+    const listaTarjetas = computed(() => tarjetas().filter((c) => coincidePersona(c.titularId || null, filtro())).map((c) => {
+      const r = resumenTarjeta(ix.value, c);
+      const u = r.ultimo;
+      const porPagar = !u.antesDelSaldo && (u.pendiente.L > 0 || u.pendiente.USD > 0);
+      const sub = porPagar
+        ? `${u.situacion === 'vencido' ? 'Venció' : 'Vence'} ${cuandoVence(u.limite, store.hoy)}: ${u.situacion === 'parcial' || u.situacion === 'vencido' ? 'faltan' : 'pago de contado'} ${dosMonedas(u.pendiente)}`
+        : `Al día · corte el ${fechaCorta(r.corteAbierto)}`;
+      return { id: c.id, nombre: c.nombre, deuda: r.deuda, sub, pagar: porPagar, corte: u.corte, urgente: porPagar && (u.situacion === 'vencido' || u.limite <= store.hoy) };
+    }));
 
     const categoriasMes = computed(() => {
       const x = ix.value;
@@ -384,14 +417,15 @@ export const VistaInicio = {
     const avisosHoy = computed(() => avisosVisibles.value.filter((a) => a.cuando === 'hoy').slice(0, 3));
     const tramo = computed(() => (store.periodo === periodoDe(store.hoy) ? tramoDeFecha(ix.value, store.hoy, filtro()) : null));
     const descontado = computed(() => Object.entries(r.value.descontado.porConcepto).sort((a, b) => b[1] - a[1]).map(([nombre, valor]) => ({ nombre, valor })));
-    const asistentePendiente = computed(() => {
+    const pasosPendientes = computed(() => {
       const hechos = store.doc.config.asistente?.completados || [];
-      return !!store.doc.config.migradoDesde && PASOS_ASISTENTE.some((p) => !hechos.includes(p.id));
+      return PASOS_ASISTENTE.filter((p) => !hechos.includes(p.id)).length;
     });
+    const asistentePendiente = computed(() => !!store.doc.config.migradoDesde && pasosPendientes.value > 0);
 
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
-      variables, resumenVariables, deuda, listaCuentas, totalCuentas, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: PASOS_ASISTENTE.length,
+      variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
       avisosHoy, totalAvisos, tramo, descontado, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),

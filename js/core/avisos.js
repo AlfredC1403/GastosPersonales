@@ -4,6 +4,7 @@ import { vivo, TIPOS_RECIBO } from './modelo.js';
 import { periodoDe, sumarMeses, sumarDias, fechaEnMes, ultimoDia, fechaCorta, nombrePeriodo, dinero } from './util.js';
 import { resumenMes } from './reportes.js';
 import { pagosSinRegistrar, estadoRecibo, netoEsperadoDe } from './nomina.js';
+import { resumenTarjeta, proximoCobro, fechaSaldoDe } from './tarjetas.js';
 
 export const CUANDO = { hoy: 'Hoy', semana: 'Esta semana', revisar: 'Para revisar' };
 
@@ -15,6 +16,7 @@ const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 export function calcularAvisos(ix, { hoy, sync = null } = {}) {
   const out = [];
   const L = (n) => dinero(n, { simbolo: ix.config.moneda || 'L' });
+  const USD = (n) => dinero(n, { simbolo: ix.config.simboloExt || 'US$' });
   const actual = periodoDe(hoy);
   const anterior = sumarMeses(actual, -1);
   const inicio = ix.config.inicio || actual;
@@ -118,6 +120,33 @@ export function calcularAvisos(ix, { hoy, sync = null } = {}) {
       titulo: `${it.partida.nombre} se paga en ${nombrePeriodo(siguiente)}`, texto: `${L(it.esperado)}.`,
       acciones: [{ tipo: 'ruta', ruta: '#/cuentas', texto: 'Ver cuentas' }],
     });
+  }
+
+  // Tarjetas: el pago del último corte (vencido, que vence en 3 días o parcial) y los cargos
+  // anuales que se cobran el mes siguiente.
+  for (const { cuenta } of ix.tarjetas.values()) {
+    const e = resumenTarjeta(ix, cuenta).ultimo;
+    const base = { tipo: 'tarjeta', personaId: cuenta.titularId || null, acciones: [{ tipo: 'pagarTarjeta', tarjetaId: cuenta.id, texto: 'Pagar' }] };
+    if (e.corte >= fechaSaldoDe(cuenta) && (e.pendiente.L > 0 || e.pendiente.USD > 0)) {
+      const falta = [e.pendiente.L ? L(e.pendiente.L) : '', e.pendiente.USD ? USD(e.pendiente.USD) : ''].filter(Boolean).join(' y ');
+      if (e.situacion === 'vencido') {
+        agregar({ ...base, id: `tarjeta-vencida:${cuenta.id}:${e.corte}`, cuando: 'hoy', titulo: `El pago de ${cuenta.nombre} venció el ${fechaCorta(e.limite)}`, texto: `Faltan ${falta}.` });
+      } else if (e.limite <= sumarDias(hoy, 3)) {
+        agregar({ ...base, id: `tarjeta-vence:${cuenta.id}:${e.corte}`, cuando: 'semana', titulo: `El pago de ${cuenta.nombre} vence el ${fechaCorta(e.limite)}`, texto: e.situacion === 'parcial' ? `Quedan ${falta}.` : `Pago de contado: ${falta}.` });
+      } else if (e.situacion === 'parcial') {
+        agregar({ ...base, id: `tarjeta-parcial:${cuenta.id}:${e.corte}`, cuando: 'revisar', titulo: `${cuenta.nombre}: pago parcial del corte del ${fechaCorta(e.corte)}`, texto: `Quedan ${falta}; vence el ${fechaCorta(e.limite)}.` });
+      }
+    }
+    for (const cargo of cuenta.tarjeta?.cargos || []) {
+      const cobro = proximoCobro(cuenta, cargo, siguiente);
+      if (!cobro || periodoDe(cobro) !== siguiente) continue;
+      agregar({
+        id: `cargo:${cuenta.id}:${cargo.id}:${cobro}`, cuando: 'revisar', tipo: 'tarjeta', personaId: cuenta.titularId || null,
+        titulo: `${cargo.nombre} de ${cuenta.nombre} se cobra en ${nombrePeriodo(siguiente)}`,
+        texto: `${cargo.moneda === 'USD' ? USD(cargo.monto) : L(cargo.monto)} en el corte del ${fechaCorta(cobro)}.`,
+        acciones: [{ tipo: 'ruta', ruta: `#/tarjeta/${cuenta.id}`, texto: 'Ver tarjeta' }],
+      });
+    }
   }
 
   // Configuración incompleta.

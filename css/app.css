@@ -433,3 +433,18 @@ dialog.modal::backdrop { background: rgba(15, 23, 42, 0.5); backdrop-filter: blu
 .pasos li.activo button { background: var(--acento-sup); color: var(--tinta); font-weight: 600; }
 .pasos li.hecho .num-circulo { background: var(--ok); color: #fff; }
 .lista-puntos { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 0.92rem; color: var(--tinta2); }
+
+/* Tarjetas de crédito y compras a cuotas */
+.hero-num.chico { font-size: 1.6rem; }
+.chip.mal { background: var(--mal-sup); color: var(--mal); }
+.icono-tipo.pago_tarjeta { background: var(--acento-sup); color: var(--acento); }
+.icono-tipo.cuota, .icono-tipo.cargo { background: var(--mal-sup); color: var(--mal); }
+.deuda-tarjeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 28px; margin-top: 10px; }
+.deuda-tarjeta > div { display: flex; flex-direction: column; gap: 2px; }
+.caja-corte { padding: 10px 14px; background: var(--sup2); border-radius: var(--radio); font-size: 0.88rem; display: flex; flex-direction: column; gap: 4px; }
+.caja-cuotas, .cargo-tarjeta { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--linea); border-radius: var(--radio); }
+.navegador-corte { display: flex; align-items: center; gap: 8px; }
+.navegador-titulos { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.navegador-titulo { font-weight: 600; font-size: 1rem; }
+.navegador-sub { font-size: 0.78rem; color: var(--tinta3); }
+.enlace-fila, .enlace-fila:hover { color: inherit; text-decoration: none; opacity: 1; }

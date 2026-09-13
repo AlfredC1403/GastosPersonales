@@ -14,12 +14,14 @@ import { editarMovimiento, editarRecibo } from './formularios.js';
 
 const { reactive, ref, computed } = Vue;
 
-const TIPOS = { ...TIPOS_MOVIMIENTO, recibo: 'Salario o pago recibido' };
-const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abono: 'A', ajuste: '±' };
+const TIPOS = { ...TIPOS_MOVIMIENTO, recibo: 'Salario o pago recibido', cuota: 'Cuota de una compra a cuotas', cargo: 'Cargo de tarjeta' };
+const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abono: 'A', ajuste: '±', pago_tarjeta: 'P', cuota: 'C', cargo: 'C' };
+// Lo que cuenta como gasto en los totales (con el chip "Gastos").
+const ES_GASTO = ['gasto', 'cuota', 'cargo'];
 const DIA_SEMANA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'short', timeStyle: 'short' });
-const VERBO = { gasto: 'pagó', abono: 'pagó', ingreso: 'recibió', recibo: 'recibió', transferencia: 'hizo' };
+const VERBO = { gasto: 'pagó', cuota: 'pagó', abono: 'pagó', pago_tarjeta: 'pagó', ingreso: 'recibió', recibo: 'recibió', transferencia: 'hizo' };
 const AGRUPAR = { dia: 'Por día', grupo: 'Por grupo', medio: 'Por medio' };
 
 function csv(filas) {
@@ -76,7 +78,10 @@ export const VistaMovimientos = {
         <li v-for="x in g.filas" :key="x.id" @click="abrir(x)">
           <span class="icono-tipo" :class="x.tipo" :title="tipos[x.tipo]">{{ inicial[x.tipo] }}</span>
           <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub">{{ x.subtitulo }}</span></div>
-          <span class="monto" :class="{ positivo: x.signo > 0 }">{{ x.textoMonto }}</span>
+          <div class="derecha">
+            <div class="monto" :class="{ positivo: x.signo > 0 }">{{ x.textoMonto }}</div>
+            <div v-if="x.textoLempiras" class="dif tenue">{{ x.textoLempiras }}</div>
+          </div>
         </li>
       </ul>
     </div>
@@ -87,39 +92,79 @@ export const VistaMovimientos = {
     const masFiltros = computed(() => [f.cuenta, f.categoria, f.grupo, f.partida, f.moneda, f.anoto, f.tipo && !['gasto', 'ingresos'].includes(f.tipo)].filter(Boolean).length);
     const alternar = (campo, valor) => { f[campo] = f[campo] === valor ? '' : valor; };
 
-    // Movimientos y pagos recibidos, con lo necesario para mostrarlos, filtrarlos y agruparlos.
+    // Movimientos, pagos recibidos, cuotas de las compras a cuotas y cargos de las tarjetas, con lo
+    // necesario para mostrarlos, filtrarlos y agruparlos. `enL`: el monto en lempiras.
     const registros = computed(() => {
       const ix = indice();
       const out = [];
+      const nombreComercio = (m) => (m.comercioId ? ix.comercios.get(m.comercioId)?.nombre || '' : '');
       for (const m of vivos('movimientos')) {
         const nombreVinculo = buscar('partidas', m.partidaId)?.nombre || buscar('prestamos', m.prestamoId)?.nombre || '';
         const categoriaId = m.categoriaId || (m.prestamoId && m.tipo === 'gasto' ? 'prestamos' : null);
-        out.push({
+        const comercio = nombreComercio(m);
+        const base = {
           id: m.id, registro: m, tipo: m.tipo, fecha: m.fecha, periodo: m.periodo || periodoDe(m.fecha), monto: Number(m.monto) || 0,
-          moneda: ix.monedaDe(m.cuentaId), cuentaId: m.cuentaId, cuentaDestinoId: m.cuentaDestinoId || null, categoriaId,
+          moneda: ix.monedaDeMovimiento(m), cuentaId: m.cuentaId, cuentaDestinoId: m.cuentaDestinoId || null, categoriaId,
           grupoId: m.tipo === 'gasto' || m.tipo === 'ingreso' ? ix.grupoDe(categoriaId) : null, partidaId: m.partidaId || null,
-          personaId: personaDeMovimiento(m, ix.cuentas), personaAnotada: m.personaId || null, creadoPor: m.creadoPor, nota: m.nota || '', nombreVinculo,
-          titulo: m.nota || nombreVinculo || (m.tipo === 'transferencia' ? `A ${nombreCuenta(m.cuentaDestinoId)}` : '') || (categoriaId ? nombreCategoria(categoriaId) : TIPOS_MOVIMIENTO[m.tipo]),
-        });
+          personaId: personaDeMovimiento(m, ix.cuentas), personaAnotada: m.personaId || null, creadoPor: m.creadoPor, nota: m.nota || '', nombreVinculo, comercio,
+          titulo: m.nota || comercio || nombreVinculo || (m.tipo === 'transferencia' ? `A ${nombreCuenta(m.cuentaDestinoId)}` : '')
+            || (m.tipo === 'pago_tarjeta' ? `Pago de ${nombreCuenta(m.cuentaDestinoId)}` : '') || (categoriaId ? nombreCategoria(categoriaId) : TIPOS_MOVIMIENTO[m.tipo]),
+          abrir: () => editarMovimiento(m),
+        };
+        const t = ix.tarjetas.get(m.cuentaId);
+        if (m.tipo === 'gasto' && m.cuotas && t) {
+          // Compra a cuotas: una fila por cuota, en el mes en que se cobra.
+          for (const q of t.cuotas.get(m.id) || []) {
+            out.push({
+              ...base, id: `${m.id}:${q.k}`, tipo: 'cuota', fecha: q.fecha, periodo: q.periodo, monto: q.c / 100, moneda: 'L', enL: q.c / 100,
+              titulo: `${base.titulo} · ${q.cancelacion ? 'cancelación' : `cuota ${q.k} de ${q.n}`}`, compra: m.fecha, interes: q.interes / 100, comision: q.comision / 100,
+            });
+          }
+          continue;
+        }
+        const l = m.tipo === 'pago_tarjeta' ? null : ix.montoEnLempiras(m);
+        out.push({ ...base, enL: l ? l.c / 100 : 0, estimado: !!l?.estimado && base.moneda === 'USD' });
       }
       for (const r of vivos('recibos')) {
         const ingreso = ix.ingresos.get(r.ingresoId);
         const categoriaId = r.tipo === 'decimo13' || r.tipo === 'decimo14' ? 'decimos' : ingreso?.categoriaId || 'salario';
         const nombre = ingreso?.nombre || 'Ingreso';
+        const moneda = ix.monedaDe(r.cuentaId);
         out.push({
           id: r.id, registro: r, tipo: 'recibo', fecha: r.fecha, periodo: r.periodo || periodoDe(r.ocurrencia || r.fecha), monto: Number(r.neto) || 0,
-          moneda: ix.monedaDe(r.cuentaId), cuentaId: r.cuentaId, cuentaDestinoId: null, categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: null,
-          personaId: r.personaId || ingreso?.personaId || null, personaAnotada: r.personaId || ingreso?.personaId || null, creadoPor: r.creadoPor, nota: r.nota || '', nombreVinculo: nombre,
+          moneda, enL: ix.enLempiras(r.neto, moneda).c / 100, cuentaId: r.cuentaId, cuentaDestinoId: null, categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: null,
+          personaId: r.personaId || ingreso?.personaId || null, personaAnotada: r.personaId || ingreso?.personaId || null, creadoPor: r.creadoPor, nota: r.nota || '', nombreVinculo: nombre, comercio: '',
           faltan: estadoRecibo(r).pendientes,
           titulo: r.nota || (r.tipo === 'ordinario' ? `${nombre} · pago del ${fechaCorta(r.ocurrencia)}` : `${nombre} · ${TIPOS_RECIBO[r.tipo]?.toLowerCase() || 'pago'}`),
+          abrir: () => editarRecibo(r),
         });
+      }
+      for (const t of ix.tarjetas.values()) {
+        for (const cargo of t.cargos) {
+          const l = cargo.moneda === 'USD' ? t.tasas.get(cargo.clave) || { c: Math.round(cargo.c * t.ultimaTasa), estimado: true } : { c: cargo.c, estimado: false };
+          out.push({
+            id: cargo.clave, registro: { creado: '' }, tipo: 'cargo', fecha: cargo.fecha, periodo: cargo.periodo, monto: cargo.c / 100, moneda: cargo.moneda, enL: l.c / 100,
+            estimado: cargo.moneda === 'USD' && l.estimado, cuentaId: t.cuenta.id, cuentaDestinoId: null, categoriaId: 'cargos-tarjeta', grupoId: ix.grupoDe('cargos-tarjeta'), partidaId: null,
+            personaId: t.cuenta.titularId || null, personaAnotada: null, creadoPor: null, nota: '', nombreVinculo: '', comercio: '',
+            titulo: cargo.cargo.nombre, abrir: () => { location.hash = `#/tarjeta/${t.cuenta.id}/${cargo.fecha}`; },
+          });
+        }
       }
       return out;
     });
 
     function subtitulo(x) {
-      const cuenta = x.tipo === 'transferencia' ? `${nombreCuenta(x.cuentaId)} → ${nombreCuenta(x.cuentaDestinoId)}` : nombreCuenta(x.cuentaId);
+      const cuenta = x.tipo === 'transferencia' || x.tipo === 'pago_tarjeta' ? `${nombreCuenta(x.cuentaId)} → ${nombreCuenta(x.cuentaDestinoId)}` : nombreCuenta(x.cuentaId);
       const partes = [cuenta];
+      if (x.tipo === 'cuota') {
+        partes.push(`compra del ${fechaCorta(x.compra)}`);
+        if (x.interes || x.comision) partes.push(`incluye ${[x.interes ? `intereses ${fmt(x.interes)}` : '', x.comision ? `comisión ${fmt(x.comision)}` : ''].filter(Boolean).join(' y ')}`);
+      }
+      if (x.tipo === 'pago_tarjeta') {
+        const m = x.registro;
+        const pagado = [Number(m.pagoL) ? fmtMoneda(m.pagoL, 'L') : '', Number(m.pagoUSD) ? `${fmtMoneda(m.pagoUSD, 'USD')}${m.tasa ? ' a ' + m.tasa : ''}` : ''].filter(Boolean).join(' + ');
+        if (pagado) partes.push(pagado);
+      }
       if (x.faltan) partes.push(x.faltan === 1 ? 'falta 1 deducción' : `faltan ${x.faltan} deducciones`);
       if (x.categoriaId && x.titulo !== nombreCategoria(x.categoriaId) && x.tipo !== 'recibo') partes.push(nombreCategoria(x.categoriaId));
       const verbo = VERBO[x.tipo];
@@ -130,14 +175,16 @@ export const VistaMovimientos = {
       }
       return partes.join(' · ');
     }
-    const signo = (x) => (x.tipo === 'ingreso' || x.tipo === 'recibo' ? 1 : x.tipo === 'gasto' || x.tipo === 'abono' ? -1 : x.tipo === 'ajuste' ? Math.sign(x.monto) : 0);
-    const buscable = (x) => [x.titulo, x.nota, x.nombreVinculo, nombreCategoria(x.categoriaId), nombreCuenta(x.cuentaId), String(x.monto)].join(' ').toLowerCase();
+    const signo = (x) => (x.tipo === 'ingreso' || x.tipo === 'recibo' ? 1 : ES_GASTO.includes(x.tipo) || x.tipo === 'abono' ? -1 : x.tipo === 'ajuste' ? Math.sign(x.monto) : 0);
+    const buscable = (x) => [x.titulo, x.nota, x.nombreVinculo, x.comercio, nombreCategoria(x.categoriaId), nombreCuenta(x.cuentaId), String(x.monto)].join(' ').toLowerCase();
 
     const lista = computed(() => {
+      const ix = indice();
       const q = f.q.trim().toLowerCase();
       return registros.value
-        .filter((x) => (f.todo || x.periodo === store.periodo)
-          && (!f.tipo || (f.tipo === 'ingresos' ? x.tipo === 'ingreso' || x.tipo === 'recibo' : x.tipo === f.tipo))
+        // En "Todos los meses" no salen las cuotas que todavía no se cobran.
+        .filter((x) => (f.todo ? !(x.tipo === 'cuota' && x.fecha > store.hoy) : x.periodo === store.periodo)
+          && (!f.tipo || (f.tipo === 'ingresos' ? x.tipo === 'ingreso' || x.tipo === 'recibo' : f.tipo === 'gasto' ? ES_GASTO.includes(x.tipo) : x.tipo === f.tipo))
           && coincidePersona(x.personaId, filtro())
           && (!f.anoto || x.creadoPor === f.anoto)
           && (!f.cuenta || x.cuentaId === f.cuenta || x.cuentaDestinoId === f.cuenta)
@@ -150,7 +197,8 @@ export const VistaMovimientos = {
         .sort((a, b) => b.fecha.localeCompare(a.fecha) || (b.registro.creado || '').localeCompare(a.registro.creado || ''))
         .map((x) => {
           const s = signo(x);
-          return { ...x, signo: s, subtitulo: subtitulo(x), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda) };
+          const textoLempiras = x.moneda === 'USD' && x.enL ? `${x.estimado ? '≈ ' : ''}${fmt(x.enL)}${x.estimado && ix.esTarjeta(x.cuentaId) ? ' al pagar' : ''}` : '';
+          return { ...x, signo: s, subtitulo: subtitulo(x), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
         });
     });
 
@@ -165,7 +213,7 @@ export const VistaMovimientos = {
         let color = null;
         if (modo === 'grupo') {
           clave = x.grupoId || 'otros';
-          titulo = !x.grupoId ? 'Transferencias, abonos y ajustes' : x.grupoId === SIN_GRUPO ? 'Sin grupo' : nombreGrupo(x.grupoId);
+          titulo = !x.grupoId ? 'Transferencias, pagos, abonos y ajustes' : x.grupoId === SIN_GRUPO ? 'Sin grupo' : nombreGrupo(x.grupoId);
           color = x.grupoId && x.grupoId !== SIN_GRUPO ? colorGrupo(ix, x.grupoId) : 'var(--tinta3)';
         } else if (modo === 'medio') {
           clave = x.cuentaId || 'sin';
@@ -181,7 +229,7 @@ export const VistaMovimientos = {
           porClave.set(clave, g);
           out.push(g);
         }
-        if (x.signo < 0) g.total += Math.abs(ix.enLempiras(x.monto, x.moneda, x.registro.tasa).c) / 100;
+        if (x.signo < 0) g.total += Math.abs(x.enL);
         g.filas.push(x);
       }
       if (modo === 'grupo') {
@@ -192,24 +240,20 @@ export const VistaMovimientos = {
     });
 
     const totales = computed(() => {
-      const ix = indice();
-      const enL = (x) => ix.enLempiras(x.monto, x.moneda, x.registro.tasa).c / 100;
-      const gastos = lista.value.filter((x) => x.tipo === 'gasto' || x.tipo === 'abono');
+      const gastos = lista.value.filter((x) => ES_GASTO.includes(x.tipo) || x.tipo === 'abono');
       const ingresos = lista.value.filter((x) => x.tipo === 'ingreso' || x.tipo === 'recibo');
-      return {
-        gastos: gastos.reduce((a, x) => a + enL(x), 0), nGastos: gastos.length,
-        ingresos: ingresos.reduce((a, x) => a + enL(x), 0), nIngresos: ingresos.length,
-      };
+      const suma = (filas) => filas.reduce((a, x) => a + Math.round(x.enL * 100), 0) / 100;
+      return { gastos: suma(gastos), nGastos: gastos.length, ingresos: suma(ingresos), nIngresos: ingresos.length };
     });
 
     function exportar() {
       const quien = (id) => (id ? nombrePersona(id) : '');
       const cuando = (iso) => (iso ? fechaHora.format(new Date(iso)) : '');
       const filas = [
-        ['Fecha', 'Mes', 'Tipo', 'Monto', 'Moneda', 'Tasa', 'Cuenta', 'Cuenta destino', 'Grupo', 'Categoría', 'Partida o préstamo', 'Comercio', 'Persona', 'Nota', 'Anotó', 'Anotado', 'Editó', 'Editado'],
+        ['Fecha', 'Mes', 'Tipo', 'Monto', 'Moneda', 'En lempiras', 'Tasa', 'Cuenta', 'Cuenta destino', 'Grupo', 'Categoría', 'Partida o préstamo', 'Comercio', 'Persona', 'Nota', 'Anotó', 'Anotado', 'Editó', 'Editado'],
         ...lista.value.map((x) => [
-          x.fecha, x.periodo, TIPOS[x.tipo], x.monto, x.moneda, x.registro.tasa || '', nombreCuenta(x.cuentaId), x.cuentaDestinoId ? nombreCuenta(x.cuentaDestinoId) : '',
-          x.grupoId && x.grupoId !== SIN_GRUPO ? nombreGrupo(x.grupoId) : '', x.categoriaId ? nombreCategoria(x.categoriaId) : '', x.nombreVinculo, '',
+          x.fecha, x.periodo, TIPOS[x.tipo], x.monto, x.moneda, x.tipo === 'pago_tarjeta' ? '' : x.enL, x.registro.tasa || '', nombreCuenta(x.cuentaId), x.cuentaDestinoId ? nombreCuenta(x.cuentaDestinoId) : '',
+          x.grupoId && x.grupoId !== SIN_GRUPO ? nombreGrupo(x.grupoId) : '', x.categoriaId ? nombreCategoria(x.categoriaId) : '', x.nombreVinculo, x.comercio,
           quien(x.personaAnotada), x.nota, quien(x.registro.creadoPor), cuando(x.registro.creado), quien(x.registro.actualizadoPor), cuando(x.registro.actualizado),
         ]),
       ];
@@ -221,7 +265,7 @@ export const VistaMovimientos = {
     return {
       store, prefs, f, verFiltros, masFiltros, alternar, lista, bloques, totales, exportar, definirVista, hayPendientes,
       fmt, fmtEntero, nombrePeriodo, tipos: TIPOS, inicial: INICIAL, agrupar: AGRUPAR, monedas: MONEDAS,
-      abrir: (x) => (x.tipo === 'recibo' ? editarRecibo(x.registro) : editarMovimiento(x.registro)),
+      abrir: (x) => x.abrir(),
       listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaCategorias: computed(categorias),
       listaGrupos: computed(grupos), listaPartidas: computed(partidas),
     };
