@@ -78,7 +78,7 @@ export const VistaMovimientos = {
       <ul class="lista-mov">
         <li v-for="x in g.filas" :key="x.id" @click="abrir(x)">
           <span class="icono-tipo" :class="x.tipo" :title="tipos[x.tipo]">{{ inicial[x.tipo] }}</span>
-          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub"><b v-if="x.quien" class="fila-quien">{{ x.quien + ' ' }}</b>{{ x.subtitulo }}</span></div>
+          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub"><span v-if="x.quien" class="chip-quien" :class="{ otro: x.quien.otro }" :title="x.quien.detalle">{{ x.quien.nombre }}</span>{{ x.subtitulo }}</span></div>
           <div class="derecha">
             <div class="monto" :class="{ positivo: x.signo > 0 }">{{ x.textoMonto }}</div>
             <div v-if="x.textoLempiras" class="dif tenue">{{ x.textoLempiras }}</div>
@@ -158,20 +158,20 @@ export const VistaMovimientos = {
       return out;
     });
 
-    // Quién pagó (o recibió, o anotó) va al principio de la fila, para verlo sin abrir el movimiento.
-    // `anoto`: quién lo anotó, si fue otra persona; va al final.
+    // Quién pagó (o recibió) va en un chip al principio de la fila: azul si también lo anotó y
+    // amarillo si lo anotó otra persona. Quién anotó queda en el título del chip y en el movimiento.
     function quienDe(x) {
       const verbo = VERBO[x.tipo];
-      if (x.personaAnotada && verbo) {
-        const mismo = x.personaAnotada === x.creadoPor;
-        return { quien: nombrePersona(x.personaAnotada), accion: mismo ? `${verbo} y anotó` : verbo, anoto: !mismo && x.creadoPor ? `anotó ${nombrePersona(x.creadoPor)}` : '' };
-      }
-      return x.creadoPor ? { quien: nombrePersona(x.creadoPor), accion: 'anotó', anoto: '' } : { quien: '', accion: '', anoto: '' };
+      const personaId = x.personaAnotada || x.personaId;
+      if (!verbo || !personaId) return null;
+      const nombre = nombrePersona(personaId);
+      const otro = !!x.creadoPor && x.creadoPor !== personaId;
+      return { nombre, otro, detalle: otro ? `${nombre} ${verbo} · anotó ${nombrePersona(x.creadoPor)}` : `${nombre} ${verbo}${x.creadoPor ? ' y anotó' : ''}` };
     }
 
-    function subtitulo(x, { accion, anoto }) {
+    function subtitulo(x) {
       const cuenta = x.tipo === 'transferencia' || x.tipo === 'pago_tarjeta' ? `${nombreCuenta(x.cuentaId)} → ${nombreCuenta(x.cuentaDestinoId)}` : nombreCuenta(x.cuentaId);
-      const partes = accion ? [accion, cuenta] : [cuenta];
+      const partes = [cuenta];
       if (x.tipo === 'cuota') {
         partes.push(`compra del ${fechaCorta(x.compra)}`);
         if (x.interes || x.comision) partes.push(`incluye ${[x.interes ? `intereses ${fmt(x.interes)}` : '', x.comision ? `comisión ${fmt(x.comision)}` : ''].filter(Boolean).join(' y ')}`);
@@ -183,7 +183,6 @@ export const VistaMovimientos = {
       }
       if (x.faltan) partes.push(x.faltan === 1 ? 'falta 1 deducción' : `faltan ${x.faltan} deducciones`);
       if (x.categoriaId && x.titulo !== nombreCategoria(x.categoriaId) && x.tipo !== 'recibo') partes.push(nombreCategoria(x.categoriaId));
-      if (anoto) partes.push(anoto);
       return partes.join(' · ');
     }
     const signo = (x) => (x.tipo === 'ingreso' || x.tipo === 'recibo' ? 1 : ES_GASTO.includes(x.tipo) || x.tipo === 'abono' ? -1 : x.tipo === 'ajuste' ? Math.sign(x.monto) : 0);
@@ -209,8 +208,7 @@ export const VistaMovimientos = {
         .map((x) => {
           const s = signo(x);
           const textoLempiras = x.moneda === 'USD' && x.enL ? `${x.estimado ? '≈ ' : ''}${fmt(x.enL)}${x.estimado && ix.esTarjeta(x.cuentaId) ? ' al pagar' : ''}` : '';
-          const autor = quienDe(x);
-          return { ...x, signo: s, quien: autor.quien, subtitulo: subtitulo(x, autor), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
+          return { ...x, signo: s, quien: quienDe(x), subtitulo: subtitulo(x), textoMonto: (s > 0 ? '+' : '') + fmtMoneda(s < 0 ? -Math.abs(x.monto) : Math.abs(x.monto), x.moneda), textoLempiras };
         });
     });
 

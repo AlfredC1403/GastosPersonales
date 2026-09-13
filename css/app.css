@@ -5,6 +5,7 @@
   --linea: #E2E8F0; --linea2: #CBD5E1;
   --acento: #4F46E5; --acento-sup: #EEF2FF; --acento-tinta: #FFFFFF;
   --ok: #10B981; --ok-sup: #D1FAE5; --mal: #F43F5E; --mal-sup: #FFE4E6; --ambar: #F59E0B; --ambar-sup: #FEF3C7;
+  --azul: #0369A1; --azul-sup: #E0F2FE; --ambar-tinta: #92400E; --ambar-suave: #FEF9C3;
   --s1: #4F46E5; --s2: #0EA5E9; --s3: #10B981; --s4: #F59E0B; --s5: #8B5CF6;
   --radio: 12px; --radio-lg: 24px;
   --sombra: 0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 0 3px rgba(15, 23, 42, 0.02);
@@ -23,6 +24,7 @@
     --linea: rgba(248, 250, 252, 0.06); --linea2: rgba(248, 250, 252, 0.12);
     --acento: #818CF8; --acento-sup: rgba(79, 70, 229, 0.15); --acento-tinta: #FFFFFF;
     --ok: #34D399; --ok-sup: rgba(16, 185, 129, 0.15); --mal: #FB7185; --mal-sup: rgba(244, 63, 94, 0.15); --ambar: #FBBF24; --ambar-sup: rgba(245, 158, 11, 0.15);
+    --azul: #7DD3FC; --azul-sup: rgba(56, 189, 248, 0.16); --ambar-tinta: #FDE68A; --ambar-suave: rgba(250, 204, 21, 0.14);
     --s1: #6366F1; --s2: #38BDF8; --s3: #34D399; --s4: #FBBF24; --s5: #A78BFA;
     --sombra: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 2px rgba(0, 0, 0, 0.3);
     --borde-tarjeta: 1px solid rgba(255, 255, 255, 0.03);
@@ -35,6 +37,7 @@
   --linea: rgba(248, 250, 252, 0.06); --linea2: rgba(248, 250, 252, 0.12);
   --acento: #818CF8; --acento-sup: rgba(79, 70, 229, 0.15); --acento-tinta: #FFFFFF;
   --ok: #34D399; --ok-sup: rgba(16, 185, 129, 0.15); --mal: #FB7185; --mal-sup: rgba(244, 63, 94, 0.15); --ambar: #FBBF24; --ambar-sup: rgba(245, 158, 11, 0.15);
+  --azul: #7DD3FC; --azul-sup: rgba(56, 189, 248, 0.16); --ambar-tinta: #FDE68A; --ambar-suave: rgba(250, 204, 21, 0.14);
   --s1: #6366F1; --s2: #38BDF8; --s3: #34D399; --s4: #FBBF24; --s5: #A78BFA;
   --sombra: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 2px rgba(0, 0, 0, 0.3);
   --borde-tarjeta: 1px solid rgba(255, 255, 255, 0.03);
@@ -130,7 +133,9 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 .fila-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .fila-titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem; }
 .fila-sub { font-size: 0.77rem; color: var(--tinta3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fila-quien { font-weight: 600; color: var(--tinta2); }
+.chip-quien { display: inline-block; font-size: 0.72rem; font-weight: 600; line-height: 1.35; padding: 1px 7px; margin-right: 6px; border-radius: 999px;
+  vertical-align: 1px; background: var(--azul-sup); color: var(--azul); }
+.chip-quien.otro { background: var(--ambar-suave); color: var(--ambar-tinta); }
 .fila-sub.envuelve { white-space: normal; display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; }
 .derecha { text-align: right; flex: none; }
 .dif { font-size: 0.74rem; font-variant-numeric: tabular-nums; }
