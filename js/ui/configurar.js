@@ -15,6 +15,7 @@ export const PASOS_ASISTENTE = [
   { id: 'e2-partidas', titulo: 'Cómo se paga cada partida' },
   { id: 'e2-ingresos', titulo: 'Salarios y deducciones' },
   { id: 'e2-tarjetas', titulo: 'Tarjetas de crédito' },
+  { id: 'e2-recordatorios', titulo: 'Recordatorios en Outlook' },
 ];
 
 // Partidas que suelen pagarse en partes.
@@ -80,6 +81,16 @@ export const VistaConfigurar = {
         </li>
       </ul>
       <p v-if="!listaPartidas.length" class="vacio">No hay partidas de gasto.</p>
+    </article>
+
+    <article v-else-if="paso.id === 'e2-recordatorios'" class="tarjeta">
+      <h2>Recordatorios en Outlook</h2>
+      <ul class="lista-puntos">
+        <li>La app puede poner en tu calendario de Outlook lo que vence en los próximos 60 días, con alarma: partidas con día, cuotas y pagos de tarjeta.</li>
+        <li>Cada persona los activa en su celular, con su cuenta de Microsoft. Los eventos no llevan montos y se borran solos al registrar el pago.</li>
+        <li>Con "Probar la alarma" se comprueba que suena en el celular.</li>
+      </ul>
+      <a class="btn" href="#/recordatorios" style="margin-top: 14px">Configurar recordatorios</a>
     </article>
 
     <article v-else-if="paso.id === 'e2-tarjetas'" class="tarjeta">

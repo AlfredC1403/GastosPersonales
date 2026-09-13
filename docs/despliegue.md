@@ -92,7 +92,7 @@ El registro le da a la app un ID con el que Microsoft permite iniciar sesión y 
 5. En la página **Información general**, copia el valor de **Id. de aplicación (cliente)**. En los pasos siguientes es `<id-de-aplicacion>`.
 6. Para probar la app en el equipo, abre **Autenticación**, agrega la URI `http://localhost:8080/` en la plataforma **Aplicación de página única** y haz clic en **Guardar**.
 
-Los permisos (perfil básico y archivos de OneDrive) se piden al iniciar sesión en la app. No hace falta agregarlos en el portal.
+Los permisos (perfil básico y archivos de OneDrive) se piden al iniciar sesión en la app. El del calendario, solo en el dispositivo donde se activan los recordatorios de Outlook. No hace falta agregarlos en el portal.
 
 Comprueba que en **Autenticación**, dentro de **Aplicación de página única**, aparece `https://<usuario>.github.io/GastosPersonales/`.
 
@@ -181,6 +181,16 @@ Abran la app con conexión en los dos celulares para que tomen la versión nueva
 
 En **Menú** > **Seguridad**, escribe un PIN de 4 a 6 números y elige cuándo se bloquea la app. El PIN es de ese dispositivo: cada persona pone el suyo en su celular. Si se olvida, **Olvidé mi PIN** pide iniciar sesión con Microsoft; en un dispositivo sin OneDrive conectado, la única salida es borrar los datos del navegador.
 
+### Activar los recordatorios en Outlook
+
+Cada persona los activa en su celular, con su cuenta de Microsoft:
+
+1. En **Menú** > **Recordatorios**, elige qué recordar, cuándo avisa y en qué calendario.
+2. Toca **Activar recordatorios**. Microsoft pide permiso para ver y editar el calendario; acéptalo.
+3. Toca **Probar la alarma**. En 10 minutos debe sonar la alarma del evento de prueba. Después tócalo en **Borrar la prueba**.
+
+La app crea el calendario **Gastos del hogar** con lo que vence en los próximos 60 días: partidas con día, cuotas, pagos anuales y pagos de tarjeta. Los eventos no llevan montos, se actualizan cuando cambia algo y se borran cuando se registra el pago. **Apagar y borrar** quita todos sus eventos.
+
 ### Actualizar la app en los celulares
 
 Cuando hay una versión nueva publicada, la app muestra **Hay una versión nueva de la app** con el botón **Actualizar**. Tócalo en cada dispositivo.
@@ -210,6 +220,14 @@ La carpeta se compartió solo para ver. Repite el paso 7 con el permiso **Puede 
 **`Ese enlace es de un archivo`**
 
 Se pegó el enlace de `finanzas.json`. En OneDrive, comparte la carpeta `GastosHogar` (paso 7) y pega ese enlace.
+
+**La alarma de los recordatorios no suena**
+
+En la app de Outlook del celular, abre la lista de calendarios y marca **Gastos del hogar**, y revisa en los ajustes del teléfono que Outlook tenga permiso para mostrar notificaciones. Si aun así no suena, en **Menú** > **Recordatorios** elige **Mi calendario principal** y vuelve a tocar **Probar la alarma**.
+
+**`Microsoft no dio permiso para usar tu calendario`**
+
+Se rechazó el permiso o se quitó desde la cuenta de Microsoft. Vuelve a tocar **Activar recordatorios** y acepta el permiso del calendario. La sincronización con OneDrive no se ve afectada.
 
 **`No tengo acceso a la carpeta GastosHogar`**
 

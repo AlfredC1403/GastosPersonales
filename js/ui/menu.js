@@ -5,6 +5,7 @@ import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { resumenTarjeta } from '../core/tarjetas.js';
 import { estadoMetas } from '../core/metas.js';
+import { RECORDATORIOS_INICIAL } from '../core/recordatorios.js';
 import { VERSION } from '../version.js';
 import { Icono } from './componentes.js';
 
@@ -39,6 +40,7 @@ export const GRUPOS_MENU = [
     { id: 'categorias', nombre: 'Categorías y grupos', icono: 'etiqueta' },
     { id: 'comercios', nombre: 'Comercios', icono: 'tienda' },
     { id: 'personas', nombre: 'Personas', icono: 'personas' },
+    { id: 'recordatorios', nombre: 'Recordatorios', icono: 'reloj', valor: 'recordatorios' },
     { id: 'seguridad', nombre: 'Seguridad', icono: 'candado' },
     { id: 'datos', nombre: 'Datos y OneDrive', icono: 'nube' },
     { id: 'apariencia', nombre: 'Apariencia', icono: 'paleta' },
@@ -110,6 +112,7 @@ export const MenuLateral = {
         cuentas: lista.length ? fmtEntero(lista.reduce((a, c) => a + enLempirasAprox(ix, c.id, saldos[c.id] || 0), 0)) : '',
         deuda: deuda ? fmtEntero(deuda) : '',
         tarjetas: deTarjetas > 0 ? fmtEntero(deTarjetas) : '',
+        recordatorios: { ...RECORDATORIOS_INICIAL, ...(buscar('personas', store.yo)?.recordatorios || {}) }.activo ? (store.recordatorios.error ? 'error' : 'activos') : '',
         metas: (() => {
           const lista = estadoMetas(ix, f);
           const objetivo = lista.reduce((a, e) => a + e.objetivo, 0);

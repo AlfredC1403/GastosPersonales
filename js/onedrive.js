@@ -1,11 +1,16 @@
 // Inicio de sesión con Microsoft (OAuth 2.0 con PKCE, sin librerías) y acceso al archivo
-// de datos en OneDrive mediante Microsoft Graph.
+// de datos en OneDrive mediante Microsoft Graph. El permiso del calendario (recordatorios en
+// Outlook) se pide aparte, solo en el dispositivo donde se activan.
 import { CONFIG } from './config.js';
 import { nombreArchivo, PRINCIPAL } from './core/anios.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
-const ALCANCES = 'openid profile offline_access User.Read Files.ReadWrite.All';
-const CLAVES = { auth: 'gastos.auth', pkce: 'gastos.pkce', clientId: 'gastos.clientId', intento: 'gastos.intentoSesion' };
+const ALCANCES_BASE = 'openid profile offline_access User.Read Files.ReadWrite.All';
+const ALCANCE_CALENDARIO = 'Calendars.ReadWrite';
+const CLAVES = {
+  auth: 'gastos.auth', pkce: 'gastos.pkce', clientId: 'gastos.clientId', intento: 'gastos.intentoSesion',
+  calendario: 'gastos.permisoCalendario', calendarioAviso: 'gastos.avisoCalendario',
+};
 const ARCHIVO = nombreArchivo(PRINCIPAL);
 const RUTA_PROPIA = `/me/drive/root:/${CONFIG.carpeta}/${ARCHIVO}`;
 
@@ -17,6 +22,10 @@ export function guardarClientId(valor) {
 }
 
 const autoridad = () => `https://login.microsoftonline.com/${CONFIG.tenant}/oauth2/v2.0`;
+
+// El mismo texto de permisos se usa al pedir el código, al canjearlo y en cada renovación.
+const pideCalendario = () => localStorage.getItem(CLAVES.calendario) === '1';
+const alcances = () => (pideCalendario() ? `${ALCANCES_BASE} ${ALCANCE_CALENDARIO}` : ALCANCES_BASE);
 // Debe coincidir exactamente con la URI registrada en Azure (con "/" final, sin index.html).
 export const direccionRetorno = () => location.origin + location.pathname.replace(/index\.html$/, '');
 
@@ -60,7 +69,7 @@ export async function iniciarSesion({ silenciosa = false, pedirClave = false } =
   sessionStorage.setItem(CLAVES.pkce, JSON.stringify({ verificador, estado, silenciosa, volver: location.hash }));
   const q = new URLSearchParams({
     client_id: clientId(), response_type: 'code', redirect_uri: direccionRetorno(), response_mode: 'query',
-    scope: ALCANCES, code_challenge: reto, code_challenge_method: 'S256', state: estado,
+    scope: alcances(), code_challenge: reto, code_challenge_method: 'S256', state: estado,
   });
   if (silenciosa) q.set('prompt', 'none');
   else if (pedirClave) q.set('prompt', 'login');
@@ -90,13 +99,25 @@ export async function completarInicio() {
   }
   if (q.has('error')) {
     const codigo = q.get('error');
+    // No se aceptó el permiso del calendario: se sigue sin él (la sesión de OneDrive no cambia).
+    if (pideCalendario() && ['access_denied', 'consent_required'].includes(codigo)) {
+      quitarPermisoCalendario();
+      sessionStorage.setItem(CLAVES.calendarioAviso, 'negado');
+      if (guardado.silenciosa) return iniciarSesion({ silenciosa: true });
+      return false;
+    }
     if (guardado.silenciosa && ['login_required', 'interaction_required', 'consent_required', 'account_selection_required'].includes(codigo)) {
       return iniciarSesion(); // hace falta que la persona elija su cuenta
     }
     throw errorCon(`Microsoft no permitió el inicio de sesión: ${explicar(q.get('error_description') || codigo)}`);
   }
-  await pedirToken({ grant_type: 'authorization_code', code: q.get('code'), redirect_uri: direccionRetorno(), code_verifier: guardado.verificador });
+  const auth = await pedirToken({ grant_type: 'authorization_code', code: q.get('code'), redirect_uri: direccionRetorno(), code_verifier: guardado.verificador });
   sessionStorage.removeItem(CLAVES.intento);
+  // Se pidió el calendario y Microsoft no lo dio: los recordatorios quedan apagados.
+  if (pideCalendario() && !incluyeCalendario(auth.alcances)) {
+    quitarPermisoCalendario();
+    sessionStorage.setItem(CLAVES.calendarioAviso, 'negado');
+  }
   return true;
 }
 
@@ -112,13 +133,40 @@ async function pedirToken(parametros) {
   const res = await fetch(`${autoridad()}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: clientId(), scope: ALCANCES, ...parametros }),
+    body: new URLSearchParams({ client_id: clientId(), scope: alcances(), ...parametros }),
   });
   const t = await res.json().catch(() => ({}));
-  if (!res.ok) throw errorCon(explicar(t.error_description || t.error || `error ${res.status}`), { codigo: t.error });
-  const auth = { access: t.access_token, expira: Date.now() + (Number(t.expires_in) - 120) * 1000, refresh: t.refresh_token || leerAuth()?.refresh };
+  if (!res.ok) throw errorCon(explicar(t.error_description || t.error || `error ${res.status}`), { codigo: t.error, codigos: t.error_codes || [] });
+  const auth = {
+    access: t.access_token, expira: Date.now() + (Number(t.expires_in) - 120) * 1000, refresh: t.refresh_token || leerAuth()?.refresh,
+    alcances: t.scope || '',
+  };
   localStorage.setItem(CLAVES.auth, JSON.stringify(auth));
-  return auth.access;
+  return auth;
+}
+
+// ---------------------------------------------------------------- Permiso del calendario
+
+const incluyeCalendario = (texto) => /calendars\.readwrite/i.test(texto || '');
+
+// En este dispositivo se pidió el calendario y el token vigente lo trae.
+export const tienePermisoCalendario = () => pideCalendario() && incluyeCalendario(leerAuth()?.alcances);
+
+// Vuelve a Microsoft pidiendo también el calendario (la página se va y regresa).
+export function pedirPermisoCalendario() {
+  localStorage.setItem(CLAVES.calendario, '1');
+  return iniciarSesion();
+}
+
+export function quitarPermisoCalendario() {
+  localStorage.removeItem(CLAVES.calendario);
+}
+
+// 'negado' (Microsoft no dio el permiso) o 'perdido' (se quitó después). Se lee una sola vez.
+export function avisoPermisoCalendario() {
+  const valor = sessionStorage.getItem(CLAVES.calendarioAviso);
+  sessionStorage.removeItem(CLAVES.calendarioAviso);
+  return valor;
 }
 
 let renovando = null;
@@ -126,9 +174,18 @@ async function token() {
   const a = leerAuth();
   if (a?.access && a.expira > Date.now()) return a.access;
   if (a?.refresh) {
-    renovando ??= pedirToken({ grant_type: 'refresh_token', refresh_token: a.refresh }).finally(() => { renovando = null; });
+    const renovar = () => pedirToken({ grant_type: 'refresh_token', refresh_token: a.refresh });
+    renovando ??= renovar().catch((e) => {
+      // Se quitó el permiso del calendario (AADSTS65001): se sigue sin él.
+      if (pideCalendario() && e.codigos?.includes(65001)) {
+        quitarPermisoCalendario();
+        sessionStorage.setItem(CLAVES.calendarioAviso, 'perdido');
+        return renovar();
+      }
+      throw e;
+    }).finally(() => { renovando = null; });
     try {
-      return await renovando;
+      return (await renovando).access;
     } catch (e) {
       if (!['invalid_grant', 'interaction_required'].includes(e.codigo)) throw e;
       cerrarSesion(); // el permiso de 24 h para apps de página única venció
@@ -139,7 +196,8 @@ async function token() {
 
 // ---------------------------------------------------------------- Graph
 
-async function graph(ruta, opciones = {}, reintentar = true) {
+// Pedido a Graph con el token de la sesión (lo usan también los recordatorios del calendario).
+export async function pedirGraph(ruta, opciones = {}, reintentar = true) {
   const t = await token();
   const res = await fetch(ruta.startsWith('http') ? ruta : GRAPH + ruta, {
     ...opciones,
@@ -148,10 +206,11 @@ async function graph(ruta, opciones = {}, reintentar = true) {
   if (res.status === 401 && reintentar) {
     const a = leerAuth();
     if (a) localStorage.setItem(CLAVES.auth, JSON.stringify({ ...a, expira: 0 }));
-    return graph(ruta, opciones, false);
+    return pedirGraph(ruta, opciones, false);
   }
   return res;
 }
+const graph = pedirGraph;
 
 async function errorGraph(res) {
   const j = await res.json().catch(() => ({}));

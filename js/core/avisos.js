@@ -11,10 +11,11 @@ export const CUANDO = { hoy: 'Hoy', semana: 'Esta semana', revisar: 'Para revisa
 
 const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
-// `sync`: estado de la sincronización (para avisar si falla). Cada aviso: { id, cuando, tipo,
+// `sync` y `recordatorios`: estado de la sincronización y de los recordatorios de Outlook de este
+// dispositivo (para avisar si fallan). Cada aviso: { id, cuando, tipo,
 // titulo, texto, personaId, acciones: [{ tipo, texto, ... }] }. El id cambia con cada
 // ocurrencia, así un aviso descartado no esconde el del mes siguiente.
-export function calcularAvisos(ix, { hoy, sync = null } = {}) {
+export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = {}) {
   const out = [];
   const L = (n) => dinero(n, { simbolo: ix.config.moneda || 'L' });
   const USD = (n) => dinero(n, { simbolo: ix.config.simboloExt || 'US$' });
@@ -29,6 +30,13 @@ export function calcularAvisos(ix, { hoy, sync = null } = {}) {
       titulo: sync.estado === 'sesion' ? 'La sesión de Microsoft venció' : 'No se pudo sincronizar con OneDrive',
       texto: sync.estado === 'sesion' ? 'Los cambios siguen guardados en este dispositivo hasta que vuelvas a conectar.' : sync.mensaje || 'Los cambios siguen guardados en este dispositivo.',
       acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Ver' }],
+    });
+  }
+
+  if (recordatorios?.error) {
+    agregar({
+      id: `recordatorios:error:${hoy}`, cuando: 'hoy', tipo: 'recordatorios', titulo: 'No se pudieron actualizar los recordatorios de Outlook',
+      texto: recordatorios.error, acciones: [{ tipo: 'ruta', ruta: '#/recordatorios', texto: 'Ver' }],
     });
   }
 

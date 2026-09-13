@@ -16,13 +16,22 @@ import { prefs } from './tema.js';
 
 const { reactive, markRaw, computed, toRaw } = Vue;
 
-const CLAVES = { yo: 'gastos.yo', pinOlvidado: 'gastos.pinOlvidado' };
+const CLAVES = { yo: 'gastos.yo', pinOlvidado: 'gastos.pinOlvidado', recordatorios: 'gastos.recordatorios' };
 
 function leerTexto(clave) {
   try {
     return localStorage.getItem(clave);
   } catch {
     return null;
+  }
+}
+
+function leerRecordatorios() {
+  try {
+    const { ultima = null, dia = '', huella = '', error = '', resultado = null } = JSON.parse(leerTexto(CLAVES.recordatorios) || '{}');
+    return { ultima, dia, huella, error, resultado };
+  } catch {
+    return { ultima: null, dia: '', huella: '', error: '', resultado: null };
   }
 }
 
@@ -43,7 +52,18 @@ export const store = reactive({
   carpeta: [], // archivos de la carpeta de OneDrive en la última sincronización
   modal: null,
   avisos: [],
+  // Recordatorios en Outlook de este dispositivo: la última pasada y su resultado (ver js/recordatorios.js).
+  recordatorios: { ...leerRecordatorios(), trabajando: false, prueba: null },
 });
+
+export function guardarEstadoRecordatorios() {
+  const { ultima, dia, huella, error, resultado } = store.recordatorios;
+  try {
+    localStorage.setItem(CLAVES.recordatorios, JSON.stringify({ ultima, dia, huella, error, resultado }));
+  } catch {
+    /* sin almacenamiento: se revisa de nuevo en la próxima apertura */
+  }
+}
 
 const docCrudo = () => toRaw(store.doc);
 
@@ -55,7 +75,7 @@ const indiceActual = computed(() => {
 export const indice = () => indiceActual.value;
 
 // Avisos visibles en este dispositivo (sin los pospuestos ni los descartados), de todo el hogar.
-const avisosActuales = computed(() => avisosVisibles(calcularAvisos(indice(), { hoy: store.hoy, sync: store.sync }), prefs.avisosOcultos, store.hoy));
+const avisosActuales = computed(() => avisosVisibles(calcularAvisos(indice(), { hoy: store.hoy, sync: store.sync, recordatorios: store.recordatorios }), prefs.avisosOcultos, store.hoy));
 // Con filtro de persona: los de esa persona y los que no son de nadie.
 export const avisos = () => avisosActuales.value.filter((a) => !a.personaId || coincidePersona(a.personaId, filtro()));
 
@@ -419,6 +439,7 @@ export function desconectar() {
   store.carpeta = [];
   persistirSync();
   od.cerrarSesion();
+  od.quitarPermisoCalendario();
   store.usuario = null;
 }
 

@@ -27,6 +27,8 @@ import { VistaMetas } from './ui/metas.js';
 import { VistaReparto } from './ui/reparto.js';
 import { VistaResumen } from './ui/resumen.js';
 import { VistaComparar } from './ui/comparar.js';
+import { VistaRecordatorios } from './ui/recordatorios.js';
+import { iniciarRecordatorios } from './recordatorios.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
 
@@ -49,6 +51,7 @@ const VISTAS = [
   // #/comparar/<año>/<año>
   { id: 'comparar', nombre: 'Comparar años', componente: VistaComparar, conParametros: true },
   { id: 'personas', nombre: 'Personas', componente: VistaPersonas },
+  { id: 'recordatorios', nombre: 'Recordatorios', componente: VistaRecordatorios },
   { id: 'categorias', nombre: 'Categorías y grupos', componente: VistaCategorias },
   { id: 'comercios', nombre: 'Comercios', componente: VistaComercios },
   { id: 'configurar', nombre: 'Revisar configuración', componente: VistaConfigurar },
@@ -270,4 +273,4 @@ const App = {
 };
 
 createApp(App).mount('#app');
-iniciar();
+iniciar().then(iniciarRecordatorios);
