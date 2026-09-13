@@ -6,7 +6,9 @@ import { normalizar } from './core/migraciones.js';
 import { crearIndice } from './core/asientos.js';
 import { resumenDelAnio } from './core/reportes.js';
 import { PRINCIPAL, archivoDe, aniosDelDoc, contenidoArchivo, claveDeNombre } from './core/anios.js';
-import { aniosCargados, aperturaActiva, quitarAnios, cierresPendientes } from './core/cierres.js';
+import {
+  aniosCargados, aperturaActiva, quitarAnios, cierresPendientes, anioMasViejoNecesario, aniosParaSoltar, bloqueoDeAnio,
+} from './core/cierres.js';
 import { periodoActual, hoy, dinero, dineroCorto } from './core/util.js';
 import { sincronizarCarpeta, marcarPendiente } from './sincronizacion.js';
 import { calcularAvisos, avisosVisibles } from './core/avisos.js';
@@ -42,6 +44,9 @@ export const store = reactive({
   conPin: pinActivo(),
   bloqueada: pinActivo(),
   actualizacion: null, // 'app' | 'esquema': hay una versión nueva de la app
+  // El documento guardado es de una versión más nueva de la app: no se puede escribir nada (ni en
+  // este navegador ni en OneDrive) hasta actualizar, porque se pisarían datos que no sabemos leer.
+  soloLectura: false,
   doc: docVacio(),
   rev: 0, // cambia con cada edición: el índice se rehace
   hoy: hoy(),
@@ -56,6 +61,7 @@ export const store = reactive({
   // Años anteriores abiertos en esta sesión (se cargan de OneDrive) y los que se pueden editar.
   anios: { abiertos: [], editar: [], cargando: '' },
   modal: null,
+  confirmacion: null, // pregunta de sí o no pendiente (ver confirmar)
   avisos: [],
   // Recordatorios en Outlook de este dispositivo: la última pasada y su resultado (ver js/recordatorios.js).
   recordatorios: { ...leerRecordatorios(), trabajando: false, prueba: null },
@@ -157,11 +163,46 @@ export function cerrarModal() {
   store.modal = null;
 }
 
+// ---------------------------------------------------------------- Confirmaciones
+
+// Pregunta de sí o no, con el diálogo de la app en vez del confirm() del navegador (que en la app
+// instalada sale con la dirección del sitio y sin el estilo de la app). Devuelve una promesa:
+//
+//   if (!await confirmar('¿Eliminar esta cuenta?', { peligro: true })) return;
+//
+// Vive en su propio <dialog> (ver ConfirmHost), así que se puede abrir encima de un formulario:
+// el navegador apila los diálogos y al cerrar la pregunta el formulario sigue ahí.
+let siguienteConfirmacion = 1;
+
+export function confirmar(texto, { titulo = 'Confirmar', aceptar = 'Sí', peligro = false } = {}) {
+  // Si ya había una pregunta abierta, se responde "no" para no dejar su promesa colgada.
+  responderConfirmacion(false);
+  return new Promise((resolver) => {
+    store.confirmacion = { id: siguienteConfirmacion++, titulo, texto, aceptar, peligro, resolver };
+  });
+}
+
+export function responderConfirmacion(valor) {
+  const actual = store.confirmacion;
+  if (!actual) return;
+  store.confirmacion = null;
+  actual.resolver(valor);
+}
+
 // ---------------------------------------------------------------- Guardado local
 
 const contadores = new Map(); // cambios locales por archivo
-let escrituraBloqueada = false; // el documento guardado es de una versión más nueva: no se pisa
 let avisoGuardadoMostrado = false;
+
+const TEXTO_SOLO_LECTURA = 'Los datos son de una versión más nueva de la app. Actualiza para poder guardar.';
+
+// Con el documento en solo lectura no se guarda nada: antes, los cambios se quedaban en memoria y
+// se perdían al recargar, con el aviso "Guardado." de por medio.
+function revisarEscritura() {
+  if (!store.soloLectura) return;
+  aviso(TEXTO_SOLO_LECTURA, 'error', 9000);
+  throw Object.assign(new Error(TEXTO_SOLO_LECTURA), { codigo: 'solo_lectura' });
+}
 
 function errorGuardado(e) {
   if (avisoGuardadoMostrado) return;
@@ -170,7 +211,7 @@ function errorGuardado(e) {
 }
 
 function persistirLocal() {
-  if (escrituraBloqueada) return;
+  if (store.soloLectura) return;
   almacen.guardarDoc(docCrudo()).catch(errorGuardado);
 }
 
@@ -192,7 +233,7 @@ async function cargarLocal() {
     } catch (e) {
       if (e.codigo === 'esquema_nuevo') {
         store.actualizacion = 'esquema';
-        escrituraBloqueada = true;
+        store.soloLectura = true;
       }
     }
   }
@@ -228,23 +269,28 @@ function cambio(claves) {
   }
 }
 
+const TEXTO_BLOQUEO = {
+  solo_ver: (a) => `${a} está abierto solo para ver. Toca «Editar este año» para cambiarlo.`,
+  no_cargado: (a) => `Para registrar algo de ${a}, abre ese año en Años anteriores y toca «Editar este año».`,
+};
+
 // Con OneDrive, lo de un año anterior al pasado solo se cambia con ese año abierto en Años
 // anteriores y en modo edición: así no se sube un archivo de año que no está cargado y nadie
-// cambia un año viejo sin querer.
+// cambia un año viejo sin querer (ver bloqueoDeAnio en core/cierres.js).
 function revisarAnios(coleccion, anios) {
   if (!COLECCIONES_ANIO.includes(coleccion) || !store.sync.ubicacion) return;
-  const anterior = Number(store.hoy.slice(0, 4)) - 1;
+  const cargados = aniosCargados(docCrudo());
   for (const a of new Set(anios)) {
-    if (Number(a) >= anterior || store.anios.editar.includes(a)) continue;
-    const texto = aniosCargados(docCrudo()).includes(a)
-      ? `${a} está abierto solo para ver. Toca «Editar este año» para cambiarlo.`
-      : `Para registrar algo de ${a}, abre ese año en Años anteriores y toca «Editar este año».`;
+    const motivo = bloqueoDeAnio({ anio: a, hoy: store.hoy, cargados, editar: store.anios.editar });
+    if (!motivo) continue;
+    const texto = TEXTO_BLOQUEO[motivo](a);
     aviso(texto, 'error', 7000);
     throw Object.assign(new Error(texto), { codigo: 'anio_cerrado' });
   }
 }
 
 export function guardar(coleccion, registro) {
+  revisarEscritura();
   const limpio = sellar(JSON.parse(JSON.stringify(registro)), store.yo);
   const lista = store.doc[coleccion];
   const i = lista.findIndex((r) => r.id === limpio.id);
@@ -264,11 +310,13 @@ export function borrar(coleccion, id) {
 }
 
 export function guardarConfig(cambios) {
+  revisarEscritura();
   store.doc.config = { ...store.doc.config, ...JSON.parse(JSON.stringify(cambios)), actualizado: new Date().toISOString() };
   cambio([PRINCIPAL]);
 }
 
 export function importar(texto) {
+  revisarEscritura();
   let datos;
   try {
     datos = JSON.parse(texto);
@@ -403,9 +451,8 @@ const selloRespaldo = (d = new Date()) => `${hoy(d)}-${String(d.getHours()).padS
 const esAnio = (x) => /^\d{4}$/.test(String(x || ''));
 export const anioActual = () => store.hoy.slice(0, 4);
 
-// Año más viejo que se carga de OneDrive: el anterior al actual, o uno más viejo si se abrió en
-// Años anteriores o tiene cambios por subir.
-const desdeDeseado = () => [String(Number(anioActual()) - 1), ...store.anios.abiertos, ...store.sync.pendientes.filter(esAnio)].sort()[0];
+// Año más viejo que se carga de OneDrive (ver anioMasViejoNecesario).
+const desdeDeseado = () => anioMasViejoNecesario({ actual: anioActual(), abiertos: store.anios.abiertos, pendientes: store.sync.pendientes });
 
 // Años que hay en la carpeta de OneDrive (según la última sincronización) o en este dispositivo.
 export const aniosDeLaCarpeta = () => [...new Set(store.carpeta.map((a) => claveDeNombre(a.nombre)).filter(esAnio))].sort();
@@ -419,7 +466,7 @@ export const resumenGuardado = (anio) => {
 // los años pasados; lo que cambió se guarda y se sube con su archivo. Sin OneDrive no hace falta:
 // todos los años están en el dispositivo.
 function actualizarCierres({ forzarResumen = '' } = {}) {
-  if (!store.sync.ubicacion || escrituraBloqueada) return;
+  if (!store.sync.ubicacion || store.soloLectura) return;
   const doc = docCrudo();
   const { aperturas, resumenes } = cierresPendientes(doc, indice(), { actual: anioActual() });
   // "Generar resumen": se guarda de nuevo aunque no haya cambiado.
@@ -453,8 +500,9 @@ function actualizarCierres({ forzarResumen = '' } = {}) {
 // Quita de este dispositivo los años más viejos que `desde` que ya no hacen falta (están en
 // OneDrive, sin cambios por subir y sin abrir).
 function descargarAniosViejos(desde) {
-  if (!desde || store.sync.pendientes.length) return;
-  const sobran = aniosCargados(docCrudo()).filter((a) => a < desde && !store.anios.abiertos.includes(a));
+  const sobran = aniosParaSoltar({
+    cargados: aniosCargados(docCrudo()), desde, abiertos: store.anios.abiertos, pendientes: store.sync.pendientes,
+  });
   if (!sobran.length) return;
   libro.adoptar(quitarAnios(docCrudo(), sobran));
   store.sync.cargados = (store.sync.cargados || []).filter((a) => !sobran.includes(a));
@@ -463,7 +511,7 @@ function descargarAniosViejos(desde) {
 }
 
 export function sincronizar() {
-  if (!store.sync.ubicacion || escrituraBloqueada) return Promise.resolve();
+  if (!store.sync.ubicacion || store.soloLectura) return Promise.resolve();
   if (enCurso) return enCurso;
   enCurso = (async () => {
     if (!navigator.onLine) {
@@ -483,7 +531,10 @@ export function sincronizar() {
       store.sync.ultima = new Date().toISOString();
       identificarPorCorreo();
     } catch (e) {
-      if (e.codigo === 'esquema_nuevo') store.actualizacion = 'esquema';
+      if (e.codigo === 'esquema_nuevo') {
+        store.actualizacion = 'esquema';
+        store.soloLectura = true;
+      }
       store.sync.estado = e.necesitaSesion ? 'sesion' : 'error';
       store.sync.mensaje = e.message;
       store.sync.codigo = e.codigo || '';

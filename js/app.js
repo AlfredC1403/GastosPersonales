@@ -1,68 +1,93 @@
 import {
-  store, iniciar, sincronizar, soyYo, aviso, personas, buscar, vivos, avisos, anioCargado, aniosDeLaCarpeta, abrirAnio, editarAnio, cerrarAniosAbiertos,
+  store, iniciar, sincronizar, soyYo, aviso, confirmar, personas, buscar, vivos, avisos, anioCargado, aniosDeLaCarpeta, abrirAnio, editarAnio,
+  cerrarAniosAbiertos,
 } from './store.js';
 import { nombrePeriodo, sumarMeses, periodoActual, hoy } from './core/util.js';
+import { estadoVisible } from './sincronizacion.js';
 import * as od from './onedrive.js';
 import { prefs, alternarMenuContraido } from './tema.js';
 import { pinActivo, minutosBloqueo, debeBloquear } from './bloqueo.js';
-import { Icono, ModalHost, Avisos, SelectorPersona, FranjaPersona } from './ui/componentes.js';
+import { Icono, ModalHost, Avisos, ConfirmHost, SelectorPersona, FranjaPersona } from './ui/componentes.js';
 import { PantallaBloqueo } from './ui/bloqueo.js';
 import { MenuLateral } from './ui/menu.js';
 import { nuevoMovimiento } from './ui/formularios.js';
 import { VistaInicio } from './ui/inicio.js';
 import { VistaMes } from './ui/mes.js';
 import { VistaMovimientos } from './ui/movimientos.js';
-import { VistaPrestamos, VistaPlanDeudas } from './ui/prestamos.js';
-import { VistaPresupuesto } from './ui/presupuesto.js';
-import { VistaCuentas } from './ui/cuentas.js';
-import { VistaPersonas } from './ui/personas.js';
-import { VistaCategorias } from './ui/categorias.js';
-import { VistaSeguridad } from './ui/seguridad.js';
-import { VistaDatos } from './ui/datos.js';
-import { VistaApariencia } from './ui/apariencia.js';
-import { VistaConfigurar } from './ui/configurar.js';
 import { VistaAvisos } from './ui/avisos.js';
-import { VistaSalarios } from './ui/salarios.js';
-import { VistaTarjetas, VistaTarjeta } from './ui/tarjetas.js';
-import { VistaComercios } from './ui/comercios.js';
-import { VistaMetas } from './ui/metas.js';
-import { VistaReparto } from './ui/reparto.js';
-import { VistaResumen } from './ui/resumen.js';
-import { VistaComparar } from './ui/comparar.js';
-import { VistaRecordatorios } from './ui/recordatorios.js';
-import { VistaAnios } from './ui/anios.js';
 import { iniciarRecordatorios } from './recordatorios.js';
 
-const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
+const { createApp, ref, computed, watch, nextTick, markRaw, defineAsyncComponent } = Vue;
+
+// Vistas que se traen al entrar en ellas. Inicio, Mes y Movimientos van en la carga inicial (son
+// las de la barra de abajo); las demás dejan fuera 19 archivos y unos 170 KB que no hacen falta
+// para abrir la app. Después se precargan solas (ver precargarVistas) y el service worker las
+// guarda, así que sin conexión se siguen abriendo igual que antes.
+const Cargando = { template: '<p class="cargando">Cargando…</p>' };
+const NoCargo = { template: '<p class="vacio">No se pudo cargar esta pantalla. Revisa tu conexión y vuelve a intentar.</p>' };
+
+const cargadores = [];
+
+const aDemanda = (cargar, nombre) => {
+  cargadores.push(cargar);
+  return defineAsyncComponent({
+    loader: () => cargar().then((m) => m[nombre]),
+    loadingComponent: Cargando,
+    errorComponent: NoCargo,
+    delay: 150, // sin parpadeo cuando el archivo ya está en caché
+    timeout: 20000,
+  });
+};
+
+// Cuando el navegador queda ocioso se traen las pantallas que faltan. Así la app abre rápido y, a
+// los pocos segundos, todas quedan en la caché del service worker y se pueden abrir sin conexión
+// (que es como funcionaba antes, cuando todo se cargaba de una).
+function precargarVistas() {
+  const cuandoPueda = window.requestIdleCallback || ((fn) => setTimeout(fn, 3000));
+  cuandoPueda(() => {
+    for (const cargar of cargadores) cargar().catch(() => {}); // sin conexión se reintenta al entrar
+  });
+}
 
 const VISTAS = [
   { id: 'inicio', nombre: 'Inicio', componente: VistaInicio, porMes: true },
   { id: 'mes', nombre: 'Mes', componente: VistaMes, porMes: true },
   { id: 'movimientos', nombre: 'Movimientos', componente: VistaMovimientos, porMes: true },
   { id: 'avisos', nombre: 'Avisos', componente: VistaAvisos },
-  { id: 'salarios', nombre: 'Salarios y deducciones', componente: VistaSalarios },
-  { id: 'cuentas', nombre: 'Cuentas', componente: VistaCuentas },
-  { id: 'tarjetas', nombre: 'Tarjetas', componente: VistaTarjetas },
+  { id: 'salarios', nombre: 'Salarios y deducciones', componente: aDemanda(() => import('./ui/salarios.js'), 'VistaSalarios') },
+  { id: 'cuentas', nombre: 'Cuentas', componente: aDemanda(() => import('./ui/cuentas.js'), 'VistaCuentas') },
+  { id: 'tarjetas', nombre: 'Tarjetas', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjetas') },
   // #/tarjeta/<id>/<corte>: el estado de cuenta de una tarjeta; en el menú se marca Tarjetas.
-  { id: 'tarjeta', nombre: 'Tarjeta', componente: VistaTarjeta, conParametros: true, menu: 'tarjetas', titulo: ([id]) => buscar('cuentas', id)?.nombre },
-  { id: 'prestamos', nombre: 'Préstamos', componente: VistaPrestamos },
-  { id: 'presupuesto', nombre: 'Presupuesto', componente: VistaPresupuesto },
-  { id: 'plan-deudas', nombre: 'Plan de deudas', componente: VistaPlanDeudas },
-  { id: 'metas', nombre: 'Metas', componente: VistaMetas },
-  { id: 'reparto', nombre: 'Reparto de gastos', componente: VistaReparto },
-  { id: 'resumen', nombre: 'Resumen anual', componente: VistaResumen, porAnio: true },
+  { id: 'tarjeta', nombre: 'Tarjeta', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjeta'), conParametros: true, menu: 'tarjetas', titulo: ([id]) => buscar('cuentas', id)?.nombre },
+  { id: 'prestamos', nombre: 'Préstamos', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPrestamos') },
+  { id: 'presupuesto', nombre: 'Presupuesto', componente: aDemanda(() => import('./ui/presupuesto.js'), 'VistaPresupuesto') },
+  { id: 'plan-deudas', nombre: 'Plan de deudas', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPlanDeudas') },
+  { id: 'metas', nombre: 'Metas', componente: aDemanda(() => import('./ui/metas.js'), 'VistaMetas') },
+  { id: 'reparto', nombre: 'Reparto de gastos', componente: aDemanda(() => import('./ui/reparto.js'), 'VistaReparto') },
+  { id: 'resumen', nombre: 'Resumen anual', componente: aDemanda(() => import('./ui/resumen.js'), 'VistaResumen'), porAnio: true },
   // #/comparar/<año>/<año>
-  { id: 'comparar', nombre: 'Comparar años', componente: VistaComparar, conParametros: true },
-  { id: 'anios', nombre: 'Años anteriores', componente: VistaAnios },
-  { id: 'personas', nombre: 'Personas', componente: VistaPersonas },
-  { id: 'recordatorios', nombre: 'Recordatorios', componente: VistaRecordatorios },
-  { id: 'categorias', nombre: 'Categorías y grupos', componente: VistaCategorias },
-  { id: 'comercios', nombre: 'Comercios', componente: VistaComercios },
-  { id: 'configurar', nombre: 'Revisar configuración', componente: VistaConfigurar },
-  { id: 'seguridad', nombre: 'Seguridad', componente: VistaSeguridad },
-  { id: 'datos', nombre: 'Datos y OneDrive', componente: VistaDatos },
-  { id: 'apariencia', nombre: 'Apariencia', componente: VistaApariencia },
+  { id: 'comparar', nombre: 'Comparar años', componente: aDemanda(() => import('./ui/comparar.js'), 'VistaComparar'), conParametros: true },
+  { id: 'anios', nombre: 'Años anteriores', componente: aDemanda(() => import('./ui/anios.js'), 'VistaAnios') },
+  { id: 'personas', nombre: 'Personas', componente: aDemanda(() => import('./ui/personas.js'), 'VistaPersonas') },
+  { id: 'recordatorios', nombre: 'Recordatorios', componente: aDemanda(() => import('./ui/recordatorios.js'), 'VistaRecordatorios') },
+  { id: 'categorias', nombre: 'Categorías y grupos', componente: aDemanda(() => import('./ui/categorias.js'), 'VistaCategorias') },
+  { id: 'comercios', nombre: 'Comercios', componente: aDemanda(() => import('./ui/comercios.js'), 'VistaComercios') },
+  { id: 'configurar', nombre: 'Revisar configuración', componente: aDemanda(() => import('./ui/configurar.js'), 'VistaConfigurar') },
+  { id: 'seguridad', nombre: 'Seguridad', componente: aDemanda(() => import('./ui/seguridad.js'), 'VistaSeguridad') },
+  { id: 'datos', nombre: 'Datos y OneDrive', componente: aDemanda(() => import('./ui/datos.js'), 'VistaDatos') },
+  { id: 'apariencia', nombre: 'Apariencia', componente: aDemanda(() => import('./ui/apariencia.js'), 'VistaApariencia') },
 ].map((v) => ({ ...v, componente: markRaw(v.componente) }));
+
+// Pastilla de la cabecera para cada estado de la sincronización (ver estadoVisible).
+const PASTILLAS_SYNC = {
+  local: { texto: 'Solo este dispositivo', icono: 'nubeNo', clase: '' },
+  sincronizando: { texto: 'Sincronizando', icono: 'sync', clase: 'ok girando' },
+  error: { texto: 'Error al sincronizar', icono: 'nubeNo', clase: 'mal' },
+  sesion: { texto: 'Reconectar', icono: 'nubeNo', clase: 'aviso' },
+  offline: { texto: 'Sin conexión', icono: 'nubeNo', clase: 'aviso' },
+  pendiente: { texto: 'Por subir', icono: 'nube', clase: 'aviso' },
+  ok: { texto: 'Sincronizado', icono: 'nube', clase: 'ok' },
+};
 
 // Rutas de versiones anteriores que ya no existen.
 const REDIRECCIONES = { ajustes: 'datos', mas: 'inicio' };
@@ -86,13 +111,13 @@ const rutaActual = () => {
 };
 
 const App = {
-  components: { Icono, ModalHost, Avisos, PantallaBloqueo, MenuLateral, SelectorPersona, FranjaPersona },
+  components: { Icono, ModalHost, Avisos, ConfirmHost, PantallaBloqueo, MenuLateral, SelectorPersona, FranjaPersona },
   template: `
   <pantalla-bloqueo v-if="store.bloqueada" @desbloqueado="store.bloqueada = false"/>
   <p v-else-if="!store.listo" class="cargando">Cargando…</p>
   <div v-else class="marco" :class="{ 'con-menu-fijo': escritorio, 'menu-contraido': escritorio && prefs.menuContraido }">
     <aside v-if="escritorio" class="menu-fijo">
-      <menu-lateral fijo :contraido="prefs.menuContraido" :ruta="vista.menu || ruta" @nuevo="nuevo" @contraer="alternarMenuContraido"/>
+      <menu-lateral fijo :contraido="prefs.menuContraido" :ruta="vista.menu || ruta" :sin-nuevo="store.soloLectura" @nuevo="nuevo" @contraer="alternarMenuContraido"/>
     </aside>
 
     <header class="cabecera">
@@ -132,7 +157,7 @@ const App = {
     <main class="contenido">
       <div v-if="store.actualizacion" class="aviso-banner" style="margin-bottom: 16px" role="status">
         <p>{{ store.actualizacion === 'esquema'
-          ? 'Los datos se guardaron con una versión más nueva de la app. Actualiza para seguir sincronizando.'
+          ? 'Los datos se guardaron con una versión más nueva de la app. Hasta que actualices no se puede registrar ni cambiar nada, para no pisarlos.'
           : 'Hay una versión nueva de la app.' }}</p>
         <button type="button" class="btn primario" @click="actualizar">Actualizar</button>
       </div>
@@ -157,7 +182,9 @@ const App = {
       <div class="navbar-dentro">
         <template v-for="(n, i) in accesos" :key="i">
           <div v-if="!n" class="nav-fab">
-            <button type="button" class="fab" aria-label="Registrar un gasto o ingreso" @click="nuevo"><icono n="mas" :t="26" :g="2"/></button>
+            <button type="button" class="fab" :disabled="store.soloLectura"
+                    :aria-label="store.soloLectura ? 'No se puede registrar: actualiza la app' : 'Registrar un gasto o ingreso'"
+                    @click="nuevo"><icono n="mas" :t="26" :g="2"/></button>
           </div>
           <a v-else class="nav-item" :class="{ activo: ruta === n.id }" :href="'#/' + n.id" :aria-current="ruta === n.id ? 'page' : null">
             <icono :n="n.icono" :t="22" :g="1.7"/><span>{{ n.nombre }}</span>
@@ -175,6 +202,7 @@ const App = {
 
     <modal-host/>
   </div>
+  <confirm-host/>
   <avisos/>`,
   setup() {
     const ruta = ref(rutaActual());
@@ -239,8 +267,10 @@ const App = {
       const anio = vista.value.porMes ? store.periodo.slice(0, 4) : vista.value.porAnio ? store.anio : '';
       return anio && !anioCargado(anio) && aniosDeLaCarpeta().includes(anio) ? anio : '';
     });
-    function editarEsteAnio() {
-      if (confirm(`¿Editar ${anioAbierto.value}? Lo que cambies ahí cambia los saldos de los años siguientes.`)) editarAnio(anioAbierto.value);
+    async function editarEsteAnio() {
+      const ok = await confirmar(`Lo que cambies en ${anioAbierto.value} cambia los saldos de los años siguientes.`,
+        { titulo: `¿Editar ${anioAbierto.value}?`, aceptar: 'Editar' });
+      if (ok) editarAnio(anioAbierto.value);
     }
     // Abre el año de la pantalla sin cambiar de pantalla ni de mes.
     const abrirAqui = (anio) => abrirAnio(anio).catch((e) => aviso(e.message, 'error', 7000));
@@ -252,13 +282,9 @@ const App = {
 
     const sync = computed(() => {
       const s = store.sync;
-      if (!s.ubicacion) return { texto: 'Solo este dispositivo', icono: 'nubeNo', clase: '' };
-      if (s.estado === 'sincronizando') return { texto: 'Sincronizando', icono: 'sync', clase: 'ok girando' };
-      if (s.estado === 'error') return { texto: 'Error al sincronizar', icono: 'nubeNo', clase: 'mal', detalle: s.mensaje };
-      if (s.estado === 'sesion') return { texto: 'Reconectar', icono: 'nubeNo', clase: 'aviso' };
-      if (s.estado === 'offline') return { texto: 'Sin conexión', icono: 'nubeNo', clase: 'aviso' };
-      if (s.pendiente) return { texto: 'Por subir', icono: 'nube', clase: 'aviso' };
-      return { texto: 'Sincronizado', icono: 'nube', clase: 'ok' };
+      const pastilla = { ...PASTILLAS_SYNC[estadoVisible(s)] };
+      if (pastilla.clase === 'mal') pastilla.detalle = s.mensaje;
+      return pastilla;
     });
     function tocarSync() {
       const s = store.sync;
@@ -307,3 +333,4 @@ const App = {
 
 createApp(App).mount('#app');
 iniciar().then(iniciarRecordatorios);
+precargarVistas();

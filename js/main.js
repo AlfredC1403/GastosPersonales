@@ -1,3 +1,5 @@
+import { VERSION } from './version.js';
+
 // Punto de entrada: si Vue no cargó (sin conexión la primera vez, CDN bloqueado),
 // se muestra un mensaje en vez de dejar la pantalla en blanco.
 if (window.Vue) {
@@ -18,7 +20,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     window.__gastosActualizacion = true;
     window.dispatchEvent(new Event('gastos:actualizacion'));
   });
-  navigator.serviceWorker.register('sw.js').then((registro) => {
+  // La versión va en la dirección: sw.js la usa para nombrar su caché (ver js/version.js).
+  navigator.serviceWorker.register(`sw.js?v=${encodeURIComponent(VERSION)}`).then((registro) => {
     let ultimaRevision = Date.now();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || Date.now() - ultimaRevision < 30 * 60000) return;

@@ -60,8 +60,12 @@ js/core/          Cálculos sin interfaz: modelo y migración de los datos, arch
                   tarjetas (cortes, cuotas, cargos) y dólares, metas, reparto de gastos, recordatorios, reportes
                   (resumen anual, patrimonio, comparación de años y resúmenes guardados), cierre de cada año
                   (la apertura del siguiente, en cierres.js) y filtro por persona
-js/ui/            Vistas, menú lateral, formularios (los de tarjetas en formularios-tarjetas.js),
-                  comercios, asistente de configuración y gráficos SVG
+js/ui/            Vistas, menú lateral, comercios, asistente de configuración y gráficos SVG.
+                  Los formularios están repartidos por tema: formularios.js (los atajos que abre el
+                  resto de la app y el detalle del mes), -movimiento, -partidas, -nomina, -catalogos
+                  y -tarjetas; formulario-base.js tiene las piezas comunes.
+                  Salvo Inicio, Mes y Movimientos, cada vista se carga al entrar en ella
+                  (js/app.js) y el resto se precarga cuando el navegador está ocioso
 js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla, avisos ocultos)
 js/store.js       Estado de la app y guardado de cada cambio
 js/sincronizacion.js  Sincronización de la carpeta de OneDrive (archivo principal y uno por año; baja el año actual y el anterior)
@@ -69,8 +73,10 @@ js/almacen.js     Guardado en el navegador (IndexedDB, o localStorage si no est�
 js/bloqueo.js     PIN del dispositivo (hash PBKDF2, intentos y espera)
 js/onedrive.js    Inicio de sesión con Microsoft, archivos de la carpeta y respaldos
 js/calendario.js  Calendario de Outlook: eventos de los recordatorios (js/recordatorios.js los mantiene al día)
+js/version.js     Versión de la entrega: se muestra en el menú y nombra la caché de sw.js
 sw.js             Caché para abrir la app sin conexión
-tests/            Pruebas de js/core, de la sincronización, del PIN y de OneDrive (datos ficticios de varios años en tests/datos)
+tests/            Pruebas de js/core, de la sincronización, del PIN y de OneDrive (datos ficticios de varios
+                  años en tests/datos). importaciones.test.js revisa que los import de js/ existan
 ```
 
 ## Despliegue

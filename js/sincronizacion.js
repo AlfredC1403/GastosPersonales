@@ -148,3 +148,18 @@ export async function sincronizarCarpeta({ libro, estado, ops, sello, desde = nu
   }
   throw errorCon('Otra persona está guardando al mismo tiempo. Se reintentará en un momento.', { status: 412 });
 }
+
+// ---------------------------------------------------------------- Estado que se ve
+
+// Lo que muestra la pastilla de la cabecera, a partir del estado de la sincronización:
+// 'local' | 'sincronizando' | 'error' | 'sesion' | 'offline' | 'pendiente' | 'ok'.
+// 'pendiente' es lo que queda por subir: mientras haya algo, nunca se dice que está todo guardado.
+const ESTADOS_PROPIOS = ['sincronizando', 'error', 'sesion', 'offline'];
+
+export function estadoVisible(sync) {
+  if (!sync?.ubicacion) return 'local';
+  if (ESTADOS_PROPIOS.includes(sync.estado)) return sync.estado;
+  // `estado === 'pendiente'` también cuando todavía no se ha hecho la primera pasada.
+  if (sync.estado === 'pendiente' || sync.pendientes?.length) return 'pendiente';
+  return 'ok';
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sincronizarCarpeta, marcarPendiente } from '../js/sincronizacion.js';
+import { sincronizarCarpeta, marcarPendiente, estadoVisible } from '../js/sincronizacion.js';
 import { docVacio, sellar, COLECCIONES } from '../js/core/modelo.js';
 import { migrar } from '../js/core/migraciones.js';
 import { archivoDe, unirAnios, claveDeNombre, contenidoArchivo, PRINCIPAL } from '../js/core/anios.js';
@@ -324,4 +324,29 @@ test('la apertura calculada en un dispositivo llega al otro', async () => {
   assert.deepEqual(carpeta.leer('finanzas-2027.json').apertura, nueva);
   await b.sincronizar('2026');
   assert.deepEqual(b.doc().aperturas['2027'], nueva);
+});
+
+// ---------------------------------------------------------------- Estado que se ve
+
+test('la pastilla dice "por subir" mientras quede algo sin subir', () => {
+  const ub = { carpetaId: 'c' };
+  // El caso que importa: la pasada terminó bien pero quedaron archivos pendientes.
+  assert.equal(estadoVisible({ ubicacion: ub, estado: 'pendiente', pendientes: ['2026'] }), 'pendiente');
+  assert.equal(estadoVisible({ ubicacion: ub, estado: 'ok', pendientes: ['finanzas'] }), 'pendiente');
+  // Y al revés: nunca se dice "sincronizado" con la primera pasada sin hacer.
+  assert.equal(estadoVisible({ ubicacion: ub, estado: 'pendiente', pendientes: [] }), 'pendiente');
+  assert.equal(estadoVisible({ ubicacion: ub, estado: 'ok', pendientes: [] }), 'ok');
+});
+
+test('la pastilla muestra cada estado de la sincronización', () => {
+  const ub = { carpetaId: 'c' };
+  assert.equal(estadoVisible({ ubicacion: null, estado: 'local', pendientes: [] }), 'local');
+  for (const estado of ['sincronizando', 'error', 'sesion', 'offline']) {
+    assert.equal(estadoVisible({ ubicacion: ub, estado, pendientes: [] }), estado);
+    // Un problema pesa más que lo que quede por subir: primero hay que resolverlo.
+    assert.equal(estadoVisible({ ubicacion: ub, estado, pendientes: ['2026'] }), estado);
+  }
+  // Sin OneDrive no hay nada que subir, aunque el estado venga sucio de una sesión anterior.
+  assert.equal(estadoVisible({ ubicacion: null, estado: 'error', pendientes: ['2026'] }), 'local');
+  assert.equal(estadoVisible(undefined), 'local');
 });

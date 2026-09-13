@@ -9,19 +9,19 @@ import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl, estadoDe } from '../core/prestamos.js';
 import { SIN_RESPONSABLE, coincidePersona } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
-import { nombrePeriodo, redondear, mesesEntre, sumarMeses, fechaCorta, periodoDe } from '../core/util.js';
+import { PASOS_ASISTENTE } from '../core/catalogos.js';
+import { nombrePeriodo, redondear, mesesEntre, sumarMeses, fechaCorta, periodoDe, cuandoVence, DIAS_CORTOS } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { BarraSegmentos, ColumnasApiladas, Sparkline } from './graficos.js';
-import { Icono } from './componentes.js';
+import { Icono, dosMonedas } from './componentes.js';
 import { marcarItem, abrirItem, completarDeducciones } from './formularios.js';
-import { PASOS_ASISTENTE } from './configurar.js';
 import { ejecutarAccionAviso } from './avisos.js';
-import { pagarTarjeta, dosMonedas } from './formularios-tarjetas.js';
-import { cuandoVence } from './tarjetas.js';
+
+// El formulario de pago de tarjeta se trae al tocar "Pagar": son 20 KB que no hacen falta al abrir.
+const pagarTarjeta = (...args) => import('./formularios-tarjetas.js').then((m) => m.pagarTarjeta(...args));
 
 const { computed } = Vue;
 
-const DIA_SEMANA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MAX_PENDIENTES = 6;
 
 export const VistaInicio = {
@@ -318,7 +318,7 @@ export const VistaInicio = {
         const clave = it.dia || 'sin';
         if (!dias.has(clave)) {
           dias.set(clave, {
-            clave, num: it.dia || '—', nombreDia: it.dia ? DIA_SEMANA[new Date(y, m - 1, Math.min(it.dia, 28)).getDay()] : 'sin día', items: [],
+            clave, num: it.dia || '—', nombreDia: it.dia ? DIAS_CORTOS[new Date(y, m - 1, Math.min(it.dia, 28)).getDay()] : 'sin día', items: [],
           });
         }
         dias.get(clave).items.push(it);

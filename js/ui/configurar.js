@@ -3,20 +3,12 @@
 import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos, categorias, vivos, tarjetas, nombrePersona, fmt } from '../store.js';
 import { FORMAS, FRECUENCIAS } from '../core/modelo.js';
 import { hoy } from '../core/util.js';
+import { PASOS_ASISTENTE } from '../core/catalogos.js';
 import { Icono, descargar } from './componentes.js';
 import { editarIngreso } from './formularios.js';
 import { editarTarjeta } from './formularios-tarjetas.js';
 
 const { ref, computed, watch, nextTick } = Vue;
-
-export const PASOS_ASISTENTE = [
-  { id: 'e2-respaldo', titulo: 'Respaldo y novedades' },
-  { id: 'e2-grupos', titulo: 'Grupos y categorías' },
-  { id: 'e2-partidas', titulo: 'Cómo se paga cada partida' },
-  { id: 'e2-ingresos', titulo: 'Salarios y deducciones' },
-  { id: 'e2-tarjetas', titulo: 'Tarjetas de crédito' },
-  { id: 'e2-recordatorios', titulo: 'Recordatorios en Outlook' },
-];
 
 // Partidas que suelen pagarse en partes.
 const EN_ABONOS = /s[uú]per|comida|gasolina|combustible|restaurante|mercado|farmacia/i;

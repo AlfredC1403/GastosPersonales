@@ -7,7 +7,7 @@ import { SIN_GRUPO } from '../core/asientos.js';
 import { colorGrupo } from '../core/reportes.js';
 import { TIPOS_MOVIMIENTO, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
 import { estadoRecibo } from '../core/nomina.js';
-import { nombrePeriodo, hoy, periodoDe, fechaCorta } from '../core/util.js';
+import { nombrePeriodo, hoy, periodoDe, fechaCorta, nombreMes, DIAS_CORTOS } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { Icono, descargar } from './componentes.js';
 import { editarMovimiento, editarRecibo } from './formularios.js';
@@ -18,8 +18,6 @@ const TIPOS = { ...TIPOS_MOVIMIENTO, recibo: 'Salario o pago recibido', cuota: '
 const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abono: 'A', ajuste: '±', pago_tarjeta: 'P', cuota: 'C', cargo: 'C' };
 // Lo que cuenta como gasto en los totales (con el chip "Gastos").
 const ES_GASTO = ['gasto', 'cuota', 'cargo'];
-const DIA_SEMANA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'short', timeStyle: 'short' });
 const VERBO = { gasto: 'pagó', cuota: 'pagó', abono: 'pagó', pago_tarjeta: 'pagó', ingreso: 'recibió', recibo: 'recibió', transferencia: 'hizo' };
 const AGRUPAR = { dia: 'Por día', grupo: 'Por grupo', medio: 'Por medio' };
@@ -231,7 +229,7 @@ export const VistaMovimientos = {
         } else {
           clave = x.fecha;
           const [y, mes, d] = x.fecha.split('-').map(Number);
-          titulo = `${DIA_SEMANA[new Date(y, mes - 1, d).getDay()]} ${d} de ${MESES[mes - 1]}${f.todo ? ' de ' + y : ''}`;
+          titulo = `${DIAS_CORTOS[new Date(y, mes - 1, d).getDay()]} ${d} de ${nombreMes(mes)}${f.todo ? ' de ' + y : ''}`;
         }
         let g = porClave.get(clave);
         if (!g) {

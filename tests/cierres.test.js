@@ -4,6 +4,7 @@ import { crearIndice } from '../js/core/asientos.js';
 import { contenidoArchivo } from '../js/core/anios.js';
 import {
   cierreDelAnio, cierresPendientes, aniosCargados, aperturaActiva, quitarAnios, fusionarApertura, mismaApertura,
+  anioMasViejoNecesario, aniosParaSoltar, bloqueoDeAnio,
 } from '../js/core/cierres.js';
 import { resumenMes, saldosCuentas, patrimonioAl, resumenAnual, resumenDelAnio, resumenAnualDeGuardado, compararAnios } from '../js/core/reportes.js';
 import { estadoDe, deudaAl, costoDePrestamos, prestamosParaSimular } from '../js/core/prestamos.js';
@@ -230,4 +231,47 @@ test('años cargados, apertura activa, quitar años y unir la apertura de un arc
   // Los registros de años anteriores que sigan en el documento no se cuentan dos veces.
   const conViejos = { ...doc, aperturas: { 2027: ap } };
   assert.deepEqual(saldosCuentas(crearIndice(conViejos, { hoy: HOY, apertura: ap })), saldosCuentas(ix));
+});
+
+// ---------------------------------------------------------------- Qué años tiene que haber en el dispositivo
+
+test('se carga el año anterior, y más atrás si hay un año abierto o con cambios sin subir', () => {
+  const sola = (actual) => anioMasViejoNecesario({ actual });
+  assert.equal(sola('2026'), '2025');
+  // Un año abierto en Años anteriores manda, aunque sea mucho más viejo.
+  assert.equal(anioMasViejoNecesario({ actual: '2026', abiertos: ['2021'] }), '2021');
+  // Los cambios sin subir también: si se descargara ese año, se perderían.
+  assert.equal(anioMasViejoNecesario({ actual: '2026', pendientes: ['2019'] }), '2019');
+  // El archivo principal no es un año y no cuenta.
+  assert.equal(anioMasViejoNecesario({ actual: '2026', pendientes: ['finanzas'] }), '2025');
+  // Un año abierto más nuevo que el anterior no reduce lo que se carga.
+  assert.equal(anioMasViejoNecesario({ actual: '2026', abiertos: ['2026'] }), '2025');
+});
+
+test('solo se sueltan los años viejos que están a salvo en OneDrive', () => {
+  const cargados = ['2023', '2024', '2025', '2026'];
+  assert.deepEqual(aniosParaSoltar({ cargados, desde: '2025' }), ['2023', '2024']);
+  // El año que se está viendo se queda, aunque sea viejo.
+  assert.deepEqual(aniosParaSoltar({ cargados, desde: '2025', abiertos: ['2023'] }), ['2024']);
+  // Con algo pendiente de subir no se suelta nada: su archivo de OneDrive está viejo.
+  assert.deepEqual(aniosParaSoltar({ cargados, desde: '2025', pendientes: ['finanzas'] }), []);
+  // Sin un año desde el que cortar (sin OneDrive) tampoco.
+  assert.deepEqual(aniosParaSoltar({ cargados, desde: null }), []);
+  assert.deepEqual(aniosParaSoltar({ cargados, desde: '2023' }), []);
+});
+
+test('el año actual y el anterior se cambian siempre; los de antes piden «Editar este año»', () => {
+  const hoy = '2026-09-13';
+  const cargados = ['2024', '2025', '2026'];
+  assert.equal(bloqueoDeAnio({ anio: '2026', hoy, cargados }), null);
+  assert.equal(bloqueoDeAnio({ anio: '2025', hoy, cargados }), null);
+  // 2024 está en el dispositivo pero solo para ver.
+  assert.equal(bloqueoDeAnio({ anio: '2024', hoy, cargados }), 'solo_ver');
+  assert.equal(bloqueoDeAnio({ anio: '2024', hoy, cargados, editar: ['2024'] }), null);
+  // 2019 no está ni cargado: el motivo es otro y el mensaje también.
+  assert.equal(bloqueoDeAnio({ anio: '2019', hoy, cargados }), 'no_cargado');
+  // El modo edición de un año no abre los demás.
+  assert.equal(bloqueoDeAnio({ anio: '2023', hoy, cargados, editar: ['2024'] }), 'no_cargado');
+  // Con números en vez de textos se comporta igual.
+  assert.equal(bloqueoDeAnio({ anio: 2024, hoy, cargados, editar: [2024] }), null);
 });

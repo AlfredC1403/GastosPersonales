@@ -56,7 +56,8 @@ const TEXTO_SYNC = {
 // `fijo`: menú lateral permanente (computadora). Si no, panel que se abre y se cierra (celular).
 export const MenuLateral = {
   components: { Icono },
-  props: { fijo: Boolean, contraido: Boolean, ruta: { type: String, default: '' } },
+  // sinNuevo: el documento está en solo lectura, no se puede registrar nada (ver store.soloLectura).
+  props: { fijo: Boolean, contraido: Boolean, ruta: { type: String, default: '' }, sinNuevo: Boolean },
   emits: ['cerrar', 'nuevo', 'contraer'],
   template: `
   <nav class="menu" :class="{ contraido }" aria-label="Menú principal">
@@ -67,7 +68,8 @@ export const MenuLateral = {
       <button v-if="!fijo" type="button" class="btn-icono" aria-label="Cerrar menú" @click="$emit('cerrar')"><icono n="x"/></button>
     </div>
 
-    <button v-if="fijo" type="button" class="btn primario menu-nuevo" :title="contraido ? 'Registrar' : null" @click="$emit('nuevo')">
+    <button v-if="fijo" type="button" class="btn primario menu-nuevo" :disabled="sinNuevo"
+            :title="sinNuevo ? 'No se puede registrar: actualiza la app' : contraido ? 'Registrar' : null" @click="$emit('nuevo')">
       <icono n="mas" :t="18" :g="2.2"/><span v-if="!contraido">Registrar</span>
     </button>
 

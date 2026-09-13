@@ -1,6 +1,6 @@
 // Metas de ahorro: progreso, fecha, aporte sugerido por mes y por pago, y si van al día.
 import {
-  store, fmt, fmtEntero, indice, vivos, abrirModal, personas, cuentasDinero, nombrePersona, nombreCuenta, filtro, personaFiltro,
+  store, fmt, fmtEntero, indice, vivos, abrirModal, personas, cuentasDinero, nombrePersona, nombreCuenta, filtro, personaFiltro, confirmar,
 } from '../store.js';
 import { estadoMetas, SITUACIONES_META } from '../core/metas.js';
 import { resumenMes } from '../core/reportes.js';
@@ -46,7 +46,8 @@ export const MetaForm = {
     const usos = original.id ? vivos('movimientos').filter((m) => m.metaId === original.id).length : 0;
     const f = usarFormulario('metas', original, emit, {
       que: 'esta meta',
-      alBorrar: () => !usos || confirm(`${usos} ${usos === 1 ? 'movimiento está marcado' : 'movimientos están marcados'} con esta meta. ¿Eliminarla igual?`),
+      alBorrar: () => !usos || confirmar(`${usos} ${usos === 1 ? 'movimiento está marcado' : 'movimientos están marcados'} con esta meta.`,
+        { titulo: '¿Eliminarla igual?', aceptar: 'Eliminar', peligro: true }),
     });
     function enviar() {
       f.error.value = '';

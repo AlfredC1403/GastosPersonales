@@ -1,9 +1,9 @@
 // Recordatorios en Outlook: activarlos en este dispositivo, elegir qué y cuándo avisa, probar la
 // alarma y ver lo que se va a recordar en los próximos 60 días.
-import { store, aviso, nombrePersona } from '../store.js';
+import { store, aviso, nombrePersona, confirmar } from '../store.js';
 import * as od from '../onedrive.js';
 import { AVISOS_RECORDATORIO, ALCANCES_RECORDATORIO, CALENDARIOS_RECORDATORIO, DIAS_RECORDATORIOS } from '../core/recordatorios.js';
-import { fechaCorta, diaDeSemana } from '../core/util.js';
+import { fechaCorta, diaDeSemana, DIAS_CORTOS } from '../core/util.js';
 import {
   configDe, personaDelDispositivo, recordatoriosDe, trabajaEnEsteDispositivo, activarRecordatorios, actualizarRecordatorios, cambiarRecordatorios,
   apagarRecordatorios, probarAlarma, borrarPrueba,
@@ -11,7 +11,6 @@ import {
 
 const { computed } = Vue;
 
-const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const hora = new Intl.DateTimeFormat('es', { hour: 'numeric', minute: '2-digit' });
 const fechaHora = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
@@ -110,7 +109,7 @@ export const VistaRecordatorios = {
       return `Última revisión: ${cuando} · ${r.total} ${r.total === 1 ? 'recordatorio' : 'recordatorios'}${cambios.length ? ` (${cambios.join(', ')})` : ''}.`;
     });
     const horaPrueba = computed(() => (st.value.prueba ? hora.format(new Date(st.value.prueba.alarma)) : ''));
-    const diaCorto = (fecha) => DIAS[diaDeSemana(fecha)];
+    const diaCorto = (fecha) => DIAS_CORTOS[diaDeSemana(fecha)];
 
     const intentar = async (fn, exito) => {
       try {
@@ -128,8 +127,9 @@ export const VistaRecordatorios = {
       cambiar: (cambios) => intentar(() => cambiarRecordatorios(cambios)),
       probar: () => intentar(() => probarAlarma(10), (p) => `Listo: la alarma debe sonar a las ${hora.format(p.alarma)}.`),
       quitarPrueba: () => intentar(borrarPrueba, 'Evento de prueba borrado.'),
-      apagar: () => {
-        if (!confirm('¿Apagar los recordatorios y borrar sus eventos del calendario?')) return;
+      apagar: async () => {
+        if (!await confirmar('Se apagan los recordatorios y se borran sus eventos del calendario de Outlook.',
+          { titulo: '¿Apagar los recordatorios?', aceptar: 'Apagar', peligro: true })) return;
         intentar(apagarRecordatorios, (n) => `Recordatorios apagados${n ? `: se borraron ${n} ${n === 1 ? 'evento' : 'eventos'}` : ''}.`);
       },
     };

@@ -1,7 +1,12 @@
 // Permite abrir la app sin conexión. Los archivos propios se piden a la red primero
 // (así siempre se ve la última versión) y, si no hay red, salen de la caché.
-const CACHE = 'gastos-v11';
-const BASICOS = ['./', './index.html', './css/app.css', './js/main.js', './manifest.webmanifest', './icon.svg'];
+//
+// La versión viene en la dirección con la que js/main.js registra este archivo
+// (`sw.js?v=...`, tomada de js/version.js): así basta subir la versión en un solo sitio.
+// Al cambiar, el navegador ve otro service worker, lo instala y `activate` borra las cachés viejas.
+const VERSION = new URL(location.href).searchParams.get('v') || 'sin-version';
+const CACHE = `gastos-${VERSION}`;
+const BASICOS = ['./', './index.html', './css/app.css', './js/main.js', './js/version.js', './manifest.webmanifest', './icon.svg'];
 const FIJOS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com']; // versiones fijas: no cambian
 
 self.addEventListener('install', (e) => {

@@ -11,7 +11,7 @@ export function hoy(d = new Date()) {
 }
 
 // Texto sin tildes ni símbolos, para ids: slug('Súper La Colonia') → 'super-la-colonia'.
-export const slug = (texto) => String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+export const slug = (texto) => String(texto ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 export const periodoDe = (fecha) => String(fecha).slice(0, 7);
 export const periodoActual = () => periodoDe(hoy());
@@ -56,6 +56,9 @@ export function mesesEntre(desde, hasta) {
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const MESES_CORTOS = MESES.map((m) => m.slice(0, 3));
 
+// Índice 0 = domingo, como getDay() y diaDeSemana().
+export const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
 export const nombreMes = (m) => MESES[m - 1];
 
 export function nombrePeriodo(periodo, corto = false) {
@@ -68,6 +71,19 @@ export function fechaCorta(fecha) {
   if (!fecha) return '';
   const [, m, d] = fecha.split('-').map(Number);
   return `${d} ${MESES_CORTOS[m - 1]}`;
+}
+
+const diasEntre = (desde, hasta) => {
+  const f = (x) => Date.UTC(...x.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
+  return Math.round((f(hasta) - f(desde)) / 86400000);
+};
+// "hoy", "mañana", "en 5 días", "hace 2 días"
+export function cuandoVence(limite, hoy) {
+  const n = diasEntre(hoy, limite);
+  if (n === 0) return 'hoy';
+  if (n === 1) return 'mañana';
+  if (n > 1) return `en ${n} días`;
+  return n === -1 ? 'ayer' : `hace ${-n} días`;
 }
 
 // "7 años y 3 meses", "11 meses"

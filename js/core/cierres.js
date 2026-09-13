@@ -174,3 +174,33 @@ export function cierresPendientes(doc, ix, { actual }) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- Qué años tiene que haber en el dispositivo
+
+// Decisiones sobre qué años se bajan de OneDrive, cuáles se pueden dejar ir y cuáles se pueden
+// cambiar. Son las reglas que aplica js/store.js en cada sincronización y en cada guardado.
+
+const esAnio = (x) => /^\d{4}$/.test(String(x || ''));
+
+// Año más viejo que hace falta tener cargado: el anterior al actual, o uno más viejo si se abrió
+// en Años anteriores o tiene cambios sin subir (si se descargara, se perderían).
+export function anioMasViejoNecesario({ actual, abiertos = [], pendientes = [] }) {
+  return [String(Number(actual) - 1), ...abiertos.map(String), ...pendientes.filter(esAnio)].sort()[0];
+}
+
+// Años que ya no hacen falta en este dispositivo: más viejos que `desde` y sin abrir. Con algo
+// pendiente de subir no se suelta ninguno, porque su archivo de OneDrive aún no tiene los cambios.
+export function aniosParaSoltar({ cargados, desde, abiertos = [], pendientes = [] }) {
+  if (!desde || pendientes.length) return [];
+  return cargados.filter((a) => a < String(desde) && !abiertos.map(String).includes(a));
+}
+
+// ¿Se puede escribir en `anio`? null si sí; si no, por qué:
+// 'solo_ver'   → está cargado pero abierto solo para ver (falta «Editar este año»);
+// 'no_cargado' → ni siquiera está en el dispositivo.
+// El año actual y el anterior siempre se pueden cambiar: son los que la app carga sola.
+export function bloqueoDeAnio({ anio, hoy, cargados, editar = [] }) {
+  const a = String(anio);
+  if (Number(a) >= Number(hoy.slice(0, 4)) - 1 || editar.map(String).includes(a)) return null;
+  return cargados.includes(a) ? 'solo_ver' : 'no_cargado';
+}

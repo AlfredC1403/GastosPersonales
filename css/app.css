@@ -404,6 +404,7 @@ html.privado #app { visibility: hidden; }
 /* ---------- Modal y avisos ---------- */
 dialog.modal { border: 0; padding: 0; background: transparent; max-width: 560px; width: calc(100% - 24px); color: var(--tinta); }
 dialog.modal::backdrop { background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(2px); }
+dialog.modal.confirmar { max-width: 420px; }
 .modal-caja { background: var(--sup); border: var(--borde-tarjeta); border-radius: var(--radio-lg); padding: 18px; max-height: calc(100dvh - 40px); overflow-y: auto; box-shadow: var(--sombra); }
 .modal-cab { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .modal-cab h2 { margin-right: auto; font-family: var(--cifra); font-size: 1.2rem; letter-spacing: var(--tr-cifra); }

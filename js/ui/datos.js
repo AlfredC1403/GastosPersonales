@@ -1,6 +1,6 @@
 import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
-  respaldarAhora, listarRespaldos, anioCargado,
+  respaldarAhora, listarRespaldos, anioCargado, confirmar,
 } from '../store.js';
 import { hoy } from '../core/util.js';
 import { esPristino } from '../core/modelo.js';
@@ -199,15 +199,26 @@ export const VistaDatos = {
         aviso('ID guardado en este dispositivo. Para publicarlo, ponlo también en js/config.js.', 'ok', 6000);
       },
       conectar: () => ejecutar(() => od.iniciarSesion()),
-      usarMio: () => {
-        if (esPristino(store.doc) && !confirm('Este dispositivo no tiene datos. Si otra persona ya tiene el archivo, usa mejor el enlace de su carpeta. ¿Usar tu OneDrive igual?')) return;
-        ejecutar(usarMiOneDrive);
+      usarMio: async () => {
+        const ok = !esPristino(store.doc) || await confirmar(
+          'Este dispositivo no tiene datos. Si otra persona del hogar ya tiene el archivo, usa mejor el enlace de su carpeta.',
+          { titulo: '¿Usar tu OneDrive igual?', aceptar: 'Usar mi OneDrive' },
+        );
+        if (ok) ejecutar(usarMiOneDrive);
       },
       usarCompartido: () => ejecutar(() => usarEnlace(enlace.value)),
       sincronizarAhora: () => ejecutar(sincronizar),
-      salir: () => confirm('¿Desconectar OneDrive en este dispositivo? Los datos siguen en OneDrive.') && desconectar(),
+      salir: async () => {
+        const ok = await confirmar('Este dispositivo deja de sincronizar. Los datos siguen en OneDrive.',
+          { titulo: '¿Desconectar OneDrive?', aceptar: 'Desconectar' });
+        if (ok) desconectar();
+      },
       respaldo: () => descargar(`gastos-respaldo-${hoy()}.json`, exportar(), 'application/json'),
-      borrarTodo: () => confirm('¿Borrar los datos de ESTE navegador, incluido el PIN? Lo que está en OneDrive no se toca.') && borrarDatosLocales(),
+      borrarTodo: async () => {
+        const ok = await confirmar('Se borran los datos de este navegador, incluido el PIN. Lo que está en OneDrive no se toca.',
+          { titulo: '¿Borrar los datos de este navegador?', aceptar: 'Borrar', peligro: true });
+        if (ok) borrarDatosLocales();
+      },
     };
   },
 };

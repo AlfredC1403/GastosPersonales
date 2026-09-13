@@ -3,10 +3,10 @@ import { store, fmt, fmtMoneda, indice, tarjetas, buscar, filtro, personaFiltro,
 import { TIPOS_MOVIMIENTO } from '../core/modelo.js';
 import { coincidePersona } from '../core/filtro.js';
 import { resumenTarjeta, estadoCiclo, corteDe, corteSiguiente, corteAnterior, fechaSaldoDe, proximoCobro, TIPOS_CARGO, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
-import { fechaCorta, nombrePeriodo, nombreMes, periodoDe, sumarDias, sumarMeses, aCentavos, deCentavos } from '../core/util.js';
-import { Icono } from './componentes.js';
+import { fechaCorta, nombrePeriodo, nombreMes, periodoDe, sumarDias, sumarMeses, aCentavos, deCentavos, cuandoVence } from '../core/util.js';
+import { Icono, dosMonedas } from './componentes.js';
 import { nuevoMovimiento, editarMovimiento } from './formularios.js';
-import { editarTarjeta, pagarTarjeta, dosMonedas, formatoTasa } from './formularios-tarjetas.js';
+import { editarTarjeta, pagarTarjeta, formatoTasa } from './formularios-tarjetas.js';
 
 const { ref, computed, watch } = Vue;
 
@@ -17,19 +17,6 @@ const SITUACION = {
   vencido: { texto: 'Vencido', clase: 'mal' },
   pagado: { texto: 'Pagado', clase: 'ok' },
 };
-
-const dias = (desde, hasta) => {
-  const f = (x) => Date.UTC(...x.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
-  return Math.round((f(hasta) - f(desde)) / 86400000);
-};
-// "hoy", "mañana", "en 5 días", "hace 2 días"
-export function cuandoVence(limite, hoy) {
-  const n = dias(hoy, limite);
-  if (n === 0) return 'hoy';
-  if (n === 1) return 'mañana';
-  if (n > 1) return `en ${n} días`;
-  return n === -1 ? 'ayer' : `hace ${-n} días`;
-}
 
 // Lo disponible: el mismo límite visto en las dos monedas ("L40,350.00 o US$1,522.64").
 const textoLibre = (r) => [r.disponible.L !== null ? fmtMoneda(r.disponible.L, 'L') : '', r.disponible.USD !== null ? fmtMoneda(r.disponible.USD, 'USD') : '']

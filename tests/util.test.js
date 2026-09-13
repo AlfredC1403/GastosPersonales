@@ -32,4 +32,9 @@ test('slug para ids', () => {
   assert.equal(slug('Súper La Colonia'), 'super-la-colonia');
   assert.equal(slug('  Pizza Hut #12 '), 'pizza-hut-12');
   assert.equal(slug('Ñandú'), 'nandu');
+  // Todas las tildes del español, ya venga el texto compuesto (NFC) o descompuesto (NFD).
+  assert.equal(slug('áéíóú ÁÉÍÓÚ üÜ ñÑ'), 'aeiou-aeiou-uu-nn');
+  assert.equal(slug('Bodegón Más x Menos'), 'bodegon-mas-x-menos');
+  // Dos nombres que solo se diferencian en la tilde comparten id: es lo que se espera.
+  assert.equal(slug('Farmacia Símán'), slug('Farmacia Siman'));
 });

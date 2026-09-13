@@ -1,8 +1,14 @@
 // Piezas comunes de los formularios de edición: pie con Guardar y Eliminar, texto de quién
 // registró, opciones de categoría y el guardado con Deshacer.
-import { guardar, borrar, aviso, buscar } from '../store.js';
+import { guardar, borrar, aviso, confirmar, buscar, indice, fmt } from '../store.js';
+import { estadoPartidas } from '../core/presupuesto.js';
+import { redondear } from '../core/util.js';
 
 const { ref } = Vue;
+
+// Motivos por los que el store se niega a guardar y que el formulario explica en su sitio, en vez
+// de dejarlos subir como error: un año anterior cerrado y el documento en solo lectura.
+const MOTIVOS = ['anio_cerrado', 'solo_lectura'];
 
 export const copia = (x) => JSON.parse(JSON.stringify(x ?? {}));
 export const hayValor = (v) => v !== null && v !== undefined && v !== '';
@@ -47,8 +53,8 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
     try {
       guardado = guardar(coleccion, r);
     } catch (e) {
-      // Un año anterior cerrado: el formulario queda abierto con el motivo.
-      if (e.codigo !== 'anio_cerrado') throw e;
+      // El formulario queda abierto con el motivo (año cerrado, solo lectura).
+      if (!MOTIVOS.includes(e.codigo)) throw e;
       error.value = e.message;
       return null;
     }
@@ -58,10 +64,17 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
     if (cerrar) emit('listo');
     return guardado;
   }
-  function eliminar() {
-    if (!confirm(`¿Eliminar ${que}?`)) return;
-    if (alBorrar && alBorrar() === false) return;
-    borrar(coleccion, original.id);
+  // `alBorrar` puede preguntar algo más (y por eso se espera): devuelve false para no borrar.
+  async function eliminar() {
+    if (!await confirmar(`Se va a eliminar ${que}.`, { titulo: '¿Eliminar?', aceptar: 'Eliminar', peligro: true })) return;
+    if (alBorrar && await alBorrar() === false) return;
+    try {
+      borrar(coleccion, original.id);
+    } catch (e) {
+      if (!MOTIVOS.includes(e.codigo)) throw e;
+      error.value = e.message;
+      return;
+    }
     aviso('Eliminado.', 'info', 6000, {
       texto: 'Deshacer',
       fn: () => guardar(coleccion, { ...buscar(coleccion, original.id), borrado: false }),
@@ -69,4 +82,27 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
     emit('listo');
   }
   return { error, existe, auditoria, terminar, eliminar };
+}
+
+// ---------------------------------------------------------------- Partidas del mes
+
+// Estado de una partida en un mes, sin contar el movimiento que se está editando.
+export function estadoSinEste(partidaId, parte, periodo, movimientoId) {
+  if (!partidaId || !periodo) return null;
+  const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
+  if (!it) return null;
+  // Lo que este movimiento aporta en ese mes (en lempiras; en una compra a cuotas, su cuota).
+  const propio = (indice().pagosPartida.get(`${partidaId}|${periodo}`) || []).filter((x) => x.m.id === movimientoId).reduce((a, x) => a + x.c, 0);
+  const real = redondear(it.real - propio / 100);
+  return { ...it, realSinEste: real, quedaSinEste: redondear(Math.max(0, it.esperado - real)) };
+}
+
+// Texto del aviso después de registrar un pago de una partida.
+export function textoDePartida(partidaId, parte, periodo) {
+  const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
+  if (!it) return '';
+  if (it.estado === 'parcial') return `Quedan ${fmt(it.queda)} en ${it.nombre}.`;
+  if (it.estado === 'excedido') return `${it.nombre}: ${fmt(it.real - it.esperado)} más de lo previsto.`;
+  if (it.sobrante > 0) return `${it.nombre} cerrada. Sobran ${fmt(it.sobrante)}${it.acumula ? ' para el mes siguiente' : ''}.`;
+  return `${it.nombre} completa.`;
 }

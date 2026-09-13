@@ -1,4 +1,4 @@
-import { store, cerrarModal, cerrarAviso, personas, buscar, personaFiltro, colorPersona } from '../store.js';
+import { store, cerrarModal, cerrarAviso, responderConfirmacion, personas, buscar, personaFiltro, colorPersona, fmtMoneda } from '../store.js';
 import { definirPersona } from '../tema.js';
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue;
@@ -99,6 +99,47 @@ export const ModalHost = {
   },
 };
 
+// Diálogo de las preguntas de sí o no (ver confirmar en store.js). Va aparte del ModalHost para
+// poder abrirse encima de un formulario, y fuera del marco para servir también en la pantalla del PIN.
+export const ConfirmHost = {
+  template: `<dialog ref="dlg" class="modal confirmar" aria-labelledby="titulo-confirmar"
+                     @cancel.prevent="responder(false)" @close="alCerrar" @click="fuera">
+    <div v-if="c" class="modal-caja">
+      <header class="modal-cab"><h2 id="titulo-confirmar">{{ c.titulo }}</h2></header>
+      <p style="margin-bottom: 16px">{{ c.texto }}</p>
+      <div class="acciones">
+        <span class="espacio"></span>
+        <button ref="btnNo" type="button" class="btn" @click="responder(false)">Cancelar</button>
+        <button ref="btnSi" type="button" class="btn" :class="c.peligro ? 'peligro' : 'primario'" @click="responder(true)">{{ c.aceptar }}</button>
+      </div>
+    </div>
+  </dialog>`,
+  setup() {
+    const dlg = ref(null);
+    const btnSi = ref(null);
+    const btnNo = ref(null);
+    const c = computed(() => store.confirmacion);
+    watch(c, async (actual) => {
+      await nextTick();
+      const d = dlg.value;
+      if (!d) return;
+      if (actual && !d.open) {
+        d.showModal();
+        // En lo que se puede deshacer, el botón de seguir; en lo que no, Cancelar.
+        (actual.peligro ? btnNo : btnSi).value?.focus();
+      }
+      if (!actual && d.open) d.close();
+    });
+    const responder = (valor) => responderConfirmacion(valor);
+    const fuera = (e) => {
+      if (e.target === dlg.value) responder(false);
+    };
+    // Escape en algunos navegadores cierra el diálogo sin pasar por "cancel".
+    const alCerrar = () => responder(false);
+    return { c, dlg, btnSi, btnNo, responder, fuera, alCerrar };
+  },
+};
+
 export const Avisos = {
   template: `<div class="avisos" role="status" aria-live="polite">
     <div v-for="a in store.avisos" :key="a.id" class="aviso-item" :class="a.tipo">
@@ -176,6 +217,9 @@ export const FranjaPersona = {
     return { actual, definirPersona };
   },
 };
+
+// "L1,300.00 y US$100.00", sin la moneda que está en cero.
+export const dosMonedas = (o, { cero = 'nada' } = {}) => [o.L ? fmtMoneda(o.L, 'L') : '', o.USD ? fmtMoneda(o.USD, 'USD') : ''].filter(Boolean).join(' y ') || cero;
 
 export function descargar(nombre, contenido, tipo) {
   const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));

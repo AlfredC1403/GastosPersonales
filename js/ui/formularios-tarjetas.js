@@ -1,18 +1,17 @@
 // Formularios de tarjetas de crédito: la tarjeta con sus cargos y el pago de la tarjeta.
 import {
-  store, abrirModal, indice, personas, cuentasDinero, tarjetas, vivos, buscar, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
+  store, abrirModal, indice, personas, cuentasDinero, tarjetas, vivos, buscar, fmt, fmtMoneda, simboloDe, monedaDeCuenta, confirmar,
 } from '../store.js';
 import { TIPOS_CARGO, PERIODICIDADES, corteDelMes, limiteDe, estadoCiclo, resumenTarjeta } from '../core/tarjetas.js';
 import { periodoDe, nombreMes, fechaCorta, redondear, aCentavos, deCentavos } from '../core/util.js';
 import { copia, hayValor, PIE, usarFormulario } from './formulario-base.js';
+import { dosMonedas } from './componentes.js';
 
 const { reactive, ref, computed, watch } = Vue;
 
 const dia = (v) => Math.min(31, Math.max(1, Math.round(Number(v)) || 0));
 const diaValido = (v) => Number(v) >= 1 && Number(v) <= 31;
 const montoOpcional = (v) => (hayValor(v) && Number(v) > 0 ? redondear(Number(v)) : null);
-// "L1,300.00 y US$100.00", sin la moneda que está en cero.
-export const dosMonedas = (o, { cero = 'nada' } = {}) => [o.L ? fmtMoneda(o.L, 'L') : '', o.USD ? fmtMoneda(o.USD, 'USD') : ''].filter(Boolean).join(' y ') || cero;
 // Tasa con hasta 4 decimales: 26.8829, 26.5.
 export const formatoTasa = (tasa) => (tasa ? String(Number(Number(tasa).toFixed(4))) : '');
 
@@ -120,7 +119,8 @@ export const TarjetaForm = {
     const usos = original.id ? vivos('movimientos').filter((m) => m.cuentaId === original.id || m.cuentaDestinoId === original.id).length : 0;
     const f = usarFormulario('cuentas', original, emit, {
       que: 'esta tarjeta',
-      alBorrar: () => !usos || confirm(`La tarjeta tiene ${usos} movimientos, que dejarán de sumar en su deuda. ¿Eliminarla igual?`),
+      alBorrar: () => !usos || confirmar(`La tarjeta tiene ${usos} ${usos === 1 ? 'movimiento' : 'movimientos'} que dejarán de sumar en su deuda.`,
+        { titulo: '¿Eliminarla igual?', aceptar: 'Eliminar', peligro: true }),
     });
 
     function enviar() {

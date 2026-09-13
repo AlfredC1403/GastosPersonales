@@ -1,4 +1,4 @@
-import { store, recuperarPin } from '../store.js';
+import { store, recuperarPin, confirmar } from '../store.js';
 import { verificarPin, largoPin, estadoIntentos, MAX_FALLOS } from '../bloqueo.js';
 import { Icono } from './componentes.js';
 
@@ -81,12 +81,19 @@ export const PantallaBloqueo = {
       else if (e.key === 'Backspace') pin.value = pin.value.slice(0, -1);
     }
 
-    function olvide() {
+    async function olvide() {
       const conOneDrive = !!store.sync.ubicacion;
-      const texto = conOneDrive
-        ? 'Vas a iniciar sesión con Microsoft y te pedirá tu contraseña. Si la cuenta es de alguien del hogar, se quita el PIN y puedes crear uno nuevo.'
-        : 'Este dispositivo no está conectado a OneDrive. La única forma de entrar es borrar los datos guardados en este navegador. ¿Borrarlos?';
-      if (confirm(texto)) recuperarPin();
+      const pregunta = conOneDrive
+        ? {
+          texto: 'Vas a iniciar sesión con Microsoft y te pedirá tu contraseña. Si la cuenta es de alguien del hogar, se quita el PIN y puedes crear uno nuevo.',
+          titulo: '¿Recuperar con Microsoft?', aceptar: 'Continuar',
+        }
+        : {
+          texto: 'Este dispositivo no está conectado a OneDrive. La única forma de entrar es borrar los datos guardados en este navegador.',
+          titulo: '¿Borrar los datos de este navegador?', aceptar: 'Borrar', peligro: true,
+        };
+      const { texto, ...opciones } = pregunta;
+      if (await confirmar(texto, opciones)) recuperarPin();
     }
 
     onMounted(() => {
