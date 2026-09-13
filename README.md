@@ -1,6 +1,6 @@
 # Gastos del hogar
 
-Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales, préstamos, cuentas y movimientos. Tiene gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
+Aplicación web para llevar las finanzas de un hogar. Registra el presupuesto del mes en partidas agrupadas por categoría (que se pueden pagar en abonos), salarios quincenales o mensuales con sus deducciones (IHSS, ISR, préstamos por planilla), préstamos, cuentas y movimientos. Muestra cuánto queda disponible con cada pago, avisa lo pendiente y tiene gráficos por grupo y un simulador de pago de deudas con los métodos bola de nieve y avalancha.
 
 Los datos se guardan en la carpeta `GastosHogar` de OneDrive (un archivo principal y uno por año, con respaldos) y en una copia en el navegador (IndexedDB). Varias personas pueden usar la misma carpeta, cada una con su cuenta de Microsoft, y cada registro guarda quién lo anotó y quién lo editó. Todas las pantallas se pueden filtrar por persona, y cada dispositivo puede pedir un PIN para abrir la app.
 
@@ -56,9 +56,10 @@ npm test
 index.html        Página, política de seguridad, fuentes y carga de Vue
 css/app.css       Estilos y variables de color (modo claro y oscuro)
 js/core/          Cálculos sin interfaz: modelo y migración de los datos, archivos por año, asientos,
-                  partidas y salarios, préstamos y bola de nieve, reportes y filtro por persona
+                  partidas, nómina y deducciones, plan por quincena, avisos, préstamos y bola de nieve,
+                  reportes y filtro por persona
 js/ui/            Vistas, menú lateral, formularios, asistente de configuración y gráficos SVG
-js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla)
+js/tema.js        Preferencias del dispositivo (tema, filtro de persona, menú, orden de cada pantalla, avisos ocultos)
 js/store.js       Estado de la app y guardado de cada cambio
 js/sincronizacion.js  Sincronización de la carpeta de OneDrive (archivo principal y uno por año)
 js/almacen.js     Guardado en el navegador (IndexedDB, o localStorage si no está disponible)

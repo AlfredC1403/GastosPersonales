@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  estadoPartidas, equivalenteMensual, presupuestoMensual, pagosProgramados, ingresosDelMes, ingresoMensual, movimientoParaItem, reciboParaItem,
-} from '../js/core/presupuesto.js';
+import { estadoPartidas, equivalenteMensual, presupuestoMensual, ingresosDelMes, movimientoParaItem } from '../js/core/presupuesto.js';
+import { pagosProgramados, ingresoMensual, reciboSugerido } from '../js/core/nomina.js';
 import { crearIndice } from '../js/core/asientos.js';
 import { docVacio } from '../js/core/modelo.js';
 
@@ -147,7 +146,7 @@ test('ingresos del mes: lo recibido marca cada pago; un recibo fuera de calendar
     ['Salario Ruth · pago del 31', false, 0],
   ]);
   assert.equal(items[1].fueraDeCalendario, true);
-  const recibo = reciboParaItem(items[2], { hoy: '2026-10-15' });
+  const recibo = reciboSugerido(ix, items[2].ingreso, items[2].pago, { hoy: '2026-10-15' });
   assert.deepEqual([recibo.ocurrencia, recibo.fecha, recibo.neto, recibo.periodo], ['2026-10-31', '2026-10-15', 14250, '2026-10']);
 });
 

@@ -6,6 +6,7 @@ import { coincidePersona, personaDeMovimiento } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { colorGrupo } from '../core/reportes.js';
 import { TIPOS_MOVIMIENTO, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
+import { estadoRecibo } from '../core/nomina.js';
 import { nombrePeriodo, hoy, periodoDe, fechaCorta } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { Icono, descargar } from './componentes.js';
@@ -51,6 +52,7 @@ export const VistaMovimientos = {
       <button type="button" class="chip-filtro" :class="{ activo: f.tipo === 'gasto' }" @click="alternar('tipo', 'gasto')">Gastos</button>
       <button type="button" class="chip-filtro" :class="{ activo: f.tipo === 'ingresos' }" @click="alternar('tipo', 'ingresos')">Ingresos</button>
       <button type="button" class="chip-filtro" :class="{ activo: f.todo }" @click="f.todo = !f.todo">Todos los meses</button>
+      <button v-if="hayPendientes" type="button" class="chip-filtro" :class="{ activo: f.pendientes }" @click="f.pendientes = !f.pendientes">Deducciones pendientes</button>
     </div>
 
     <div class="kpis dos">
@@ -80,7 +82,7 @@ export const VistaMovimientos = {
     </div>
   </section>`,
   setup() {
-    const f = reactive({ q: '', tipo: '', anoto: '', cuenta: '', categoria: '', grupo: '', partida: '', moneda: '', todo: false });
+    const f = reactive({ q: '', tipo: '', anoto: '', cuenta: '', categoria: '', grupo: '', partida: '', moneda: '', todo: false, pendientes: false });
     const verFiltros = ref(false);
     const masFiltros = computed(() => [f.cuenta, f.categoria, f.grupo, f.partida, f.moneda, f.anoto, f.tipo && !['gasto', 'ingresos'].includes(f.tipo)].filter(Boolean).length);
     const alternar = (campo, valor) => { f[campo] = f[campo] === valor ? '' : valor; };
@@ -108,6 +110,7 @@ export const VistaMovimientos = {
           id: r.id, registro: r, tipo: 'recibo', fecha: r.fecha, periodo: r.periodo || periodoDe(r.ocurrencia || r.fecha), monto: Number(r.neto) || 0,
           moneda: ix.monedaDe(r.cuentaId), cuentaId: r.cuentaId, cuentaDestinoId: null, categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: null,
           personaId: r.personaId || ingreso?.personaId || null, personaAnotada: r.personaId || ingreso?.personaId || null, creadoPor: r.creadoPor, nota: r.nota || '', nombreVinculo: nombre,
+          faltan: estadoRecibo(r).pendientes,
           titulo: r.nota || (r.tipo === 'ordinario' ? `${nombre} · pago del ${fechaCorta(r.ocurrencia)}` : `${nombre} · ${TIPOS_RECIBO[r.tipo]?.toLowerCase() || 'pago'}`),
         });
       }
@@ -117,6 +120,7 @@ export const VistaMovimientos = {
     function subtitulo(x) {
       const cuenta = x.tipo === 'transferencia' ? `${nombreCuenta(x.cuentaId)} → ${nombreCuenta(x.cuentaDestinoId)}` : nombreCuenta(x.cuentaId);
       const partes = [cuenta];
+      if (x.faltan) partes.push(x.faltan === 1 ? 'falta 1 deducción' : `faltan ${x.faltan} deducciones`);
       if (x.categoriaId && x.titulo !== nombreCategoria(x.categoriaId) && x.tipo !== 'recibo') partes.push(nombreCategoria(x.categoriaId));
       const verbo = VERBO[x.tipo];
       if (x.personaAnotada && verbo && x.personaAnotada === x.creadoPor) partes.push(`${verbo} y anotó ${nombrePersona(x.personaAnotada)}`);
@@ -141,6 +145,7 @@ export const VistaMovimientos = {
           && (!f.grupo || x.grupoId === f.grupo)
           && (!f.partida || (f.partida === '__fuera' ? x.tipo === 'gasto' && !x.partidaId && !x.registro.prestamoId : x.partidaId === f.partida))
           && (!f.moneda || x.moneda === f.moneda)
+          && (!f.pendientes || x.faltan > 0)
           && (!q || buscable(x).includes(q)))
         .sort((a, b) => b.fecha.localeCompare(a.fecha) || (b.registro.creado || '').localeCompare(a.registro.creado || ''))
         .map((x) => {
@@ -212,8 +217,9 @@ export const VistaMovimientos = {
       descargar(`movimientos-${f.todo ? 'todos' : store.periodo}-${hoy()}.csv`, '﻿' + csv(filas), 'text/csv;charset=utf-8');
     }
 
+    const hayPendientes = computed(() => registros.value.some((x) => x.faltan > 0));
     return {
-      store, prefs, f, verFiltros, masFiltros, alternar, lista, bloques, totales, exportar, definirVista,
+      store, prefs, f, verFiltros, masFiltros, alternar, lista, bloques, totales, exportar, definirVista, hayPendientes,
       fmt, fmtEntero, nombrePeriodo, tipos: TIPOS, inicial: INICIAL, agrupar: AGRUPAR, monedas: MONEDAS,
       abrir: (x) => (x.tipo === 'recibo' ? editarRecibo(x.registro) : editarMovimiento(x.registro)),
       listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaCategorias: computed(categorias),

@@ -352,6 +352,9 @@ dialog.menu-panel[open] { animation: entrar-izq 0.2s ease-out; }
 
 /* ---------- Filtro de persona ---------- */
 .selector-persona { position: relative; flex: none; }
+.campana { position: relative; text-decoration: none; }
+.campana.activo { border-color: transparent; background: var(--acento-sup); color: var(--acento); }
+.insignia { position: absolute; top: -4px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--mal); color: #fff; font-size: 0.66rem; font-weight: 700; display: grid; place-items: center; line-height: 1; }
 .btn-persona { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--linea); background: transparent; color: var(--tinta2); display: grid; place-items: center; cursor: pointer; padding: 0; }
 .btn-persona.activo { border-color: transparent; background: var(--acento-sup); color: var(--acento); }
 .inicial { font-weight: 700; font-size: 0.82rem; }
@@ -407,6 +410,21 @@ dialog.modal::backdrop { background: rgba(15, 23, 42, 0.5); backdrop-filter: blu
 .aviso-item.error { background: var(--mal); color: #fff; }
 .aviso-item span { flex: 1; }
 .aviso-item button { border: 0; background: transparent; color: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* Deducciones del pago de un salario */
+.deducciones { display: flex; flex-direction: column; gap: 8px; }
+.deducciones-cab { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.deduccion { display: grid; grid-template-columns: minmax(0, 1fr) 118px auto; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--linea); }
+.deduccion-nombre { display: flex; flex-direction: column; min-width: 0; font-size: 0.92rem; }
+.deduccion input[type="number"] { width: 100%; border: 1px solid var(--linea2); background: var(--sup); color: var(--tinta); border-radius: var(--radio); padding: 8px 10px; font: inherit; font-variant-numeric: tabular-nums; }
+.deduccion.no-aplica .deduccion-nombre { color: var(--tinta3); text-decoration: line-through; }
+.casilla.chica { font-size: 0.8rem; white-space: nowrap; }
+.texto-aviso { color: var(--ambar); }
+.check.planilla { border-style: dashed; }
+.aviso-tarjeta.hoy { border-left: 3px solid var(--mal); }
+.aviso-tarjeta.semana { border-left: 3px solid var(--ambar); }
+.aviso-tarjeta h3 { font-size: 1rem; }
+@media (max-width: 400px) { .deduccion { grid-template-columns: minmax(0, 1fr) 100px; } .deduccion .casilla { grid-column: 1 / -1; } }
 
 /* Asistente de configuración */
 .pasos { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; overflow-x: auto; }

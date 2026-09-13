@@ -4,6 +4,7 @@ import { sumarMeses, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
 import { estadoPartidas, ingresosDelMes, partidasDelMes, usoDelPlan } from './presupuesto.js';
 import { cuotasDelMes } from './prestamos.js';
+import { estadoRecibo } from './nomina.js';
 
 // Guarda resultados en el índice: se rehace solo cuando cambian los datos.
 function memo(ix, clave, calcular) {
@@ -39,6 +40,29 @@ export function gastoDelMes(ix, periodo, filtro) {
   });
 }
 
+// Lo descontado de los salarios en el mes (por fecha del pago): no es gasto del hogar, porque
+// el presupuesto trabaja con el neto. También los recibos con deducciones sin monto.
+export function descontadoDelMes(ix, periodo, filtro) {
+  return memo(ix, `descontado|${periodo}|${claveFiltro(filtro)}`, () => {
+    const c = { total: 0, porConcepto: {}, porPersona: {}, porNaturaleza: {} };
+    for (const a of ix.porPeriodo.get(periodo) || []) {
+      if (a.clase !== 'deduccion' || !coincidePersona(a.personaId, filtro)) continue;
+      c.total += a.c;
+      sumarEn(c.porConcepto, a.nombre, a.c);
+      sumarEn(c.porPersona, a.personaId || 'sin', a.c);
+      sumarEn(c.porNaturaleza, a.naturaleza, a.c);
+    }
+    const incompletos = (ix.recibosPorPeriodo.get(periodo) || []).filter((r) => {
+      const persona = r.personaId || ix.ingresos.get(r.ingresoId)?.personaId || null;
+      return coincidePersona(persona, filtro) && estadoRecibo(r).pendientes > 0;
+    });
+    return {
+      total: deCentavos(c.total), porConcepto: aLempiras(c.porConcepto), porPersona: aLempiras(c.porPersona), porNaturaleza: aLempiras(c.porNaturaleza),
+      incompletos,
+    };
+  });
+}
+
 // Todo lo del mes: plan (partidas y cuotas), ingresos, gasto real y lo que queda libre.
 // Con filtro, las partidas y cuotas van por responsable, y lo registrado, por quién pagó.
 export function resumenMes(ix, periodo, filtro) {
@@ -46,8 +70,9 @@ export function resumenMes(ix, periodo, filtro) {
     const partidas = estadoPartidas(ix, periodo, filtro);
     const cuotas = cuotasDelMes(ix, periodo, filtro);
     const ingresos = ingresosDelMes(ix, periodo, filtro);
-    // Pagar un pago anual sale de lo que ya se apartó: no se cuenta dos veces.
-    const plan = [...cuotas, ...partidas.filter((it) => it.parte !== 'pagar')];
+    // Pagar un pago anual sale de lo que ya se apartó, y una cuota por planilla ya viene
+    // descontada del neto: ninguna de las dos se cuenta otra vez.
+    const plan = [...cuotas.filter((it) => !it.planilla), ...partidas.filter((it) => it.parte !== 'pagar')];
     const enPlan = partidasDelMes(ix, periodo);
 
     const c = { comprometido: 0, pagado: 0, pendiente: 0, ingresoEsperado: 0, ingresoReal: 0, fueraDelPlan: 0, ahorro: 0, abonos: 0 };
@@ -67,6 +92,7 @@ export function resumenMes(ix, periodo, filtro) {
 
     const gasto = gastoDelMes(ix, periodo, filtro);
     const r = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, deCentavos(v)]));
+    r.descontado = descontadoDelMes(ix, periodo, filtro);
     r.libre = deCentavos(c.ingresoEsperado - c.comprometido - c.fueraDelPlan);
     r.gastoReal = gasto.total;
     r.gasto = gasto;

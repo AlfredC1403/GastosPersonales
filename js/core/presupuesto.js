@@ -5,6 +5,7 @@ import { mesDe, periodoDe, sumarMeses, fechaEnMes, aCentavos, deCentavos } from 
 import { coincidePersona } from './filtro.js';
 import { parteDe, claveRecibo } from './asientos.js';
 import { prestamoActivoEn } from './prestamos.js';
+import { pagosProgramados, pagosPorMes, ingresoMensual, planillaDe, estadoRecibo } from './nomina.js';
 
 const TODOS_LOS_MESES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const MAX_MESES_ARRASTRE = 240;
@@ -143,41 +144,6 @@ export function usoDelPlan(it) {
 
 // ---------------------------------------------------------------- Ingresos
 
-function ajustarFinDeSemana(fecha, regla) {
-  if (regla !== 'anterior') return fecha;
-  const [y, m, d] = fecha.split('-').map(Number);
-  const dia = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  const atras = dia === 6 ? 1 : dia === 0 ? 2 : 0;
-  if (!atras) return fecha;
-  const t = new Date(Date.UTC(y, m - 1, d - atras));
-  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
-}
-
-export const pagosPorMes = (ingreso) => (ingreso.frecuencia === 'quincenal' ? 2 : 1);
-
-// Pagos programados de un ingreso en un mes: [{ tipo, ocurrencia, fecha }].
-// `ocurrencia` es la fecha que toca según los días de pago (31 = último día); `fecha`, la
-// que queda después de mover los fines de semana si así se configuró.
-export function pagosProgramados(ingreso, periodo) {
-  if (!vivo(ingreso) || ingreso.activo === false) return [];
-  if (ingreso.vigenteDesde && periodo < periodoDe(ingreso.vigenteDesde)) return [];
-  const mes = mesDe(periodo);
-  const out = [];
-  const meses = ingreso.meses?.length ? ingreso.meses : TODOS_LOS_MESES;
-  if (meses.includes(mes)) {
-    const dias = ingreso.frecuencia === 'quincenal'
-      ? (ingreso.diasPago?.length >= 2 ? ingreso.diasPago.slice(0, 2) : [15, 31])
-      : [ingreso.diasPago?.[0] || 31];
-    for (const dia of [...dias].sort((a, b) => a - b)) {
-      const ocurrencia = fechaEnMes(periodo, dia);
-      out.push({ tipo: 'ordinario', ocurrencia, fecha: ajustarFinDeSemana(ocurrencia, ingreso.finDeSemana) });
-    }
-  }
-  if (ingreso.decimo14 && mes === 6) out.push({ tipo: 'decimo14', ocurrencia: fechaEnMes(periodo, 31), fecha: fechaEnMes(periodo, 31) });
-  if (ingreso.decimo13 && mes === 12) out.push({ tipo: 'decimo13', ocurrencia: fechaEnMes(periodo, 31), fecha: fechaEnMes(periodo, 31) });
-  return out;
-}
-
 const netoDe = (ingreso, tipo) => aCentavos(ingreso.netoEsperado) * (tipo === 'ordinario' ? 1 : pagosPorMes(ingreso));
 
 // Ingresos esperados en `periodo` y lo recibido en cada pago. Los recibos que no coinciden
@@ -212,10 +178,12 @@ function itemIngreso(ingreso, pago, recibos, ordinariosEnMes) {
   if (pago.tipo === 'decimo14') nombre += ' · décimo cuarto mes';
   else if (pago.tipo === 'decimo13') nombre += ' · décimo tercer mes';
   else if (ordinariosEnMes > 1) nombre += ` · pago del ${dia}`;
+  const faltanDeducciones = recibos.reduce((n, r) => n + estadoRecibo(r).pendientes, 0);
   return {
     clave: `ingreso:${claveRecibo({ ingresoId: ingreso.id, ...pago })}`,
     tipoItem: 'ingreso',
     ingreso,
+    pago,
     tipo: pago.tipo,
     ocurrencia: pago.ocurrencia,
     fecha: pago.fecha,
@@ -223,6 +191,7 @@ function itemIngreso(ingreso, pago, recibos, ordinariosEnMes) {
     responsableId: ingreso.personaId || null,
     dia,
     recibos,
+    faltanDeducciones,
     esperado: deCentavos(esperado),
     real: deCentavos(real),
     hecho: recibos.length > 0,
@@ -239,18 +208,10 @@ export function equivalenteMensual(p) {
   return ((Number(p.monto) || 0) * meses) / 12;
 }
 
-// Ingreso mensual promedio: los pagos del mes y los décimos repartidos en el año.
-export function ingresoMensual(ingreso) {
-  const neto = Number(ingreso.netoEsperado) || 0;
-  const meses = ingreso.meses?.length ? ingreso.meses.length : 12;
-  const decimos = (ingreso.decimo13 ? 1 : 0) + (ingreso.decimo14 ? 1 : 0);
-  return (neto * pagosPorMes(ingreso) * (meses + decimos)) / 12;
-}
-
 // Presupuesto promedio del mes por grupo, persona y medio de pago. Los aportes no cuentan
 // como esenciales (sirven para el fondo de emergencia).
 export function presupuestoMensual(ix, periodo, filtro) {
-  const r = { ingresos: 0, egresos: 0, esenciales: 0, aportes: 0, prestamos: 0, porGrupo: {}, porPersona: {}, porMedio: {} };
+  const r = { ingresos: 0, egresos: 0, esenciales: 0, aportes: 0, prestamos: 0, planilla: 0, porGrupo: {}, porPersona: {}, porMedio: {} };
   const sumar = (persona, grupoId, medioId, monto, aporte) => {
     if (!coincidePersona(persona, filtro)) return;
     const v = aCentavos(monto);
@@ -272,10 +233,15 @@ export function presupuestoMensual(ix, periodo, filtro) {
   for (const p of ix.doc.prestamos || []) {
     if (!vivo(p) || !prestamoActivoEn(ix, p, periodo)) continue;
     const cuota = Number(p.cuota) || 0;
+    // Una cuota por planilla ya viene descontada del neto: no se cuenta otra vez como egreso.
+    if (planillaDe(ix, p.id)) {
+      if (coincidePersona(p.responsableId, filtro)) r.planilla += aCentavos(cuota);
+      continue;
+    }
     if (coincidePersona(p.responsableId, filtro)) r.prestamos += aCentavos(cuota);
     sumar(p.responsableId, ix.grupoDe(p.categoriaId || 'prestamos'), p.cuentaId, cuota, false);
   }
-  for (const k of ['ingresos', 'egresos', 'esenciales', 'aportes', 'prestamos']) r[k] = deCentavos(r[k]);
+  for (const k of ['ingresos', 'egresos', 'esenciales', 'aportes', 'prestamos', 'planilla']) r[k] = deCentavos(r[k]);
   for (const k of ['porGrupo', 'porPersona', 'porMedio']) r[k] = Object.fromEntries(Object.entries(r[k]).map(([id, c]) => [id, deCentavos(c)]));
   return r;
 }
@@ -307,15 +273,4 @@ export function movimientoParaItem(it, periodo, { hoy, monto, cierra = false } =
     return { ...base, ...vinculo, tipo: 'gasto', cuentaId: p.cuentaDestinoId || 'reservas', categoriaId: p.categoriaId || 'otros' };
   }
   return { ...base, ...vinculo, tipo: 'gasto', cuentaId: p.medioPagoId || 'gastos', categoriaId: p.categoriaId || 'otros', ...(cierra ? { cierra: true } : {}) };
-}
-
-// Recibo listo para registrar un pago de un ingreso: con la fecha programada (o hoy, si
-// todavía no llega) y el neto esperado.
-export function reciboParaItem(it, { hoy } = {}) {
-  const i = it.ingreso;
-  return {
-    ingresoId: i.id, tipo: it.tipo, ocurrencia: it.ocurrencia, periodo: periodoDe(it.ocurrencia),
-    fecha: it.fecha <= hoy ? it.fecha : hoy, cuentaId: i.cuentaId || 'gastos', neto: it.esperado,
-    extras: [], deducciones: [], personaId: i.personaId || null, nota: '',
-  };
 }

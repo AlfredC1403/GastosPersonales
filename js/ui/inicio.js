@@ -1,17 +1,19 @@
 import {
-  store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro,
+  store, fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, indice, vivos, cuentas, nombrePersona, nombreCategoria, nombreCuenta, filtro, personaFiltro, avisos,
 } from '../store.js';
+import { tramoDeFecha } from '../core/quincena.js';
 import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl, estadoDe } from '../core/prestamos.js';
 import { SIN_RESPONSABLE, coincidePersona } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
-import { nombrePeriodo, redondear, mesesEntre, sumarMeses } from '../core/util.js';
+import { nombrePeriodo, redondear, mesesEntre, sumarMeses, fechaCorta, periodoDe } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { BarraSegmentos, ColumnasApiladas, Sparkline } from './graficos.js';
 import { Icono } from './componentes.js';
-import { marcarItem, abrirItem } from './formularios.js';
+import { marcarItem, abrirItem, completarDeducciones } from './formularios.js';
 import { PASOS_ASISTENTE } from './configurar.js';
+import { ejecutarAccionAviso } from './avisos.js';
 
 const { computed } = Vue;
 
@@ -35,6 +37,19 @@ export const VistaInicio = {
       <a class="btn" href="#/presupuesto">Definirlos</a>
     </div>
 
+    <article v-if="avisosHoy.length" class="tarjeta aviso-tarjeta hoy">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Para hoy</h2>
+        <a class="btn-link" href="#/avisos">Ver {{ totalAvisos > avisosHoy.length ? 'los ' + totalAvisos + ' avisos' : 'avisos' }}</a>
+      </div>
+      <ul class="lista" style="margin-top: 6px">
+        <li v-for="a in avisosHoy" :key="a.id" class="fila">
+          <div class="fila-info"><span class="fila-titulo" style="white-space: normal">{{ a.titulo }}</span><span class="fila-sub" style="white-space: normal">{{ a.texto }}</span></div>
+          <button v-if="a.acciones[0]" type="button" class="btn" @click="ejecutarAccionAviso(a.acciones[0])">{{ a.acciones[0].texto }}</button>
+        </li>
+      </ul>
+    </article>
+
     <div>
       <p class="etiqueta">{{ r.libre < 0 ? 'Faltan este mes' : 'Libre este mes' }}</p>
       <p class="hero-num xl" :class="{ negativo: r.libre < 0 }">{{ fmt(Math.abs(r.libre)) }}</p>
@@ -47,6 +62,15 @@ export const VistaInicio = {
         <span v-for="f in flujo" :key="f.nombre"><i class="punto" :style="{ background: f.color }"></i>{{ f.nombre }} <b>{{ fmtEntero(f.valor) }}</b></span>
       </div>
     </div>
+
+    <a v-if="tramo" class="tarjeta enlace-tarjeta" href="#/mes">
+      <div class="fila-info">
+        <span class="etiqueta">Disponible hasta el {{ fechaCorta(tramo.fin) }}</span>
+        <span class="hero-num" style="font-size: 1.7rem; margin-top: 4px" :class="{ negativo: tramo.disponible < 0 }">{{ fmt(tramo.disponible) }}</span>
+        <span class="fila-sub envuelve" style="margin-top: 6px">Entran {{ fmt(tramo.entra) }} · salen {{ fmt(tramo.sale) }} del plan{{ tramo.fueraDelPlan ? ' · ' + fmt(tramo.fueraDelPlan) + ' fuera del plan' : '' }}</span>
+      </div>
+      <icono n="der" :t="20"/>
+    </a>
 
     <article class="tarjeta">
       <div class="tarjeta-cab">
@@ -138,6 +162,24 @@ export const VistaInicio = {
         </li>
       </ul>
       <p class="nota" style="margin-top: 12px">{{ resumenVariables }}</p>
+    </article>
+
+    <article v-if="r.descontado.total || r.descontado.incompletos.length" class="tarjeta">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Descontado en planilla</h2>
+        <span class="monto">{{ fmt(r.descontado.total) }}</span>
+      </div>
+      <p class="nota chica" style="margin: 3px 0 10px">De los salarios de {{ nombrePeriodo(store.periodo) }}. No es gasto del hogar: el presupuesto usa el neto.</p>
+      <ul class="lista">
+        <li v-for="c in descontado" :key="c.nombre" class="fila compacta">
+          <span style="flex: 1; min-width: 0; font-size: 0.92rem">{{ c.nombre }}</span>
+          <span class="monto">{{ fmt(c.valor) }}</span>
+        </li>
+      </ul>
+      <div v-if="r.descontado.incompletos.length" class="caja-ambar" style="display: flex; align-items: center; gap: 10px">
+        <span style="flex: 1">Faltan deducciones en {{ r.descontado.incompletos.length }} {{ r.descontado.incompletos.length === 1 ? 'pago' : 'pagos' }}.</span>
+        <button type="button" class="btn" @click="completarDeducciones(r.descontado.incompletos[0])">Completar</button>
+      </div>
     </article>
 
     <article class="tarjeta">
@@ -337,6 +379,11 @@ export const VistaInicio = {
       ...vivos('ingresos').map((i) => ({ nombre: i.nombre, activo: i.activo, monto: i.netoEsperado, persona: i.personaId })),
     ].filter((t) => t.activo !== false && !Number(t.monto) && (!t.persona || coincidePersona(t.persona, filtro()))));
     const sinPersonas = computed(() => !vivos('personas').length);
+    const avisosVisibles = computed(avisos);
+    const totalAvisos = computed(() => avisosVisibles.value.length);
+    const avisosHoy = computed(() => avisosVisibles.value.filter((a) => a.cuando === 'hoy').slice(0, 3));
+    const tramo = computed(() => (store.periodo === periodoDe(store.hoy) ? tramoDeFecha(ix.value, store.hoy, filtro()) : null));
+    const descontado = computed(() => Object.entries(r.value.descontado.porConcepto).sort((a, b) => b[1] - a[1]).map(([nombre, valor]) => ({ nombre, valor })));
     const asistentePendiente = computed(() => {
       const hechos = store.doc.config.asistente?.completados || [];
       return !!store.doc.config.migradoDesde && PASOS_ASISTENTE.some((p) => !hechos.includes(p.id));
@@ -345,6 +392,7 @@ export const VistaInicio = {
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
       variables, resumenVariables, deuda, listaCuentas, totalCuentas, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: PASOS_ASISTENTE.length,
+      avisosHoy, totalAvisos, tramo, descontado, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),
       abrir: (it) => abrirItem(it, store.periodo),

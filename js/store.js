@@ -7,6 +7,8 @@ import { crearIndice } from './core/asientos.js';
 import { PRINCIPAL, archivoDe, aniosDelDoc, contenidoArchivo } from './core/anios.js';
 import { periodoActual, hoy, dinero, dineroCorto } from './core/util.js';
 import { sincronizarCarpeta, marcarPendiente } from './sincronizacion.js';
+import { calcularAvisos, avisosVisibles } from './core/avisos.js';
+import { coincidePersona } from './core/filtro.js';
 import * as od from './onedrive.js';
 import * as almacen from './almacen.js';
 import { pinActivo, quitarPin } from './bloqueo.js';
@@ -50,6 +52,11 @@ const indiceActual = computed(() => {
   return markRaw(crearIndice(docCrudo(), { hoy: store.hoy }));
 });
 export const indice = () => indiceActual.value;
+
+// Avisos visibles en este dispositivo (sin los pospuestos ni los descartados), de todo el hogar.
+const avisosActuales = computed(() => avisosVisibles(calcularAvisos(indice(), { hoy: store.hoy, sync: store.sync }), prefs.avisosOcultos, store.hoy));
+// Con filtro de persona: los de esa persona y los que no son de nadie.
+export const avisos = () => avisosActuales.value.filter((a) => !a.personaId || coincidePersona(a.personaId, filtro()));
 
 // ---------------------------------------------------------------- Consultas
 

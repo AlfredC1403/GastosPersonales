@@ -1,4 +1,4 @@
-import { store, iniciar, sincronizar, soyYo, aviso, personas, buscar, vivos } from './store.js';
+import { store, iniciar, sincronizar, soyYo, aviso, personas, buscar, vivos, avisos } from './store.js';
 import { nombrePeriodo, sumarMeses, periodoActual, hoy } from './core/util.js';
 import * as od from './onedrive.js';
 import { prefs, alternarMenuContraido } from './tema.js';
@@ -19,6 +19,8 @@ import { VistaSeguridad } from './ui/seguridad.js';
 import { VistaDatos } from './ui/datos.js';
 import { VistaApariencia } from './ui/apariencia.js';
 import { VistaConfigurar } from './ui/configurar.js';
+import { VistaAvisos } from './ui/avisos.js';
+import { VistaSalarios } from './ui/salarios.js';
 
 const { createApp, ref, computed, watch, nextTick, markRaw } = Vue;
 
@@ -26,6 +28,8 @@ const VISTAS = [
   { id: 'inicio', nombre: 'Inicio', componente: VistaInicio, porMes: true },
   { id: 'mes', nombre: 'Mes', componente: VistaMes, porMes: true },
   { id: 'movimientos', nombre: 'Movimientos', componente: VistaMovimientos, porMes: true },
+  { id: 'avisos', nombre: 'Avisos', componente: VistaAvisos },
+  { id: 'salarios', nombre: 'Salarios y deducciones', componente: VistaSalarios },
   { id: 'cuentas', nombre: 'Cuentas', componente: VistaCuentas },
   { id: 'prestamos', nombre: 'Préstamos', componente: VistaPrestamos },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: VistaPresupuesto },
@@ -81,6 +85,9 @@ const App = {
         </template>
         <span v-else class="cab-titulo">{{ vista.nombre }}</span>
         <span class="cab-espacio"></span>
+        <a href="#/avisos" class="btn-persona campana" :class="{ activo: ruta === 'avisos' }" :aria-label="cuentaAvisos ? cuentaAvisos + ' avisos' : 'Avisos'">
+          <icono n="campana" :t="17"/><span v-if="cuentaAvisos" class="insignia">{{ cuentaAvisos > 9 ? '9+' : cuentaAvisos }}</span>
+        </a>
         <selector-persona v-if="listaPersonas.length"/>
         <button type="button" class="pill-sync con-texto" :class="sync.clase" :title="sync.detalle || sync.texto" :aria-label="sync.texto" @click="tocarSync">
           <icono :n="sync.icono" :t="15"/><span>{{ sync.texto }}</span>
@@ -161,6 +168,7 @@ const App = {
     const vista = computed(() => VISTAS.find((v) => v.id === ruta.value));
     const esAcceso = computed(() => ACCESOS.some((a) => a?.id === ruta.value));
     const listaPersonas = computed(personas);
+    const cuentaAvisos = computed(() => avisos().length);
     const preguntarQuien = computed(() => !buscar('personas', store.yo) && listaPersonas.value.length > 0);
     const actual = periodoActual();
 
@@ -219,7 +227,7 @@ const App = {
 
     return {
       store, prefs, vista, ruta, accesos: ACCESOS, esAcceso, escritorio, menuAbierto, dlgMenu, fueraDelMenu, tocarMenu, alternarMenuContraido,
-      listaPersonas, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
+      listaPersonas, cuentaAvisos, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
       actualizar: () => location.reload(),
       mover: (n) => { store.periodo = sumarMeses(store.periodo, n); },
       nuevo: () => nuevoMovimiento({ fecha: store.periodo === actual ? undefined : `${store.periodo}-01` }),

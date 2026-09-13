@@ -2,6 +2,7 @@
 import { redondear, sumarMeses, mesesEntre, mesDe, periodoDe, aCentavos, deCentavos } from './util.js';
 import { vivo } from './modelo.js';
 import { coincidePersona } from './filtro.js';
+import { planillaDe } from './nomina.js';
 
 // Un saldo menor a L1 es redondeo: el banco lo ajusta en la última cuota.
 export const RESIDUO = 1;
@@ -141,6 +142,7 @@ export function deudaAl(ix, periodo, filtro) {
 }
 
 // Cuotas de préstamos que tocan en `periodo`, con lo pagado (pendiente, parcial, completo).
+// Una cuota que se descuenta por planilla lleva `planilla` y se paga con los recibos del salario.
 export function cuotasDelMes(ix, periodo, filtro) {
   const items = [];
   for (const p of ix.doc.prestamos || []) {
@@ -149,11 +151,15 @@ export function cuotasDelMes(ix, periodo, filtro) {
     const esperado = aCentavos(p.cuota);
     const real = pagos.reduce((a, x) => a + aCentavos(x.monto), 0);
     const estado = !real ? 'pendiente' : real > esperado ? 'excedido' : real >= esperado ? 'completo' : 'parcial';
+    const planilla = planillaDe(ix, p.id);
     items.push({
       clave: `prestamo:${p.id}`, tipoItem: 'prestamo', prestamo: p, nombre: p.nombre, responsableId: p.responsableId || null,
-      dia: p.dia || null, grupoId: ix.grupoDe(p.categoriaId || 'prestamos'), categoriaId: p.categoriaId || 'prestamos', medioId: p.cuentaId || null,
-      forma: 'fijo', esperado: deCentavos(esperado), real: deCentavos(real), queda: deCentavos(Math.max(0, esperado - real)), sobrante: 0,
-      estado, hecho: estado === 'completo' || estado === 'excedido', pagos: pagos.map((x) => ix.movimientos.get(x.origen)).filter(Boolean),
+      dia: planilla ? null : p.dia || null, grupoId: ix.grupoDe(p.categoriaId || 'prestamos'), categoriaId: p.categoriaId || 'prestamos',
+      medioId: planilla ? null : p.cuentaId || null, forma: planilla ? 'planilla' : 'fijo',
+      planilla: planilla ? { ingreso: planilla.ingreso, deduccion: planilla.deduccion, esperados: planilla.veces, descontados: pagos.filter((x) => x.planilla).length } : null,
+      esperado: deCentavos(esperado), real: deCentavos(real), queda: deCentavos(Math.max(0, esperado - real)), sobrante: 0,
+      estado, hecho: estado === 'completo' || estado === 'excedido',
+      pagos: pagos.map((x) => ix.movimientos.get(x.origen) || ix.recibosPorId.get(x.origen)).filter(Boolean),
     });
   }
   return items;

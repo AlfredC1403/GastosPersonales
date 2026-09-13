@@ -20,6 +20,18 @@ export function ultimoDia(periodo) {
   return new Date(y, m, 0).getDate();
 }
 
+// sumarDias('2026-09-30', 2) → '2026-10-02'. Con fechas UTC para no depender del horario de verano.
+export function sumarDias(fecha, n) {
+  const [y, m, d] = fecha.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+}
+
+export const diaDeSemana = (fecha) => {
+  const [y, m, d] = fecha.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+};
+
 // Día `dia` del mes, sin pasarse del último: fechaEnMes('2026-02', 31) → '2026-02-28'.
 export function fechaEnMes(periodo, dia) {
   const d = Math.min(Math.max(Math.round(Number(dia)) || 1, 1), ultimoDia(periodo));

@@ -82,6 +82,28 @@ export function expandir(doc, ix) {
       ...base, clase: 'ingreso', c: neto, bruto: neto + descontado, completo: deducciones.every((d) => d.noAplica || tieneValor(d.monto)),
       estimado: false, categoriaId, grupoId: ix.grupoDe(categoriaId), medioId: r.cuentaId, ingresoId: r.ingresoId, tipoRecibo: r.tipo || 'ordinario',
     });
+    // Lo descontado no es gasto del hogar: se ve aparte. Un préstamo por planilla baja su saldo
+    // y un ahorro suma en su cuenta, aunque ese dinero nunca pase por la cuenta del salario.
+    for (const d of deducciones) {
+      if (d.noAplica || !tieneValor(d.monto)) continue;
+      const definicion = ingreso?.deducciones?.find((x) => x.id === d.deduccionId);
+      const naturaleza = d.naturaleza || definicion?.naturaleza || 'gasto';
+      const cd = aCentavos(d.monto);
+      const cat = d.categoriaId ?? definicion?.categoriaId ?? null;
+      out.push({
+        ...base, clase: 'deduccion', c: cd, deduccionId: d.deduccionId, nombre: d.nombre || definicion?.nombre || 'Deducción', naturaleza,
+        categoriaId: cat, grupoId: ix.grupoDe(cat), ingresoId: r.ingresoId,
+      });
+      const prestamoId = d.prestamoId ?? definicion?.prestamoId;
+      if (naturaleza === 'prestamo' && prestamoId) {
+        out.push({ ...base, clase: 'prestamo', prestamoId, tipoPago: 'cuota', c: cd, creado: r.creado || '', planilla: true });
+      }
+      const cuentaDestinoId = d.cuentaDestinoId ?? definicion?.cuentaDestinoId;
+      if (naturaleza === 'ahorro' && cuentaDestinoId) {
+        out.push({ ...base, clase: 'saldo', cuentaId: cuentaDestinoId, moneda: ix.monedaDe(cuentaDestinoId), delta: cd });
+        out.push({ ...base, clase: 'ahorro', c: cd, estimado: false, partidaId: null, metaId: null, cuentaId: cuentaDestinoId, planilla: true });
+      }
+    }
   }
 
   return out.sort(porFecha);
@@ -130,7 +152,9 @@ export function crearIndice(doc, { hoy = '' } = {}) {
     if (a.clase === 'saldo') ix.saldos.push(a);
     else agregar(ix.porPeriodo, a.periodo, a);
     if (a.clase === 'prestamo') {
-      agregar(ix.pagosPrestamo, a.prestamoId, { tipo: a.tipoPago, periodo: a.periodo, fecha: a.fecha, monto: deCentavos(a.c), creado: a.creado, origen: a.origen });
+      agregar(ix.pagosPrestamo, a.prestamoId, {
+        tipo: a.tipoPago, periodo: a.periodo, fecha: a.fecha, monto: deCentavos(a.c), creado: a.creado, origen: a.origen, planilla: !!a.planilla,
+      });
     }
   }
 
@@ -145,10 +169,13 @@ export function crearIndice(doc, { hoy = '' } = {}) {
 
   ix.recibos = new Map(); // claveRecibo → recibos
   ix.recibosPorPeriodo = new Map();
+  ix.recibosPorIngreso = new Map();
+  ix.recibosPorId = mapa(doc.recibos);
   for (const r of doc.recibos || []) {
     if (!vivo(r)) continue;
     agregar(ix.recibos, claveRecibo(r), r);
     agregar(ix.recibosPorPeriodo, r.periodo || periodoDe(r.ocurrencia || r.fecha), r);
+    agregar(ix.recibosPorIngreso, r.ingresoId, r);
   }
 
   ix.ajustes = new Map(); // `${partidaId}:${periodo}` → ajuste

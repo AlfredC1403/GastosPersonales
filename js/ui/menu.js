@@ -1,4 +1,4 @@
-import { store, fmtEntero, indice, vivos, cuentas, buscar, filtro, bloquear } from '../store.js';
+import { store, fmtEntero, indice, vivos, cuentas, buscar, filtro, bloquear, avisos } from '../store.js';
 import { saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl } from '../core/prestamos.js';
@@ -14,6 +14,7 @@ export const GRUPOS_MENU = [
     { id: 'inicio', nombre: 'Inicio', icono: 'casa' },
     { id: 'mes', nombre: 'Mes', icono: 'calendario' },
     { id: 'movimientos', nombre: 'Movimientos', icono: 'flechas' },
+    { id: 'avisos', nombre: 'Avisos', icono: 'campana', valor: 'avisos' },
   ] },
   { nombre: 'Dinero', items: [
     { id: 'cuentas', nombre: 'Cuentas', icono: 'banco', valor: 'cuentas' },
@@ -25,6 +26,7 @@ export const GRUPOS_MENU = [
   ] },
   { nombre: 'Configuración', items: [
     { id: 'configurar', nombre: 'Revisar configuración', icono: 'check' },
+    { id: 'salarios', nombre: 'Salarios y deducciones', icono: 'billete' },
     { id: 'categorias', nombre: 'Categorías y grupos', icono: 'etiqueta' },
     { id: 'personas', nombre: 'Personas', icono: 'personas' },
     { id: 'seguridad', nombre: 'Seguridad', icono: 'candado' },
@@ -97,6 +99,7 @@ export const MenuLateral = {
         cuentas: lista.length ? fmtEntero(lista.reduce((a, c) => a + enLempirasAprox(ix, c.id, saldos[c.id] || 0), 0)) : '',
         deuda: deuda ? fmtEntero(deuda) : '',
         presupuesto: `${fmtEntero(presupuestoMensual(ix, store.periodo, f).egresos)}/mes`,
+        avisos: avisos().length ? String(avisos().length) : '',
       };
     });
     const bloquearAhora = () => {

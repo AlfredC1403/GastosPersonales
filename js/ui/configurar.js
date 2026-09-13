@@ -12,7 +12,7 @@ export const PASOS_ASISTENTE = [
   { id: 'e2-respaldo', titulo: 'Respaldo y novedades' },
   { id: 'e2-grupos', titulo: 'Grupos y categorías' },
   { id: 'e2-partidas', titulo: 'Cómo se paga cada partida' },
-  { id: 'e2-ingresos', titulo: 'Salarios' },
+  { id: 'e2-ingresos', titulo: 'Salarios y deducciones' },
 ];
 
 // Partidas que suelen pagarse en partes.
@@ -81,8 +81,8 @@ export const VistaConfigurar = {
     </article>
 
     <article v-else class="tarjeta">
-      <h2>Salarios</h2>
-      <p class="nota" style="margin: 4px 0 6px">Si les pagan por quincena, cámbienlo aquí para que Mes muestre cada pago por separado. Las deducciones (IHSS, ISR) llegan en una próxima versión.</p>
+      <h2>Salarios y deducciones</h2>
+      <p class="nota" style="margin: 4px 0 6px">Si les pagan por quincena, cámbienlo aquí para que Mes muestre cada pago. En Salarios y deducciones agreguen el IHSS, el ISR y los préstamos que se descuentan por planilla: esos préstamos quedan pagados al registrar la quincena.</p>
       <ul class="lista">
         <li v-for="i in listaIngresos" :key="i.id" class="fila clic" @click="editarIngreso(i)">
           <div class="fila-info">
@@ -92,7 +92,8 @@ export const VistaConfigurar = {
           <span class="btn-link">Editar</span>
         </li>
       </ul>
-      <p v-if="!listaIngresos.length" class="vacio">No hay salarios. Agrégalos en Presupuesto.</p>
+      <p v-if="!listaIngresos.length" class="vacio">No hay salarios todavía.</p>
+      <a class="btn" href="#/salarios" style="margin-top: 12px">Salarios y deducciones</a>
     </article>
 
     <div class="acciones">

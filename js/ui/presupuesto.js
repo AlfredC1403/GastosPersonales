@@ -1,5 +1,6 @@
 import { store, fmt, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
-import { presupuestoMensual, equivalenteMensual, ingresoMensual, pagosPorMes } from '../core/presupuesto.js';
+import { presupuestoMensual, equivalenteMensual } from '../core/presupuesto.js';
+import { ingresoMensual, pagosPorMes, planillaDe } from '../core/nomina.js';
 import { estadoDe } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
@@ -22,7 +23,7 @@ export const VistaPresupuesto = {
 
     <div class="kpis">
       <div class="kpi"><div class="kpi-et">Ingresos al mes</div><div class="kpi-val positivo">{{ fmt(p.ingresos) }}</div><div class="kpi-nota">netos, con décimos</div></div>
-      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmt(p.egresos) }}</div><div class="kpi-nota">partidas, préstamos y aportes</div></div>
+      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmt(p.egresos) }}</div><div class="kpi-nota">{{ p.planilla ? 'sin ' + fmt(p.planilla) + ' de cuotas por planilla' : 'partidas, préstamos y aportes' }}</div></div>
       <div class="kpi"><div class="kpi-et">Libre planificado</div><div class="kpi-val" :class="{ negativo: libre < 0 }">{{ fmt(libre) }}</div><div class="kpi-nota">antes de gastos fuera del plan</div></div>
     </div>
 
@@ -61,7 +62,10 @@ export const VistaPresupuesto = {
         </li>
       </ul>
       <p v-if="!filasIngresos.length" class="nota chica" style="padding-top: 8px">Todavía no hay salarios ni otros ingresos.</p>
-      <button type="button" class="btn-punteado" style="margin-top: 14px" @click="editarIngreso({ personaId: personaFiltro() || undefined })">+ Agregar ingreso</button>
+      <div class="botones">
+        <button type="button" class="btn" @click="editarIngreso({ personaId: personaFiltro() || undefined })">+ Agregar ingreso</button>
+        <a class="btn" href="#/salarios">Salarios y deducciones</a>
+      </div>
     </article>
 
     <div class="segmentos" role="group" aria-label="Ver partidas">
@@ -119,6 +123,8 @@ export const VistaPresupuesto = {
       const dias = i.diasPago?.length ? i.diasPago : [31];
       chips.push({ t: i.frecuencia === 'quincenal' ? `quincenal · ${dias.map((d) => (d >= 31 ? 'último' : d)).join(' y ')}` : `mensual · ${dia(dias[0])}`, c: '' });
       if (i.decimo13 || i.decimo14) chips.push({ t: 'con décimos', c: 'acento' });
+      const activas = (i.deducciones || []).filter((d) => d.activo !== false).length;
+      if (activas) chips.push({ t: `${activas} ${activas === 1 ? 'deducción' : 'deducciones'}`, c: '' });
       const promedio = Number(i.netoEsperado) > 0 && (pagosPorMes(i) > 1 || i.decimo13 || i.decimo14);
       return { id: i.id, ingreso: i, chips, detalle: promedio ? `≈ ${fmt(ingresoMensual(i))}/mes` : '' };
     }));
@@ -154,11 +160,15 @@ export const VistaPresupuesto = {
     function filaPrestamo(x) {
       const fin = estadoDe(ix.value, x).finEstimado;
       if (!fin || fin < store.periodo) return null;
+      const planilla = planillaDe(ix.value, x.id);
       const chips = [{ t: 'préstamo', c: '' }];
       if (prefs.vistaPresupuesto !== 'persona') chips.unshift({ t: nombrePersona(x.responsableId), c: '' });
-      if (x.dia) chips.push({ t: `día ${x.dia}`, c: '' });
-      return { id: x.id, nombre: x.nombre, persona: x.responsableId || null, grupoId: ix.value.grupoDe(x.categoriaId || 'prestamos'), medioId: x.cuentaId || 'sin',
-        valor: Number(x.cuota) || 0, chips, monto: fmt(x.cuota), detalle: `hasta ${nombrePeriodo(fin, true)}`, abrir: () => editarPrestamo(x) };
+      if (planilla) chips.push({ t: `por planilla de ${planilla.ingreso.nombre}`, c: 'acento' });
+      else if (x.dia) chips.push({ t: `día ${x.dia}`, c: '' });
+      return { id: x.id, nombre: x.nombre, persona: x.responsableId || null, grupoId: ix.value.grupoDe(x.categoriaId || 'prestamos'), medioId: planilla ? 'planilla' : x.cuentaId || 'sin',
+        // Una cuota por planilla ya viene descontada del neto: no suma en los egresos.
+        valor: planilla ? 0 : Number(x.cuota) || 0, inactiva: false, chips, monto: fmt(x.cuota),
+        detalle: planilla ? 'se descuenta del salario' : `hasta ${nombrePeriodo(fin, true)}`, abrir: () => editarPrestamo(x) };
     }
 
     const filas = computed(() => [
@@ -177,7 +187,7 @@ export const VistaPresupuesto = {
       }
       if (vista === 'medio') {
         const ids = [...new Set([...cuentas().map((c) => c.id), ...filas.value.map((x) => x.medioId)])];
-        return ids.map((id) => seccion(id, id === 'sin' ? 'Sin medio de pago' : nombreCuenta(id), null,
+        return ids.map((id) => seccion(id, id === 'sin' ? 'Sin medio de pago' : id === 'planilla' ? 'Por planilla' : nombreCuenta(id), null,
           filas.value.filter((x) => x.medioId === id), () => editarPartida({ medioPagoId: id === 'sin' ? 'gastos' : id, responsableId: personaFiltro() || undefined })))
           .filter((s) => s.filas.length).sort((a, b) => b.total - a.total);
       }

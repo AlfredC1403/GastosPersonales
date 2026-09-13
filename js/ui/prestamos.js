@@ -1,5 +1,6 @@
 import { store, fmt, fmtEntero, fmtCorto, indice, vivos, nombrePersona, guardarConfig, filtro, personaFiltro } from '../store.js';
 import { estadoDe, prestamosParaSimular, simularDeudas, ordenarPrioridad } from '../core/prestamos.js';
+import { planillaDe } from '../core/nomina.js';
 import { coincidePersona } from '../core/filtro.js';
 import { nombrePeriodo, sumarMeses, mesesEntre, duracion, periodoActual } from '../core/util.js';
 import { Icono } from './componentes.js';
@@ -189,6 +190,7 @@ export const VistaPrestamos = {
       <div class="tarjeta-cab pegada">
         <h2>{{ x.p.nombre }}</h2>
         <span class="chip">{{ nombrePersona(x.p.responsableId) }}</span>
+        <span v-if="x.planilla" class="chip acento">{{ x.planilla }}</span>
         <span v-if="x.e.pagado" class="chip ok">Pagado</span>
       </div>
       <p class="hero-num" style="font-size: 1.85rem; margin-top: 8px">{{ fmt(x.e.saldo) }}</p>
@@ -225,7 +227,11 @@ export const VistaPrestamos = {
   setup() {
     const lista = computed(() => vivos('prestamos')
       .filter((p) => coincidePersona(p.responsableId, filtro()))
-      .map((p) => ({ p, e: estadoDe(indice(), p) }))
+      .map((p) => {
+        const planilla = planillaDe(indice(), p.id);
+        const texto = planilla ? `Por planilla · ${planilla.veces === 2 ? 'mitad en cada pago' : 'en un pago'}` : '';
+        return { p, e: estadoDe(indice(), p), planilla: texto };
+      })
       .sort((a, b) => a.e.pagado - b.e.pagado || b.e.saldo - a.e.saldo));
     const activos = computed(() => lista.value.filter((x) => !x.e.pagado));
     const totales = computed(() => ({
