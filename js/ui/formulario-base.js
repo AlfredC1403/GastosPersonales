@@ -133,7 +133,10 @@ export function revisarFinanciamiento({ monto, fecha, q }) {
   const n = Number(q.n);
   if (!Number.isInteger(n) || n < 2 || n > 60) return 'Escribe el número de cuotas (de 2 a 60).';
   if (hayValor(q.tasaAnual) && !(Number(q.tasaAnual) >= 0)) return 'Revisa la tasa anual.';
-  if (Number(q.cuotaBanco) > 0 && Number(q.cuotaBanco) * n < Number(monto)) return 'Con esa cuota no se paga: revisa la cuota o el número de cuotas.';
+  // La última cuota absorbe lo que falte (el banco redondea las demás), pero si la cuota escrita se
+  // queda muy corta la última saldría disparada: eso casi siempre es un número mal puesto.
+  const cuota = Number(q.cuotaBanco);
+  if (cuota > 0 && Number(monto) - cuota * (n - 1) > cuota * 2) return 'Con esa cuota la última saldría al doble o más: revisa la cuota o el número de cuotas.';
   if (hayValor(q.comision?.valor) && !(Number(q.comision.valor) >= 0 && (q.comision.unidad === 'monto' || Number(q.comision.valor) <= 100))) return 'Revisa la comisión.';
   if (q.canceladaEl && q.canceladaEl < fecha) return 'La cancelación no puede ser antes del financiamiento.';
   const desde = Number(q.desdeCuota) || 1;

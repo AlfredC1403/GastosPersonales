@@ -48,6 +48,16 @@ export function posteriorAlSaldo(cuenta, fecha, creado) {
 
 export const TIPOS_FINANCIAMIENTO = { intra: 'Intrafinanciamiento', extra: 'Extrafinanciamiento' };
 
+// Cuándo cae cada cuota. Depende del banco: unos las cargan en el corte de la tarjeta y otros el
+// mismo día del mes en que se sacó el financiamiento (un extra del 30 cae los días 30, aunque el
+// corte sea el 12). 'corte' es lo que hacía la app antes, y sigue siendo lo que se asume si no se dice.
+export const COBROS_CUOTA = { corte: 'En el corte de la tarjeta', dia: 'El mismo día de cada mes' };
+export const cobroDeCuotas = (q) => (q?.cobro === 'dia' ? 'dia' : 'corte');
+
+// Día del mes en que cae la cuota cuando el banco cobra por día (31 = el último del mes, que
+// fechaEnMes recorta a lo que tenga cada mes: un financiamiento del 31 cae el 28 en febrero).
+export const diaDeCuota = (m) => Number(String((m.cuotas?.primerCorte) || m.fecha || '').slice(8, 10)) || 1;
+
 const tasaMensual = (tasa) => (Number(tasa) || 0) / 100 / 12;
 const cuotaNivelada = (monto, r, n) => (r ? (monto * r) / (1 - (1 + r) ** -n) : monto / n);
 
@@ -103,7 +113,10 @@ export function cuotasDeCompra(cuenta, m) {
   const q = m.cuotas || {};
   const n = Math.max(1, Math.round(Number(q.n) || 1));
   const total = aCentavos(m.monto);
-  const primero = corteDe(cuenta, q.primerCorte || m.fecha);
+  // `primerCorte` guarda la fecha de la primera cuota: el corte que la lleva, o el día en que cae.
+  const porDia = cobroDeCuotas(q) === 'dia';
+  const primero = porDia ? (q.primerCorte || m.fecha) : corteDe(cuenta, q.primerCorte || m.fecha);
+  const dia = Number(primero.slice(8, 10)) || 1;
   const intra = q.tipo !== 'extra';
   const cuotaBanco = aCentavos(q.cuotaBanco);
   const r = tasaMensual(q.tasaAnual) || (cuotaBanco > 0 ? tasaDeCuota(total, cuotaBanco, n) : 0);
@@ -113,11 +126,15 @@ export function cuotasDeCompra(cuenta, m) {
   let saldo = total;
   let lista = Array.from({ length: n }, (_, i) => {
     const interes = r ? Math.round(saldo * r) : 0;
-    let capital = r ? Math.min(saldo, Math.max(0, cuota - interes)) : base;
+    // Sin intereses, si se anotó la cuota del banco se usa esa: los bancos redondean (L25,797.97
+    // entre 18 lo cobran como L1,433.20) y la última cuota absorbe la diferencia. Así los números
+    // de la app calzan con el estado de cuenta en vez de quedar a unos centavos.
+    let capital = r ? Math.min(saldo, Math.max(0, cuota - interes)) : Math.min(saldo, cuotaBanco > 0 ? cuotaBanco : base);
     if (i === n - 1) capital = saldo;
     saldo -= capital;
     const com = comision.c && !comision.comoGasto && (comision.mensual || i === 0) ? comision.c : 0;
-    const fecha = corteDelMes(cuenta, sumarMeses(periodoDe(primero), i));
+    const mes = sumarMeses(periodoDe(primero), i);
+    const fecha = porDia ? fechaEnMes(mes, dia) : corteDelMes(cuenta, mes);
     return { k: i + 1, n, fecha, periodo: periodoDe(fecha), capital, interes, comision: com, c: capital + interes + com, intra };
   });
   // Un financiamiento que ya venía empezado: las cuotas anteriores no generan nada.

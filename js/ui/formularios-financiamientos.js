@@ -3,11 +3,11 @@
 // campos del financiamiento por delante y sin lo que aquí no viene al caso (partida, comercio, meta).
 // Sirve también para registrar uno que ya venía empezado, diciendo por qué cuota va.
 import { store, abrirModal, personas, tarjetas, categoriasPorGrupo, buscar, fmt, nombreCuenta } from '../store.js';
-import { corteDe, corteSiguiente, cuotasDeCompra, cuotaSiguienteHoy, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
-import { hoy, periodoDe, nombrePeriodo, fechaCorta, redondear } from '../core/util.js';
+import { corteDe, corteSiguiente, cuotasDeCompra, cuotaSiguienteHoy, TIPOS_FINANCIAMIENTO, COBROS_CUOTA, cobroDeCuotas } from '../core/tarjetas.js';
+import { hoy, periodoDe, nombrePeriodo, fechaCorta, fechaEnMes, sumarMeses, redondear } from '../core/util.js';
 import { copia, PIE, opcionesCategoria, usarFormulario, textoDeCuotas, revisarFinanciamiento } from './formulario-base.js';
 
-const { reactive, ref, computed } = Vue;
+const { reactive, ref, computed, watch } = Vue;
 
 export const FinanciamientoForm = {
   props: { inicial: Object },
@@ -37,6 +37,12 @@ export const FinanciamientoForm = {
     <label class="campo"><span>Categoría del gasto</span>
       <select v-model="m.categoriaId">${opcionesCategoria('listaCategorias')}</select></label>
     <p class="nota chica" style="margin-top: -4px">El capital de cada cuota se anota en esta categoría. Los intereses y la comisión van a "Intereses y cargos de tarjeta".</p>
+
+    <label class="campo"><span>Cuándo cae la cuota</span>
+      <select v-model="q.cobro"><option v-for="(n, k) in cobros" :key="k" :value="k">{{ n }}</option></select></label>
+    <p class="nota chica" style="margin-top: -4px">{{ q.cobro === 'dia'
+      ? 'Cada cuota cae el mismo día del mes, aunque el corte de la tarjeta sea otro día.'
+      : 'Cada cuota cae en el corte de la tarjeta.' }}</p>
 
     <div class="fila-campos">
       <label class="campo"><span>Cuotas</span><input v-model.number="q.n" type="number" inputmode="numeric" min="2" max="60" required></label>
@@ -86,7 +92,10 @@ export const FinanciamientoForm = {
     });
     const campoMonto = ref(null);
     const q = reactive({
-      n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, desdeCuota: 1, ...(original.cuotas || {}),
+      n: 12, tipo: 'intra', tasaAnual: null, cuotaBanco: null, primerCorte: null, canceladaEl: null, desdeCuota: 1,
+      // Lo que suele hacer el banco de esa tarjeta; se puede cambiar aquí para este financiamiento.
+      cobro: buscar('cuentas', original.cuentaId || primeraTarjeta)?.tarjeta?.cobroCuotas === 'dia' ? 'dia' : 'corte',
+      ...(original.cuotas || {}),
     });
     q.desdeCuota = Number(q.desdeCuota) || 1;
     q.comision = { valor: null, unidad: 'porcentaje', cobro: 'unica', comoGasto: false, ...(original.cuotas?.comision || {}) };
@@ -97,14 +106,28 @@ export const FinanciamientoForm = {
     const listaCategorias = computed(() => categoriasPorGrupo('gasto'));
     const periodo = computed(() => periodoDe(m.fecha || hoy()));
 
+    // Con cobro en el corte se elige entre el corte de la fecha y el siguiente; con cobro por día,
+    // entre el mismo mes del financiamiento y el siguiente (unos bancos cobran ya, otros al mes).
     const cortesPosibles = computed(() => {
       const cuenta = buscar('cuentas', m.cuentaId);
-      if (!cuenta?.tarjeta || !m.fecha) return [{ valor: null, texto: 'En el primer corte' }];
+      if (!cuenta?.tarjeta || !m.fecha) return [{ valor: null, texto: 'En el primer cobro' }];
+      if (cobroDeCuotas(q) === 'dia') {
+        const dia = Number(m.fecha.slice(8, 10));
+        const siguiente = fechaEnMes(sumarMeses(periodoDe(m.fecha), 1), dia);
+        const lista = [{ valor: null, texto: `El ${fechaCorta(m.fecha)} (este mes)` }, { valor: siguiente, texto: `El ${fechaCorta(siguiente)} (mes siguiente)` }];
+        if (q.primerCorte && ![null, siguiente].includes(q.primerCorte)) lista.push({ valor: q.primerCorte, texto: `El ${fechaCorta(q.primerCorte)}` });
+        return lista;
+      }
       const primero = corteDe(cuenta, m.fecha);
       const siguiente = corteSiguiente(cuenta, primero);
       const lista = [{ valor: null, texto: `Corte del ${fechaCorta(primero)}` }, { valor: siguiente, texto: `Corte del ${fechaCorta(siguiente)}` }];
       if (q.primerCorte && ![null, siguiente].includes(q.primerCorte)) lista.push({ valor: q.primerCorte, texto: `Corte del ${fechaCorta(corteDe(cuenta, q.primerCorte))}` });
       return lista;
+    });
+
+    watch(() => [m.cuentaId, q.cobro], ([cuentaId], [antesCuenta]) => {
+      q.primerCorte = null; // la fecha elegida era de la otra tarjeta o del otro modo de cobro
+      if (cuentaId !== antesCuenta) q.cobro = buscar('cuentas', cuentaId)?.tarjeta?.cobroCuotas === 'dia' ? 'dia' : 'corte';
     });
 
     const cuotas = computed(() => {
@@ -159,6 +182,7 @@ export const FinanciamientoForm = {
           tasaAnual: Number(q.tasaAnual) > 0 ? Number(q.tasaAnual) : null,
           cuotaBanco: Number(q.cuotaBanco) > 0 ? redondear(Number(q.cuotaBanco)) : null,
           primerCorte: q.primerCorte || null,
+          cobro: cobroDeCuotas(q),
           canceladaEl: q.canceladaEl || null,
           desdeCuota: Number(q.desdeCuota) > 1 ? Math.round(Number(q.desdeCuota)) : 1,
           comision: Number(q.comision.valor) > 0
@@ -179,7 +203,7 @@ export const FinanciamientoForm = {
 
     return {
       m, q, campoMonto, listaTarjetas, listaPersonas, listaCategorias, cortesPosibles, vista, periodo, enviar, avisoCuota,
-      store, tipos: TIPOS_FINANCIAMIENTO, simbolo: store.doc.config.moneda || 'L', nombrePeriodo, nombreCuenta,
+      store, tipos: TIPOS_FINANCIAMIENTO, cobros: COBROS_CUOTA, simbolo: store.doc.config.moneda || 'L', nombrePeriodo, nombreCuenta,
       error: f.error, existe: f.existe, auditoria: f.auditoria, eliminar: f.eliminar,
     };
   },

@@ -384,3 +384,53 @@ test('cuotaSiguienteHoy(): qué cuota tocaría hoy según la fecha y el corte', 
   // No le afecta el desdeCuota que se haya escrito: mira el plan completo.
   assert.equal(cuotaSiguienteHoy(t, { ...m, cuotas: { ...m.cuotas, desdeCuota: 9 } }, '2026-09-13'), 7);
 });
+
+// ---------------------------------------------------------------- Cuándo cae la cuota
+
+test('unos bancos cobran la cuota en el corte y otros el mismo día del financiamiento', () => {
+  const t = visa({ diaCorte: 12, diaPago: 2 });
+  const base = { monto: 24000, fecha: '2025-08-30', cuotas: { n: 6, tasaAnual: 0 } };
+  // Por defecto, en el corte de la tarjeta: el del 30 de agosto es el 12 de septiembre.
+  assert.deepEqual(cuotasDeCompra(t, base).slice(0, 3).map((x) => x.fecha), ['2025-09-12', '2025-10-12', '2025-11-12']);
+  // Por día: cae los 30, aunque el corte sea el 12.
+  const porDia = cuotasDeCompra(t, { ...base, cuotas: { ...base.cuotas, cobro: 'dia' } });
+  assert.deepEqual(porDia.slice(0, 3).map((x) => x.fecha), ['2025-08-30', '2025-09-30', '2025-10-30']);
+  // Un financiamiento del 31 no se sale de los meses cortos.
+  const fin = cuotasDeCompra(t, { monto: 12000, fecha: '2026-01-31', cuotas: { n: 4, tasaAnual: 0, cobro: 'dia' } });
+  assert.deepEqual(fin.map((x) => x.fecha), ['2026-01-31', '2026-02-28', '2026-03-31', '2026-04-30']);
+});
+
+test('por día, la primera cuota puede ser el mismo mes o el siguiente', () => {
+  const t = visa({ diaCorte: 12 });
+  const q = { n: 6, tasaAnual: 0, cobro: 'dia' };
+  // Sin decir nada, empieza el día del financiamiento.
+  assert.equal(cuotasDeCompra(t, { monto: 24000, fecha: '2025-08-30', cuotas: q })[0].fecha, '2025-08-30');
+  // Con la fecha del mes siguiente, empieza ahí y sigue en ese día.
+  const despues = cuotasDeCompra(t, { monto: 24000, fecha: '2025-08-30', cuotas: { ...q, primerCorte: '2025-09-30' } });
+  assert.deepEqual(despues.slice(0, 2).map((x) => x.fecha), ['2025-09-30', '2025-10-30']);
+});
+
+test('sin intereses, la cuota que cobra el banco manda y la última absorbe el redondeo', () => {
+  // El caso real de un extrafinanciamiento BAC: L25,797.97 en 18 cuotas de L1,433.20.
+  const t = visa({ diaCorte: 12 });
+  const m = { monto: 25797.97, fecha: '2025-08-30', cuotas: { n: 18, tipo: 'extra', tasaAnual: 0, cobro: 'dia', cuotaBanco: 1433.20 } };
+  const lista = cuotasDeCompra(t, m);
+  // Todas menos la última son exactamente la del estado de cuenta.
+  assert.deepEqual([...new Set(lista.slice(0, -1).map((x) => x.c))], [143320]);
+  // La última lleva lo que falta, y el total cuadra al centavo.
+  assert.equal(lista.at(-1).c, 143357);
+  assert.equal(lista.reduce((a, x) => a + x.c, 0), 2579797);
+  // Sin anotar la cuota del banco, el reparto es parejo y también cuadra.
+  const parejo = cuotasDeCompra(t, { ...m, cuotas: { ...m.cuotas, cuotaBanco: null } });
+  assert.equal(parejo.reduce((a, x) => a + x.c, 0), 2579797);
+  assert.equal(parejo[0].c, 143322);
+});
+
+test('con intereses, la cuota del banco sigue definiendo la amortización', () => {
+  const t = visa({ diaCorte: 20 });
+  const conTasa = cuotasDeCompra(t, { monto: 12000, fecha: '2026-09-08', cuotas: { n: 6, tasaAnual: 18, cuotaBanco: 2110 } });
+  // El interés se calcula sobre el saldo y el resto de la cuota es capital.
+  assert.equal(conTasa[0].c, 211000);
+  assert.equal(conTasa[0].interes, Math.round(1200000 * (0.18 / 12)));
+  assert.equal(conTasa.reduce((a, x) => a + x.capital, 0), 1200000);
+});

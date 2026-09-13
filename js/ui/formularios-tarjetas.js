@@ -2,7 +2,7 @@
 import {
   store, abrirModal, indice, personas, cuentasDinero, tarjetas, vivos, buscar, fmt, fmtMoneda, simboloDe, monedaDeCuenta, confirmar,
 } from '../store.js';
-import { TIPOS_CARGO, PERIODICIDADES, corteDelMes, limiteDe, estadoCiclo, resumenTarjeta } from '../core/tarjetas.js';
+import { TIPOS_CARGO, PERIODICIDADES, COBROS_CUOTA, corteDelMes, limiteDe, estadoCiclo, resumenTarjeta } from '../core/tarjetas.js';
 import { periodoDe, nombreMes, fechaCorta, redondear, aCentavos, deCentavos } from '../core/util.js';
 import { copia, hayValor, PIE, usarFormulario } from './formulario-base.js';
 import { dosMonedas } from './componentes.js';
@@ -37,6 +37,11 @@ export const TarjetaForm = {
       <label class="campo"><span>Día límite de pago</span><input v-model.number="t.diaPago" type="number" min="1" max="31"></label>
     </div>
     <p v-if="textoCiclo" class="nota chica">{{ textoCiclo }}</p>
+    <label class="campo"><span>Cuándo cobra este banco las cuotas de los financiamientos</span>
+      <select v-model="t.cobroCuotas"><option v-for="(n, k) in cobros" :key="k" :value="k">{{ n }}</option></select></label>
+    <p class="nota chica" style="margin-top: -4px">{{ t.cobroCuotas === 'dia'
+      ? 'Cada cuota cae el mismo día del mes en que se sacó el financiamiento, aunque el corte sea otro día.'
+      : 'Cada cuota cae en el corte de la tarjeta.' }} Se puede cambiar en cada financiamiento.</p>
     <div class="fila-campos">
       <label class="campo"><span>Límite en lempiras</span><input v-model.number="t.limite.L" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Opcional"></label>
       <label class="campo"><span>Límite en dólares</span><input v-model.number="t.limite.USD" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Opcional"></label>
@@ -85,7 +90,7 @@ export const TarjetaForm = {
     const previa = original.tarjeta || {};
     const c = reactive({ nombre: original.nombre || '', titularId: original.id ? original.titularId || null : original.titularId ?? store.yo ?? null, nota: original.nota || '' });
     const t = reactive({
-      banco: '', ultimos4: '', diaCorte: null, diaPago: null, cuentaPagoId: cuentasDinero()[0]?.id || 'gastos', saldoFecha: store.hoy, saldoRegistrado: null,
+      banco: '', ultimos4: '', diaCorte: null, diaPago: null, cobroCuotas: 'corte', cuentaPagoId: cuentasDinero()[0]?.id || 'gastos', saldoFecha: store.hoy, saldoRegistrado: null,
       ...copia(previa),
       limite: { L: null, USD: null, ...(previa.limite || {}) },
       saldoInicial: { L: 0, USD: 0, ...(previa.saldoInicial || {}) },
@@ -150,7 +155,7 @@ export const TarjetaForm = {
     }
 
     return {
-      c, t, textoCiclo, textoLimite, alternarMes, agregarCargo, enviar, nombreMes, tiposCargo: TIPOS_CARGO, periodicidades: PERIODICIDADES,
+      c, t, textoCiclo, textoLimite, alternarMes, agregarCargo, enviar, nombreMes, tiposCargo: TIPOS_CARGO, periodicidades: PERIODICIDADES, cobros: COBROS_CUOTA,
       listaPersonas: computed(personas), listaCuentas: computed(cuentasDinero), ...f,
     };
   },
