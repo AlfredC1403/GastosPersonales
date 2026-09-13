@@ -71,10 +71,10 @@ export const Simulador = {
     <p v-if="!incluidos.length" class="vacio">Activa al menos un préstamo para simular.</p>
     <template v-else>
       <div class="kpis">
-        <div class="kpi destacado"><div class="kpi-et">Con el plan terminan en</div><div class="kpi-val">{{ nombrePeriodo(con.fin) }}</div><div class="kpi-nota">{{ duracion(con.meses) }} desde hoy</div></div>
-        <div class="kpi"><div class="kpi-et">Sin plan</div><div class="kpi-val">{{ nombrePeriodo(sin.fin) }}</div><div class="kpi-nota">{{ mesesAntes > 0 ? duracion(mesesAntes) + ' más tarde' : 'lo mismo' }}</div></div>
+        <div class="kpi destacado"><div class="kpi-et">Con el plan terminan en</div><div class="kpi-val">{{ nombrePeriodo(con.fin, true) }}</div><div class="kpi-nota">{{ duracion(con.meses) }} desde hoy</div></div>
+        <div class="kpi"><div class="kpi-et">Sin plan</div><div class="kpi-val">{{ nombrePeriodo(sin.fin, true) }}</div><div class="kpi-nota">{{ mesesAntes > 0 ? duracion(mesesAntes) + ' más tarde' : 'lo mismo' }}</div></div>
         <div class="kpi"><div class="kpi-et">Se ahorran</div><div class="kpi-val positivo">{{ fmtEntero(ahorro) }}</div><div class="kpi-nota">en intereses y seguros</div></div>
-        <div class="kpi"><div class="kpi-et">Pago mensual</div><div class="kpi-val">{{ fmt(con.presupuesto) }}</div><div class="kpi-nota">{{ extrasAnuales ? '+ ' + fmtEntero(extrasAnuales) + ' al año en junio y diciembre' : 'cuotas actuales + extra' }}</div></div>
+        <div class="kpi"><div class="kpi-et">Pago mensual</div><div class="kpi-val">{{ fmtEntero(con.presupuesto) }}</div><div class="kpi-nota">{{ extrasAnuales ? '+ ' + fmtEntero(extrasAnuales) + ' al año en junio y diciembre' : 'cuotas actuales + extra' }}</div></div>
       </div>
 
       <article class="tarjeta">

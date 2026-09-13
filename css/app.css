@@ -180,9 +180,12 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 /* ---------- KPIs ---------- */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
 .kpis.dos { grid-template-columns: 1fr 1fr; }
-.kpi { background: var(--sup); border: var(--borde-tarjeta); box-shadow: var(--sombra); border-radius: var(--radio-lg); padding: 14px 16px; min-width: 0; }
+.kpi { background: var(--sup); border: var(--borde-tarjeta); box-shadow: var(--sombra); border-radius: var(--radio-lg); padding: 14px 16px; min-width: 0; container-type: inline-size; }
 .kpi-et { font-size: 0.76rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta3); }
-.kpi-val { font-family: var(--cifra); font-weight: var(--pc); font-size: 1.5rem; letter-spacing: var(--tr-cifra); font-variant-numeric: tabular-nums; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* La cifra no debe perder el final: en «septiembre 2029» lo que se cortaba era el año, que es
+   justo el dato. Lo resuelve el texto (mes corto y lempiras enteras); el clamp es la red por si
+   una tarjeta queda muy angosta, y mide el ancho de la tarjeta, no el de la pantalla (cqi). */
+.kpi-val { font-family: var(--cifra); font-weight: var(--pc); font-size: clamp(1.15rem, 20cqi, 1.5rem); letter-spacing: var(--tr-cifra); font-variant-numeric: tabular-nums; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kpi-nota { font-size: 0.76rem; color: var(--tinta3); }
 .kpi.destacado { background: var(--acento-sup); box-shadow: none; border-color: transparent; }
 .kpi.destacado .kpi-et, .kpi.destacado .kpi-nota { color: var(--tinta2); }

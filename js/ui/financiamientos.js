@@ -29,8 +29,8 @@ export const VistaFinanciamientos = {
     <template v-else>
       <franja-persona/>
 
-      <div class="kpis tres">
-        <div class="kpi"><div class="kpi-et">Falta por pagar</div><div class="kpi-val">{{ fmt(total.total) }}</div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-et">Falta por pagar</div><div class="kpi-val">{{ fmtEntero(total.total) }}</div>
           <div class="kpi-nota">{{ total.vigentes }} {{ total.vigentes === 1 ? 'financiamiento' : 'financiamientos' }} vigentes</div></div>
         <div class="kpi"><div class="kpi-et">Intra</div><div class="kpi-val">{{ fmtEntero(total.intra) }}</div>
           <div class="kpi-nota">usa el límite de la tarjeta</div></div>

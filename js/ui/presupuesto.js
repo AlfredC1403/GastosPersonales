@@ -1,4 +1,4 @@
-import { store, fmt, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
+import { store, fmt, fmtEntero, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
 import { presupuestoMensual, equivalenteMensual } from '../core/presupuesto.js';
 import { ingresoMensual, pagosPorMes, planillaDe } from '../core/nomina.js';
 import { estadoDe } from '../core/prestamos.js';
@@ -22,9 +22,9 @@ export const VistaPresupuesto = {
     <p class="nota">Lo que el hogar paga, aparta o recibe cada mes. Los montos son promedios: un seguro de 10 meses cuenta 10/12 por mes y los décimos se reparten en el año.</p>
 
     <div class="kpis">
-      <div class="kpi"><div class="kpi-et">Ingresos al mes</div><div class="kpi-val positivo">{{ fmt(p.ingresos) }}</div><div class="kpi-nota">netos, con décimos</div></div>
-      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmt(p.egresos) }}</div><div class="kpi-nota">{{ p.planilla ? 'sin ' + fmt(p.planilla) + ' de cuotas por planilla' : 'partidas, préstamos y aportes' }}</div></div>
-      <div class="kpi"><div class="kpi-et">Libre planificado</div><div class="kpi-val" :class="{ negativo: libre < 0 }">{{ fmt(libre) }}</div><div class="kpi-nota">antes de gastos fuera del plan</div></div>
+      <div class="kpi"><div class="kpi-et">Ingresos al mes</div><div class="kpi-val positivo">{{ fmtEntero(p.ingresos) }}</div><div class="kpi-nota">netos, con décimos</div></div>
+      <div class="kpi"><div class="kpi-et">Egresos al mes</div><div class="kpi-val">{{ fmtEntero(p.egresos) }}</div><div class="kpi-nota">{{ p.planilla ? 'sin ' + fmt(p.planilla) + ' de cuotas por planilla' : 'partidas, préstamos y aportes' }}</div></div>
+      <div class="kpi"><div class="kpi-et">Libre planificado</div><div class="kpi-val" :class="{ negativo: libre < 0 }">{{ fmtEntero(libre) }}</div><div class="kpi-nota">antes de gastos fuera del plan</div></div>
     </div>
 
     <div v-if="sinDefinir.length" class="aviso-banner ambar">
@@ -199,6 +199,6 @@ export const VistaPresupuesto = {
       }).filter((s) => s.filas.length);
     });
 
-    return { store, prefs, p, libre, porPersona, sinDefinir, filasIngresos, secciones, vistas: VISTAS, definirVista, fmt, editarPartida, editarIngreso, personaFiltro };
+    return { store, prefs, p, libre, porPersona, sinDefinir, filasIngresos, secciones, vistas: VISTAS, definirVista, fmt, fmtEntero, editarPartida, editarIngreso, personaFiltro };
   },
 };
