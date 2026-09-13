@@ -3,7 +3,7 @@ import { saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
-import { resumenTarjeta } from '../core/tarjetas.js';
+import { resumenTarjeta, comprometidoEnCuotas } from '../core/tarjetas.js';
 import { estadoMetas } from '../core/metas.js';
 import { RECORDATORIOS_INICIAL } from '../core/recordatorios.js';
 import { VERSION } from '../version.js';
@@ -112,10 +112,14 @@ export const MenuLateral = {
       const lista = cuentasDinero().filter((c) => coincidePersona(c.titularId || null, f));
       const deTarjetas = tarjetas().filter((c) => coincidePersona(c.titularId || null, f)).reduce((a, c) => a + resumenTarjeta(ix, c).deudaEnL, 0);
       const deuda = vivos('prestamos').length ? deudaAl(ix, '9999-12', f) : 0;
+      // Lo que falta por pagar en cuotas de financiamientos, de las tarjetas que se estén viendo.
+      const enCuotas = tarjetas().filter((c) => coincidePersona(c.titularId || null, f))
+        .reduce((a, c) => a + comprometidoEnCuotas(ix, { cuentaId: c.id }).total, 0);
       return {
         cuentas: lista.length ? fmtEntero(lista.reduce((a, c) => a + enLempirasAprox(ix, c.id, saldos[c.id] || 0), 0)) : '',
         deuda: deuda ? fmtEntero(deuda) : '',
         tarjetas: deTarjetas > 0 ? fmtEntero(deTarjetas) : '',
+        financiamientos: enCuotas > 0 ? fmtEntero(enCuotas) : '',
         recordatorios: { ...RECORDATORIOS_INICIAL, ...(buscar('personas', store.yo)?.recordatorios || {}) }.activo ? (store.recordatorios.error ? 'error' : 'activos') : '',
         metas: (() => {
           const lista = estadoMetas(ix, f);

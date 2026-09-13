@@ -3,6 +3,7 @@ import { redondear, sumarMeses, mesesEntre, mesDe, periodoDe, aCentavos, deCenta
 import { vivo } from './modelo.js';
 import { coincidePersona } from './filtro.js';
 import { planillaDe } from './nomina.js';
+import { financiamientos } from './tarjetas.js';
 
 // Un saldo menor a L1 es redondeo: el banco lo ajusta en la última cuota.
 export const RESIDUO = 1;
@@ -201,10 +202,37 @@ export function prestamosParaSimular(ix) {
     .filter(vivo)
     .map((p) => {
       const est = estadoDe(ix, p);
-      return { id: p.id, nombre: p.nombre, tasa: Number(p.tasa) || 0, cuota: Number(p.cuota) || 0,
+      return { id: p.id, nombre: p.nombre, tipo: 'prestamo', tasa: Number(p.tasa) || 0, cuota: Number(p.cuota) || 0,
         seguro: est.seguro, saldo: est.saldo, ultimoPeriodo: est.ultimoPeriodo, finOriginal: periodoDe(p.ultimaCuota) };
     })
     .filter((p) => p.saldo >= RESIDUO);
+}
+
+// Los financiamientos de tarjeta como deudas para el simulador. Son deuda con su cuota fija, y
+// cuando uno termina su cuota queda libre para el siguiente: justo lo que hace la bola de nieve.
+// El saldo es el capital que falta (los intereses los va calculando el simulador con la tasa), y la
+// comisión que viaja en la cuota va como `seguro`: se paga, pero no baja el saldo.
+export function financiamientosParaSimular(ix, opciones = {}) {
+  return financiamientos(ix, opciones)
+    .filter((f) => f.situacion === 'en-curso' || f.situacion === 'por-empezar')
+    .map((f) => {
+      const sig = f.siguiente;
+      // Último mes con una cuota ya cobrada, como el `ultimoPeriodo` de un préstamo: así el
+      // simulador arranca donde toca y no vuelve a cobrar una cuota que ya pasó.
+      const cobradas = f.cuotas.filter((x) => !sig || x.fecha < sig.fecha);
+      return {
+        id: `fin:${f.id}`,
+        nombre: `${f.nombre} · ${f.cuenta.nombre}`,
+        tipo: 'financiamiento',
+        tasa: Number(f.movimiento.cuotas?.tasaAnual) || 0,
+        cuota: sig ? deCentavos(sig.c) : 0,
+        seguro: sig ? deCentavos(sig.comision) : 0,
+        saldo: f.capitalPendiente,
+        ultimoPeriodo: cobradas.length ? cobradas[cobradas.length - 1].periodo : null,
+        finOriginal: f.termina,
+      };
+    })
+    .filter((f) => f.saldo >= RESIDUO && f.cuota > 0);
 }
 
 export function ordenarPrioridad(prestamos, estrategia = 'bola', orden = []) {
@@ -227,7 +255,7 @@ export function simularDeudas(prestamos, opciones = {}) {
   } = opciones;
 
   const ls = prestamos.filter((p) => p.saldo >= RESIDUO).map((p) => ({
-    id: p.id, nombre: p.nombre, tasa: p.tasa, r: tasaMensual(p.tasa), cuota: p.cuota, seguro: p.seguro,
+    id: p.id, nombre: p.nombre, tipo: p.tipo || 'prestamo', tasa: p.tasa, r: tasaMensual(p.tasa), cuota: p.cuota, seguro: p.seguro,
     pi: Math.max(0, p.cuota - p.seguro), saldo: p.saldo, saldoInicial: p.saldo, interes: 0, seguros: 0, fin: null,
   }));
   const prioridad = ordenarPrioridad(ls, estrategia, orden);
@@ -277,7 +305,7 @@ export function simularDeudas(prestamos, opciones = {}) {
     interes: redondear(ls.reduce((a, l) => a + l.interes, 0)),
     seguros: redondear(ls.reduce((a, l) => a + l.seguros, 0)),
     orden: prioridad.map((l) => l.id),
-    prestamos: ls.map((l) => ({ id: l.id, nombre: l.nombre, fin: l.fin, saldoInicial: redondear(l.saldoInicial),
+    prestamos: ls.map((l) => ({ id: l.id, nombre: l.nombre, tipo: l.tipo, fin: l.fin, saldoInicial: redondear(l.saldoInicial),
       interes: redondear(l.interes), seguros: redondear(l.seguros), cuota: l.cuota })),
     serie,
   };

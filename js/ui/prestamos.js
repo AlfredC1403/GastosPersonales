@@ -1,5 +1,5 @@
 import { store, fmt, fmtEntero, fmtCorto, indice, vivos, nombrePersona, guardarConfig, filtro, personaFiltro } from '../store.js';
-import { estadoDe, prestamosParaSimular, simularDeudas, ordenarPrioridad } from '../core/prestamos.js';
+import { estadoDe, prestamosParaSimular, financiamientosParaSimular, simularDeudas, ordenarPrioridad } from '../core/prestamos.js';
 import { planillaDe } from '../core/nomina.js';
 import { coincidePersona } from '../core/filtro.js';
 import { nombrePeriodo, sumarMeses, mesesEntre, duracion, periodoActual } from '../core/util.js';
@@ -9,7 +9,10 @@ import { nuevoMovimiento, editarPrestamo } from './formularios.js';
 
 const { reactive, computed, watch, onBeforeUnmount } = Vue;
 
-const PLAN_INICIAL = { estrategia: 'bola', extraMensual: 0, extraJunio: 0, extraDiciembre: 0, excluidos: [], orden: [] };
+// `conFinanciamientos`: los intra y extra de las tarjetas también son deuda con cuota fija, y al
+// terminar cada uno su cuota queda libre para el siguiente. Entran por defecto; se pueden sacar
+// todos con el interruptor, o uno por uno como cualquier préstamo.
+const PLAN_INICIAL = { estrategia: 'bola', extraMensual: 0, extraJunio: 0, extraDiciembre: 0, excluidos: [], orden: [], conFinanciamientos: true };
 const copia = (x) => JSON.parse(JSON.stringify(x));
 
 // "−10 m", "−2 a", "−21 a 8 m"
@@ -30,7 +33,7 @@ export const Simulador = {
     <div style="margin-top: 8px">
       <h2 class="cifra" style="font-size: 1.5rem">Plan bola de nieve</h2>
       <p class="nota" style="margin-top: 4px">Cada mes se paga lo mismo que hoy ({{ fmt(cuotasIncluidas) }} en cuotas) más lo extra.
-        Cuando un préstamo se termina, su cuota completa pasa al siguiente.</p>
+        Cuando una deuda se termina, su cuota completa pasa a la siguiente.</p>
     </div>
 
     <article class="tarjeta">
@@ -44,11 +47,16 @@ export const Simulador = {
         <label class="campo"><span>Extra en diciembre</span><input v-model.number="plan.extraDiciembre" type="number" min="0" step="1000" inputmode="decimal"></label>
       </div>
       <p class="nota chica" style="margin-top: 8px">Junio y diciembre sirven para simular abonos con el décimo cuarto y el décimo tercer mes.</p>
+      <label v-if="hayFinanciamientos" class="casilla" style="margin-top: 16px">
+        <input v-model="plan.conFinanciamientos" type="checkbox"> Incluir los financiamientos de tarjeta</label>
+      <p v-if="hayFinanciamientos" class="nota chica" style="margin-top: -4px">Sus cuotas también se liberan al terminar y pasan al siguiente de la lista.</p>
+
       <h3 class="titulo-grupo" style="margin-top: 18px">Orden de pago</h3>
       <ol class="lista" style="margin-top: 6px">
         <li v-for="(p, i) in listaOrden" :key="p.id" class="fila">
           <span class="num-circulo" :class="{ fuera: fuera(p.id) }">{{ fuera(p.id) ? '–' : i + 1 }}</span>
-          <span class="fila-titulo" :class="{ tenue: fuera(p.id) }" style="flex: 1; min-width: 0; font-size: 0.92rem">{{ p.nombre }}</span>
+          <span class="fila-titulo" :class="{ tenue: fuera(p.id) }" style="flex: 1; min-width: 0; font-size: 0.92rem">{{ p.nombre }}<span
+            v-if="p.tipo === 'financiamiento'" class="chip" style="margin-left: 6px; font-size: 0.68rem">tarjeta</span></span>
           <span class="tenue" style="font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap">{{ fmtEntero(p.saldo) }} · {{ p.tasa }}%</span>
           <template v-if="plan.estrategia === 'personalizado' && !fuera(p.id)">
             <button type="button" class="btn-icono" :aria-label="'Subir ' + p.nombre" @click="mover(p.id, -1)"><icono n="arriba" :t="16"/></button>
@@ -77,10 +85,10 @@ export const Simulador = {
         <linea-plan :periodos="grafico.periodos" :sin="grafico.sin" :con="grafico.con" :formatear-mes="(p) => nombrePeriodo(p)" :formatear="fmtCorto"/>
         <div class="envoltura-tabla">
           <table class="tabla">
-            <thead><tr><th>Préstamo</th><th class="num">Saldo</th><th>Sin plan</th><th>Con el plan</th></tr></thead>
+            <thead><tr><th>Deuda</th><th class="num">Saldo</th><th>Sin plan</th><th>Con el plan</th></tr></thead>
             <tbody>
               <tr v-for="f in filas" :key="f.id">
-                <td>{{ f.nombre }}</td>
+                <td>{{ f.nombre }}<span v-if="f.tipo === 'financiamiento'" class="tenue" style="display: block; font-size: 0.74rem">financiamiento de tarjeta</span></td>
                 <td class="num">{{ fmtEntero(f.saldo) }}</td>
                 <td class="tenue">{{ nombrePeriodo(f.finSin, true) }}</td>
                 <td><b style="font-weight: 600">{{ nombrePeriodo(f.finCon, true) }}</b><span v-if="f.antes > 0" class="positivo" style="display: block; font-size: 0.74rem">{{ antesCorto(f.antes) }}</span></td>
@@ -111,12 +119,17 @@ export const Simulador = {
     }, { deep: true });
     onBeforeUnmount(() => clearTimeout(temporizador));
 
-    const todos = computed(() => prestamosParaSimular(indice()));
+    const todos = computed(() => [
+      ...prestamosParaSimular(indice()),
+      ...(plan.conFinanciamientos === false ? [] : financiamientosParaSimular(indice())),
+    ]);
+    const hayFinanciamientos = computed(() => financiamientosParaSimular(indice()).length > 0);
     const fuera = (id) => plan.excluidos.includes(id);
     const incluidos = computed(() => todos.value.filter((p) => !fuera(p.id)));
     const cuotasIncluidas = computed(() => incluidos.value.reduce((a, p) => a + p.cuota, 0));
     const desde = computed(() => {
-      const ultimos = todos.value.map((p) => p.ultimoPeriodo).sort();
+      // Un financiamiento sin ninguna cuota cobrada todavía no tiene último periodo.
+      const ultimos = todos.value.map((p) => p.ultimoPeriodo).filter(Boolean).sort();
       return ultimos.length ? sumarMeses(ultimos[ultimos.length - 1], 1) : sumarMeses(periodoActual(), 1);
     });
     const ordenManual = computed(() => (plan.orden.length ? plan.orden : ordenarPrioridad(incluidos.value, 'bola').map((p) => p.id)));
@@ -136,7 +149,7 @@ export const Simulador = {
     const filas = computed(() => con.value.orden.map((id) => {
       const c = con.value.prestamos.find((p) => p.id === id);
       const s = sin.value.prestamos.find((p) => p.id === id);
-      return { id, nombre: c.nombre, saldo: c.saldoInicial, finSin: s?.fin, finCon: c.fin, antes: s?.fin && c.fin ? mesesEntre(c.fin, s.fin) : 0 };
+      return { id, nombre: c.nombre, tipo: c.tipo, saldo: c.saldoInicial, finSin: s?.fin, finCon: c.fin, antes: s?.fin && c.fin ? mesesEntre(c.fin, s.fin) : 0 };
     }));
 
     // El gráfico cubre hasta que termina el plan (unos meses más para ver la línea en cero).
@@ -168,7 +181,7 @@ export const Simulador = {
     const estrategiaActual = computed(() => estrategias.find((e) => e.id === plan.estrategia) || estrategias[0]);
 
     return {
-      plan, incluidos, cuotasIncluidas, sin, con, mesesAntes, ahorro, extrasAnuales, listaOrden, filas, grafico, fuera, alternar, mover,
+      plan, incluidos, cuotasIncluidas, hayFinanciamientos, sin, con, mesesAntes, ahorro, extrasAnuales, listaOrden, filas, grafico, fuera, alternar, mover,
       estrategias, estrategiaActual, fmt, fmtEntero, fmtCorto, nombrePeriodo, duracion, sumarMeses, antesCorto,
     };
   },
@@ -259,12 +272,13 @@ export const VistaPlanDeudas = {
   components: { Simulador },
   template: `
   <div class="pila">
-    <p v-if="personaFiltro()" class="nota">El plan de deudas incluye los préstamos de todo el hogar, aunque tengas un filtro de persona.</p>
-    <simulador v-if="hayPrestamos"/>
-    <p v-else class="vacio">No hay préstamos activos para simular. <a href="#/prestamos">Agrega uno</a>.</p>
+    <p v-if="personaFiltro()" class="nota">El plan de deudas incluye las deudas de todo el hogar, aunque tengas un filtro de persona.</p>
+    <simulador v-if="hayDeudas"/>
+    <p v-else class="vacio">No hay préstamos ni financiamientos activos para simular.
+      <a href="#/prestamos">Agrega un préstamo</a> o <a href="#/financiamientos">un financiamiento</a>.</p>
   </div>`,
   setup() {
-    const hayPrestamos = computed(() => prestamosParaSimular(indice()).length > 0);
-    return { hayPrestamos, personaFiltro };
+    const hayDeudas = computed(() => prestamosParaSimular(indice()).length > 0 || financiamientosParaSimular(indice()).length > 0);
+    return { hayDeudas, personaFiltro };
   },
 };

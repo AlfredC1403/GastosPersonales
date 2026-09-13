@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cuotasRestantes, seguroEstimado, seguroDe, estadoPrestamo, deudaAl, prestamosParaSimular, simularDeudas, cuotasDelMes, estadoDe,
+  cuotasRestantes, seguroEstimado, seguroDe, estadoPrestamo, deudaAl, prestamosParaSimular, financiamientosParaSimular, simularDeudas, cuotasDelMes, estadoDe,
 } from '../js/core/prestamos.js';
 import { crearIndice } from '../js/core/asientos.js';
 import { docVacio } from '../js/core/modelo.js';
+import { mesesEntre } from '../js/core/util.js';
 
 const cerca = (a, b, tol = 0.05) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
 
@@ -137,4 +138,102 @@ test('los abonos de junio y diciembre solo entran esos meses', () => {
   // oct 100, nov 100, dic 100 + 500 → 200 pendientes; ene 100, feb 100 → termina en febrero
   assert.equal(r.fin, '2027-02');
   assert.equal(r.serie[2].total, 200);
+});
+
+// ---------------------------------------------------------------- Financiamientos en el plan
+
+function conFinanciamientos(extra = {}) {
+  const doc = docVacio();
+  doc.config = { ...doc.config, inicio: '2026-01' };
+  doc.cuentas = [...doc.cuentas, {
+    id: 'visa', nombre: 'Visa', tipo: 'tarjeta', moneda: 'L', saldoInicial: 0, creado: '2026-01-01T00:00:00Z', actualizado: 't',
+    tarjeta: { diaCorte: 20, diaPago: 10, limite: { L: 200000 }, saldoInicial: { L: 0, USD: 0 }, saldoFecha: '2026-01-01', cargos: [] },
+  }];
+  doc.movimientos = [
+    // Tasa cero a 12 cuotas de L1,000 desde el 10 de febrero: al 13 de septiembre van 8 cobradas.
+    { id: 'f1', tipo: 'gasto', fecha: '2026-02-10', monto: 12000, cuentaId: 'visa', categoriaId: 'otros', nota: 'Refri', actualizado: '2026-02-10T12:00:00Z',
+      cuotas: { n: 12, tipo: 'intra', tasaAnual: 0, cobro: 'dia', cuotaBanco: 1000 } },
+  ];
+  Object.assign(doc, extra);
+  return crearIndice(doc, { hoy: '2026-09-13' });
+}
+
+test('un financiamiento entra al simulador como deuda con su cuota', () => {
+  const [f] = financiamientosParaSimular(conFinanciamientos());
+  assert.equal(f.tipo, 'financiamiento');
+  assert.match(f.nombre, /Refri/);
+  assert.match(f.nombre, /Visa/); // se dice de qué tarjeta es
+  assert.equal(f.cuota, 1000);
+  assert.equal(f.tasa, 0);
+  // El saldo es el capital que falta (4 cuotas), no el total del financiamiento.
+  assert.equal(f.saldo, 4000);
+  // Y el id no choca con el de un préstamo que se llamara igual.
+  assert.match(f.id, /^fin:/);
+});
+
+test('los terminados y los cancelados no entran al plan', () => {
+  const viejo = {
+    id: 'f2', tipo: 'gasto', fecha: '2026-01-05', monto: 3000, cuentaId: 'visa', categoriaId: 'otros', nota: 'Ya pagado', actualizado: '2026-01-05T12:00:00Z',
+    cuotas: { n: 3, tipo: 'intra', tasaAnual: 0, cobro: 'dia' },
+  };
+  const ix = conFinanciamientos();
+  const doc = { ...ix.doc, movimientos: [...ix.doc.movimientos, viejo] };
+  const conViejo = crearIndice(doc, { hoy: '2026-09-13' });
+  assert.deepEqual(financiamientosParaSimular(conViejo).map((f) => f.id), ['fin:f1']);
+});
+
+test('al terminar un financiamiento su cuota pasa a la siguiente deuda', () => {
+  const ix = conFinanciamientos({
+    prestamos: [{
+      id: 'carro', nombre: 'Carro', tasa: 12, cuota: 5000, saldo: 100000, saldoPeriodo: '2026-08', fechaSaldo: '2026-08-31',
+      ultimaCuota: '2030-01-02', cuentaId: 'gastos', actualizado: 't',
+    }],
+  });
+  const deudas = [...prestamosParaSimular(ix), ...financiamientosParaSimular(ix)];
+  assert.deepEqual(deudas.map((d) => d.tipo), ['prestamo', 'financiamiento']);
+
+  const opciones = { desde: '2026-10', estrategia: 'bola' };
+  const con = simularDeudas(deudas, opciones);
+  const soloPrestamo = simularDeudas(deudas.filter((d) => d.tipo === 'prestamo'), opciones);
+
+  // El presupuesto del plan suma las dos cuotas.
+  assert.equal(con.presupuesto, 6000);
+  // La bola de nieve ataca primero el saldo más chico, que es el financiamiento.
+  assert.equal(con.orden[0], 'fin:f1');
+  // Con el financiamiento dentro, el carro se termina antes que si fuera solo.
+  assert.ok(mesesEntre(con.prestamos.find((p) => p.id === 'carro').fin, soloPrestamo.prestamos[0].fin) > 0,
+    'el carro debería terminar antes al sumarle la cuota liberada');
+  // Y el tipo viaja hasta el resultado, para poder mostrarlo distinto.
+  assert.deepEqual(con.prestamos.map((p) => p.tipo).sort(), ['financiamiento', 'prestamo']);
+});
+
+test('la comisión que viaja en la cuota se paga pero no baja el saldo', () => {
+  const ix = conFinanciamientos({
+    movimientos: [{
+      id: 'f3', tipo: 'gasto', fecha: '2026-02-10', monto: 12000, cuentaId: 'visa', categoriaId: 'otros', nota: 'Con comisión', actualizado: '2026-02-10T12:00:00Z',
+      cuotas: { n: 12, tipo: 'intra', tasaAnual: 0, cobro: 'dia', cuotaBanco: 1000, comision: { valor: 50, unidad: 'monto', cobro: 'mensual' } },
+    }],
+  });
+  const [f] = financiamientosParaSimular(ix);
+  // La cuota es lo que se paga; la comisión va aparte, como el seguro de un préstamo.
+  assert.equal(f.cuota, 1050);
+  assert.equal(f.seguro, 50);
+  assert.equal(f.saldo, 4000);
+  // Al simular, los L50 se gastan cada mes sin bajar el saldo.
+  const r = simularDeudas([f], { desde: '2026-10', rodar: false });
+  assert.equal(r.prestamos[0].seguros, 50 * r.meses);
+});
+
+test('un financiamiento dice hasta qué mes ya se cobró, para que el plan arranque bien', () => {
+  // Cuotas el 10 de cada mes desde febrero; al 13 de septiembre la última cobrada es la de septiembre.
+  const [f] = financiamientosParaSimular(conFinanciamientos());
+  assert.equal(f.ultimoPeriodo, '2026-09');
+  // Uno que todavía no cobra ninguna no tiene último periodo (y el plan no debe romperse con eso).
+  const doc = { movimientos: [{
+    id: 'nuevo', tipo: 'gasto', fecha: '2026-10-05', monto: 6000, cuentaId: 'visa', categoriaId: 'otros', nota: 'Por empezar', actualizado: '2026-09-13T12:00:00Z',
+    cuotas: { n: 6, tipo: 'intra', tasaAnual: 0, cobro: 'dia' },
+  }] };
+  const [sinCobrar] = financiamientosParaSimular(conFinanciamientos(doc));
+  assert.equal(sinCobrar.ultimoPeriodo, null);
+  assert.equal(sinCobrar.saldo, 6000);
 });
