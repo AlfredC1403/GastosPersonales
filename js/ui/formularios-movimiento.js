@@ -3,7 +3,7 @@
 // cuotas y en dólares. Los de tarjeta están en formularios-tarjetas.js.
 import {
   store, guardar, indice, personas, cuentas, cuentasDinero, tarjetas, comercios, categoriasPorGrupo, vivos, buscar,
-  nombreCuenta, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
+  nombreCuenta, nombrePartida, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
 } from '../store.js';
 import { TIPOS_MOVIMIENTO } from '../core/modelo.js';
 import { partidaActivaEn } from '../core/presupuesto.js';
@@ -104,8 +104,9 @@ export const MovimientoForm = {
       <select v-model="m.metaId"><option :value="null">Ninguna</option>
         <option v-for="x in listaMetas" :key="x.id" :value="x.id">{{ x.nombre }}</option></select></label>
 
-    <label v-if="enPartida && monedaOrigen === 'L' && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
-      <input v-model="m.cierra" type="checkbox"> Cierra la partida: sobran {{ fmt(estado.quedaSinEste - m.monto) }}{{ estado.acumula ? ' para el mes siguiente' : '' }}
+    <p v-if="enPartida && monedaOrigen !== monedaPartida" class="nota chica">{{ nombrePartida(m.partidaId) }} se lleva en {{ simboloDe(monedaPartida) }}: este pago se le abona con la tasa de referencia.</p>
+    <label v-if="enPartida && monedaOrigen === monedaPartida && estado && m.monto > 0 && m.monto < estado.quedaSinEste" class="casilla">
+      <input v-model="m.cierra" type="checkbox"> Cierra la partida: sobran {{ fmtMoneda(estado.quedaSinEste - m.monto, monedaPartida) }}{{ estado.acumula ? ' para el mes siguiente' : '' }}
     </label>
 
     <div class="fila-campos">
@@ -156,6 +157,8 @@ export const MovimientoForm = {
     }, { immediate: true });
 
     const partida = computed(() => buscar('partidas', m.partidaId));
+    // Moneda en la que se mide la partida: una suscripción en dólares se compara en dólares.
+    const monedaPartida = computed(() => (partida.value?.moneda === 'USD' ? 'USD' : 'L'));
     watch(() => m.partidaId, (id, anterior) => {
       const p = buscar('partidas', id);
       if (p && id !== anterior && p.categoriaId) m.categoriaId = p.categoriaId;
@@ -184,7 +187,7 @@ export const MovimientoForm = {
       const it = estadoSinEste(p.id, null, periodo, original.id);
       if (!it) return `${p.nombre} · no toca en ${nombrePeriodo(periodo, true)}`;
       if (it.estado === 'omitida') return `${p.nombre} · omitida este mes`;
-      return it.quedaSinEste > 0 ? `${p.nombre} · quedan ${fmt(it.quedaSinEste)}` : `${p.nombre} · completa`;
+      return it.quedaSinEste > 0 ? `${p.nombre} · quedan ${fmtMoneda(it.quedaSinEste, it.moneda)}` : `${p.nombre} · completa`;
     };
     const partidasGasto = computed(() => vivos('partidas')
       .filter((p) => p.tipo === 'gasto' && (p.id === m.partidaId || partidaActivaEn(p, periodoMov.value)))
@@ -201,9 +204,11 @@ export const MovimientoForm = {
     const montosRapidos = computed(() => {
       const it = estado.value;
       const abonos = props.sugerirMontos || partida.value?.forma === 'abonos';
-      if (!enPartida.value || !it || !abonos || !(it.quedaSinEste > 0) || monedaOrigen.value !== 'L') return [];
-      const lista = [1000, 2000].filter((v) => v < it.quedaSinEste).map((v) => ({ texto: fmt(v).replace('.00', ''), valor: v }));
-      lista.push({ texto: `Lo que queda (${fmt(it.quedaSinEste)})`, valor: it.quedaSinEste });
+      if (!enPartida.value || !it || !abonos || !(it.quedaSinEste > 0) || monedaOrigen.value !== monedaPartida.value) return [];
+      const sueltos = monedaOrigen.value === 'USD' ? [5, 10] : [1000, 2000];
+      const f = (v) => fmtMoneda(v, monedaOrigen.value);
+      const lista = sueltos.filter((v) => v < it.quedaSinEste).map((v) => ({ texto: f(v).replace('.00', ''), valor: v }));
+      lista.push({ texto: `Lo que queda (${f(it.quedaSinEste)})`, valor: it.quedaSinEste });
       return lista;
     });
 
@@ -313,7 +318,7 @@ export const MovimientoForm = {
       if (r.tipo !== 'transferencia') r.metaId = original.tipo === r.tipo ? original.metaId || null : null;
       if (!(r.tipo === 'gasto' || r.tipo === 'transferencia')) r.partidaId = null;
       if (!r.partidaId) r.parte = null;
-      r.cierra = enPartida.value && r.moneda === 'L' && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
+      r.cierra = enPartida.value && r.moneda === monedaPartida.value && !!r.cierra && !!estado.value && r.monto < estado.value.quedaSinEste;
       if (r.tipo === 'ajuste') r.personaId = null;
       // Un financiamiento no se edita aquí (editarMovimiento lo manda a su formulario), pero si
       // llegara un registro con cuotas, se conservan tal cual en vez de deshacerlo.
@@ -332,12 +337,12 @@ export const MovimientoForm = {
     }
 
     return {
-      m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, periodoMov, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, partidasGasto, partidasAporte, opcionesPeriodo,
+      m, campoMonto, verMas, otroTipo, nuevaQuincena, periodoTocado, periodoMov, esCuota, tipoFijo, vinculado, enPartida, textoVinculo, estado, monedaPartida, partidasGasto, partidasAporte, opcionesPeriodo,
       listaMetas, esRetiroDeMeta,
       montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
       usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, esTarjetaConCuotas, pasarAFinanciamiento,
       saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
-      fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
+      fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePartida, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
       listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),
       categoriasGasto: computed(() => categoriasPorGrupo('gasto')), categoriasIngreso: computed(() => categoriasPorGrupo('ingreso')), ...f,
     };

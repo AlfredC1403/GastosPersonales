@@ -1,6 +1,6 @@
 // Asistente para revisar la configuración después de una actualización grande. El avance
 // se guarda en config.asistente.completados, así no vuelve a aparecer en ningún dispositivo.
-import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos, categorias, vivos, tarjetas, nombrePersona, fmt } from '../store.js';
+import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos, categorias, vivos, tarjetas, nombrePersona, fmt, fmtMoneda } from '../store.js';
 import { FORMAS, FRECUENCIAS } from '../core/modelo.js';
 import { hoy } from '../core/util.js';
 import { PASOS_ASISTENTE } from '../core/catalogos.js';
@@ -64,7 +64,7 @@ export const VistaConfigurar = {
         <li v-for="p in listaPartidas" :key="p.id" class="fila" style="flex-wrap: wrap">
           <div class="fila-info" style="min-width: 150px">
             <span class="fila-titulo" style="font-size: 0.93rem">{{ p.nombre }}</span>
-            <span class="fila-sub">{{ nombrePersona(p.responsableId) }} · {{ fmt(p.monto) }}<template v-if="sugerida(p)"> · se sugiere en abonos</template></span>
+            <span class="fila-sub">{{ nombrePersona(p.responsableId) }} · {{ fmtMoneda(p.monto, p.moneda) }}<template v-if="sugerida(p)"> · se sugiere en abonos</template></span>
           </div>
           <div class="segmentos" role="group" :aria-label="'Cómo se paga ' + p.nombre" style="flex: 1 1 260px">
             <button v-for="(n, k) in formas" :key="k" type="button" :class="{ activo: p.forma === k }" :aria-pressed="p.forma === k" @click="cambiar(p, { forma: k })">{{ n }}</button>
@@ -167,7 +167,7 @@ export const VistaConfigurar = {
     }
 
     return {
-      store, pasos: PASOS_ASISTENTE, actual, paso, hecho, completar, cambiar, ocupado, respaldarEnOneDrive, fmt, nombrePersona,
+      store, pasos: PASOS_ASISTENTE, actual, paso, hecho, completar, cambiar, ocupado, respaldarEnOneDrive, fmt, fmtMoneda, nombrePersona,
       formas: FORMAS, frecuencias: FRECUENCIAS, editarIngreso, editarTarjeta, listaTarjetas: computed(tarjetas),
       sugerida: (p) => p.forma !== 'abonos' && EN_ABONOS.test(p.nombre),
       bajarRespaldo: () => descargar(`gastos-respaldo-${hoy()}.json`, exportar(), 'application/json'),

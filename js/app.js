@@ -63,6 +63,7 @@ const VISTAS = [
   { id: 'financiamientos', nombre: 'Financiamientos', componente: aDemanda(() => import('./ui/financiamientos.js'), 'VistaFinanciamientos') },
   { id: 'prestamos', nombre: 'Préstamos', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPrestamos') },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: aDemanda(() => import('./ui/presupuesto.js'), 'VistaPresupuesto') },
+  { id: 'suscripciones', nombre: 'Suscripciones', componente: aDemanda(() => import('./ui/suscripciones.js'), 'VistaSuscripciones') },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPlanDeudas') },
   { id: 'metas', nombre: 'Metas', componente: aDemanda(() => import('./ui/metas.js'), 'VistaMetas') },
   { id: 'reparto', nombre: 'Reparto de gastos', componente: aDemanda(() => import('./ui/reparto.js'), 'VistaReparto') },

@@ -6,6 +6,7 @@ import { resumenMes, ritmoDelMes, categoriasSobreSuPromedio } from './reportes.j
 import { pagosSinRegistrar, estadoRecibo, netoEsperadoDe } from './nomina.js';
 import { resumenTarjeta, proximoCobro, fechaSaldoDe } from './tarjetas.js';
 import { estadoMetas } from './metas.js';
+import { estadoSuscripciones, pruebasPorTerminar } from './suscripciones.js';
 
 export const CUANDO = { hoy: 'Hoy', semana: 'Esta semana', revisar: 'Para revisar' };
 
@@ -23,6 +24,9 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
   const anterior = sumarMeses(actual, -1);
   const inicio = ix.config.inicio || actual;
   const agregar = (aviso) => out.push({ personaId: null, acciones: [], ...aviso });
+  // Una partida en dólares se avisa en dólares: son sus cifras exactas.
+  const montos = (it) => (it.moneda === 'USD' ? it.enMoneda : it);
+  const M = (it, n) => (it.moneda === 'USD' ? USD(n) : L(n));
 
   if (sync?.ubicacion && (sync.estado === 'error' || sync.estado === 'sesion')) {
     agregar({
@@ -74,7 +78,7 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
       if (!it.dia || it.hecho || !(it.esperado > 0) || it.forma === 'abonos') continue;
       const vence = fechaEnMes(actual, it.dia);
       const base = { personaId: it.responsableId, acciones: [{ tipo: 'item', periodo: actual, clave: it.clave, texto: 'Registrar' }] };
-      const falta = it.estado === 'parcial' ? `Quedan ${L(it.queda)}.` : `${L(it.esperado)} sin registrar.`;
+      const falta = it.estado === 'parcial' ? `Quedan ${M(it, montos(it).queda)}.` : `${M(it, montos(it).esperado)} sin registrar.`;
       if (vence < hoy) agregar({ ...base, id: `vencida:${it.clave}:${actual}`, cuando: 'hoy', tipo: 'vencida', titulo: `${it.nombre} vencía el ${fechaCorta(vence)}`, texto: falta });
       else if (vence <= sumarDias(hoy, 3)) agregar({ ...base, id: `vence:${it.clave}:${actual}`, cuando: 'semana', tipo: 'vence', titulo: `${it.nombre} vence el ${fechaCorta(vence)}`, texto: falta });
     }
@@ -85,13 +89,14 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
     for (const it of resumenMes(ix, periodo).partidas) {
       if (it.forma !== 'abonos' || it.estado !== 'parcial') continue;
       const siguiente = sumarMeses(periodo, 1);
+      const x = montos(it);
       agregar({
         id: `abonos:${it.clave}:${periodo}`, cuando, tipo: 'abonos', personaId: it.responsableId,
         titulo: `${it.nombre} quedó abierta en ${nombrePeriodo(periodo)}`,
-        texto: `Se pagaron ${L(it.real)} de ${L(it.esperado)}; quedan ${L(it.queda)}.`,
+        texto: `Se pagaron ${M(it, x.real)} de ${M(it, x.esperado)}; quedan ${M(it, x.queda)}.`,
         acciones: [
           { tipo: 'cerrarPartida', periodo, clave: it.clave, texto: 'Cerrar' },
-          { tipo: 'pasarAlSiguiente', periodo, clave: it.clave, texto: `Pasar ${L(it.queda)} a ${nombrePeriodo(siguiente).split(' ')[0]}` },
+          { tipo: 'pasarAlSiguiente', periodo, clave: it.clave, texto: `Pasar ${M(it, x.queda)} a ${nombrePeriodo(siguiente).split(' ')[0]}` },
         ],
       });
     }
@@ -117,7 +122,7 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
     if (it.parte !== 'pagar' || it.hecho) continue;
     agregar({
       id: `anual:${it.partida.id}:${actual}`, cuando: 'semana', tipo: 'anual', personaId: it.responsableId,
-      titulo: `Este mes se paga ${it.partida.nombre}`, texto: `${L(it.esperado)}, de lo apartado en ${ix.cuentas.get(it.medioId)?.nombre || 'Reservas'}.`,
+      titulo: `Este mes se paga ${it.partida.nombre}`, texto: `${M(it, montos(it).esperado)}, de lo apartado en ${ix.cuentas.get(it.medioId)?.nombre || 'Reservas'}.`,
       acciones: [{ tipo: 'item', periodo: actual, clave: it.clave, texto: 'Registrar' }],
     });
   }
@@ -126,7 +131,7 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
     if (it.parte !== 'pagar') continue;
     agregar({
       id: `anual:${it.partida.id}:${siguiente}`, cuando: 'revisar', tipo: 'anual', personaId: it.responsableId,
-      titulo: `${it.partida.nombre} se paga en ${nombrePeriodo(siguiente)}`, texto: `${L(it.esperado)}.`,
+      titulo: `${it.partida.nombre} se paga en ${nombrePeriodo(siguiente)}`, texto: `${M(it, montos(it).esperado)}.`,
       acciones: [{ tipo: 'ruta', ruta: '#/cuentas', texto: 'Ver cuentas' }],
     });
   }
@@ -156,6 +161,20 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
         acciones: [{ tipo: 'ruta', ruta: `#/tarjeta/${cuenta.id}`, texto: 'Ver tarjeta' }],
       });
     }
+  }
+
+  // Suscripciones en prueba gratis que están por empezar a cobrar: es el momento de decidir si
+  // se queda o se cancela, y el único en que cancelarla no cuesta nada.
+  const suscripciones = estadoSuscripciones(ix, { hoy });
+  for (const s of pruebasPorTerminar(suscripciones, hoy)) {
+    const cuanto = s.moneda === 'USD' ? USD(s.monto) : L(s.monto);
+    agregar({
+      id: `prueba:${s.id}:${s.pruebaHasta}`, cuando: diasDesde(hoy, s.pruebaHasta) <= 1 ? 'hoy' : 'semana', tipo: 'suscripcion',
+      personaId: s.responsableId,
+      titulo: `La prueba de ${s.nombre} termina el ${fechaCorta(s.pruebaHasta)}`,
+      texto: `Después empieza a cobrar ${cuanto}${s.proximo ? `, el ${fechaCorta(s.proximo)}` : ''}${s.medioId ? ` en ${ix.cuentas.get(s.medioId)?.nombre || 'el medio de pago'}` : ''}.`,
+      acciones: [{ tipo: 'ruta', ruta: '#/suscripciones', texto: 'Ver suscripciones' }],
+    });
   }
 
   // Metas atrasadas frente a un ritmo parejo (una vez por mes).
@@ -217,6 +236,7 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
   // su estimado en lempiras cuelga de esta tasa, y una vieja distorsiona en silencio la deuda de
   // la tarjeta y el patrimonio. Solo se avisa si hay dólares de por medio.
   const hayDolares = (ix.doc.cuentas || []).some((c) => vivo(c) && c.moneda === 'USD')
+    || (ix.doc.partidas || []).some((p) => vivo(p) && p.moneda === 'USD' && p.activo !== false)
     || [...ix.tarjetas.values()].some((t) => t.dolares?.cargos?.length > 0);
   if (hayDolares) {
     const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = ix.config;
@@ -225,7 +245,7 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
       agregar({
         id: `tasa-falta:${actual}`, cuando: 'revisar', tipo: 'configuracion',
         titulo: 'Falta la tasa de referencia del dólar',
-        texto: 'Sin ella, lo que está en dólares y no se ha pagado no se puede estimar en lempiras.',
+        texto: 'Sin ella, lo que está en dólares (cargos sin pagar, partidas y suscripciones) no se puede estimar en lempiras.',
         acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Anotarla' }],
       });
     } else if (dias === null || dias > 35) {

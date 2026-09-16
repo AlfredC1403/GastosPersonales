@@ -1,4 +1,4 @@
-import { store, fmt, indice, nombrePersona, nombreCuenta, filtro, personaFiltro } from '../store.js';
+import { store, fmt, fmtMoneda, indice, nombrePersona, nombreCuenta, filtro, personaFiltro } from '../store.js';
 import { resumenMes, colorGrupo } from '../core/reportes.js';
 import { tramosDePago } from '../core/quincena.js';
 import { pagosDeTarjetas } from '../core/tarjetas.js';
@@ -29,7 +29,7 @@ export const FilaItem = {
       <span class="fila-sub">{{ detalle }}</span>
     </div>
     <div class="derecha">
-      <div class="monto" :class="{ tenue: it.estado === 'omitida' }">{{ fmt(montoPrincipal) }}</div>
+      <div class="monto" :class="{ tenue: it.estado === 'omitida' }">{{ fmtMoneda(principal.valor, principal.moneda) }}</div>
       <div v-if="nota" class="dif" :class="nota.clase">{{ nota.texto }}</div>
     </div>
   </li>`,
@@ -37,9 +37,15 @@ export const FilaItem = {
     const pct = computed(() => (props.it.esperado > 0 ? Math.min(100, Math.round((props.it.real / props.it.esperado) * 100)) : 0));
     const claseCheck = computed(() => ({ parcial: props.it.estado === 'parcial', omitida: props.it.estado === 'omitida', planilla: !!props.it.planilla }));
     const estiloCheck = computed(() => (props.it.estado === 'parcial' ? { '--pct': pct.value } : null));
-    const montoPrincipal = computed(() => {
-      if (props.parte !== null) return props.parte;
-      return props.it.hecho && props.it.estado !== 'omitida' ? props.it.real : props.it.esperado;
+    // Una partida en dólares se ve en dólares (sus cifras exactas); las de lempiras, como siempre.
+    const moneda = computed(() => props.it.moneda || 'L');
+    const enDolares = computed(() => moneda.value === 'USD');
+    const x = computed(() => props.it.enMoneda || props.it);
+    const f = (v) => fmtMoneda(v, moneda.value);
+    // La mitad que toca en un pago viene en lempiras: es dinero que sale de la cuenta ese día.
+    const principal = computed(() => {
+      if (props.parte !== null) return { valor: props.parte, moneda: 'L' };
+      return { valor: props.it.hecho && props.it.estado !== 'omitida' ? x.value.real : x.value.esperado, moneda: moneda.value };
     });
     const otroMes = computed(() => (props.periodo && props.periodo !== store.periodo ? nombrePeriodo(props.periodo).split(' ')[0] : ''));
     const detalle = computed(() => {
@@ -65,12 +71,12 @@ export const FilaItem = {
       } else if (it.planilla) {
         partes.push(`Planilla de ${it.planilla.ingreso.nombre}: ${it.planilla.descontados} de ${it.planilla.esperados}`);
       } else if (it.estado === 'parcial') {
-        partes.push(`${fmt(it.real)} de ${fmt(it.esperado)}`, `${it.pagos.length} ${it.pagos.length === 1 ? 'pago' : 'pagos'}`);
+        partes.push(`${f(x.value.real)} de ${f(x.value.esperado)}`, `${it.pagos.length} ${it.pagos.length === 1 ? 'pago' : 'pagos'}`);
       } else if (!it.hecho) {
         partes.push(nombrePersona(it.responsableId));
-        if (it.dia) partes.push(`día ${it.dia}`);
+        if (it.dia) partes.push(it.suscripcion ? `renueva el ${it.dia}` : `día ${it.dia}`);
         if (it.forma === 'abonos') partes.push('en abonos');
-        if (it.arrastre > 0) partes.push(`+${fmt(it.arrastre)} del mes pasado`);
+        if (x.value.arrastre > 0) partes.push(`+${f(x.value.arrastre)} del mes pasado`);
       } else {
         const m = it.pagos[it.pagos.length - 1];
         partes.push(fechaCorta(m.fecha), `pagó ${nombrePersona(m.personaId)}`);
@@ -91,12 +97,14 @@ export const FilaItem = {
         const d = it.hecho && it.esperado ? redondear(it.real - it.esperado) : 0;
         return d ? { texto: `${d > 0 ? '+' : ''}${fmt(d)}`, clase: d > 0 ? 'positivo' : 'negativo' } : null;
       }
-      if (it.estado === 'parcial') return { texto: `quedan ${fmt(it.queda)}`, clase: 'tenue' };
-      if (it.estado === 'excedido') return { texto: `+${fmt(it.real - it.esperado)}`, clase: 'negativo' };
-      if (it.sobrante > 0) return { texto: `sobran ${fmt(it.sobrante)}`, clase: 'positivo' };
+      if (it.estado === 'parcial') return { texto: `quedan ${f(x.value.queda)}`, clase: 'tenue' };
+      if (it.estado === 'excedido') return { texto: `+${f(x.value.real - x.value.esperado)}`, clase: 'negativo' };
+      if (it.sobrante > 0) return { texto: `sobran ${f(x.value.sobrante)}`, clase: 'positivo' };
+      // En dólares, el equivalente en lempiras: es lo que suma en el mes y en los reportes.
+      if (enDolares.value) return { texto: `≈ ${fmt(it.hecho && it.estado !== 'omitida' ? it.real : it.esperado)}`, clase: 'tenue' };
       return null;
     });
-    return { claseCheck, estiloCheck, montoPrincipal, detalle, nota, fmt, marcarItem, abrirItem };
+    return { claseCheck, estiloCheck, principal, detalle, nota, fmt, fmtMoneda, marcarItem, abrirItem };
   },
 };
 

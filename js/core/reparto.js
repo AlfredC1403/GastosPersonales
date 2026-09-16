@@ -3,7 +3,7 @@
 // que el hogar lo decida.
 import { vivo } from './modelo.js';
 import { sumarMeses, aCentavos, deCentavos } from './util.js';
-import { equivalenteMensual, partidaActivaEn } from './presupuesto.js';
+import { equivalenteMensualL, partidaActivaEn } from './presupuesto.js';
 import { ingresoMensual, estadoRecibo } from './nomina.js';
 import { prestamoActivoEn } from './prestamos.js';
 
@@ -71,7 +71,7 @@ function itemsDelPresupuesto(ix, periodo, o, grupos) {
     if (!partidaActivaEn(p, periodo)) continue;
     const incluir = p.tipo === 'aporte' ? o.incluirAportes && aporteDelHogar(ix, p.cuentaDestinoId, p.metaId) : grupos.has(ix.grupoDe(p.categoriaId));
     if (!incluir) continue;
-    items.push({ tipo: 'partida', id: p.id, nombre: p.nombre, c: aCentavos(equivalenteMensual(p)), responsableId: p.responsableId || null });
+    items.push({ tipo: 'partida', id: p.id, nombre: p.nombre, c: aCentavos(equivalenteMensualL(ix, p)), responsableId: p.responsableId || null });
   }
   if (o.incluirPrestamos) {
     for (const p of ix.doc.prestamos || []) {
