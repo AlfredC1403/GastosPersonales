@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sincronizarCarpeta, marcarPendiente, estadoVisible } from '../js/sincronizacion.js';
-import { docVacio, sellar, COLECCIONES } from '../js/core/modelo.js';
+import { docVacio, sellar, COLECCIONES, ESQUEMA } from '../js/core/modelo.js';
 import { migrar } from '../js/core/migraciones.js';
 import { archivoDe, unirAnios, claveDeNombre, contenidoArchivo, PRINCIPAL } from '../js/core/anios.js';
 
@@ -125,7 +125,7 @@ function archivoV1() {
   };
 }
 
-test('un archivo del esquema 1 se respalda, se reparte por año y el principal queda en el esquema 2', async () => {
+test('un archivo del esquema 1 se respalda, se reparte por año y el principal queda en el esquema de hoy', async () => {
   const carpeta = new Carpeta();
   carpeta.poner('finanzas.json', archivoV1());
   const a = dispositivo(carpeta, 'moises');
@@ -135,7 +135,7 @@ test('un archivo del esquema 1 se respalda, se reparte por año y el principal q
   assert.deepEqual(JSON.parse(carpeta.respaldos.get('finanzas-e1-2026-09-20-1000.json')), archivoV1());
   assert.deepEqual([...carpeta.archivos.keys()].sort(), ['finanzas-2025.json', 'finanzas-2026.json', 'finanzas.json']);
   const principal = carpeta.leer('finanzas.json');
-  assert.equal(principal.esquema, 2);
+  assert.equal(principal.esquema, ESQUEMA);
   assert.equal(principal.movimientos, undefined);
   assert.equal(principal.plantillas, undefined);
   assert.deepEqual(carpeta.leer('finanzas-2026.json').recibos.map((r) => r.id), ['m2']);
@@ -147,6 +147,53 @@ test('un archivo del esquema 1 se respalda, se reparte por año y el principal q
   // Una segunda pasada no baja ni sube nada.
   const eTags = [...carpeta.archivos.values()].map((x) => x.eTag);
   await a.sincronizar();
+  assert.deepEqual([...carpeta.archivos.values()].map((x) => x.eTag), eTags);
+});
+
+// Carpeta del esquema 2: el principal ya sin registros de año, y un año aparte.
+function carpetaV2() {
+  const carpeta = new Carpeta();
+  const partida = { id: 'super', nombre: 'Súper', tipo: 'gasto', forma: 'variable', monto: 6000, meses: [], categoriaId: 'comida', medioPagoId: 'gastos', responsableId: 'moises', activo: true, ...s };
+  carpeta.poner('finanzas.json', {
+    esquema: 2,
+    config: { moneda: 'L', monedaExt: 'USD', simboloExt: 'US$', inicio: '2026-09', tasaReferencia: 25, actualizado: T },
+    personas: [{ id: 'moises', nombre: 'Moises', ...s }],
+    cuentas: [{ id: 'gastos', nombre: 'Gastos', tipo: 'gastos', saldoInicial: 0, moneda: 'L', titularId: null, ...s }],
+    categorias: [{ id: 'comida', nombre: 'Comida', grupoId: 'comida', tipo: 'gasto', ...s }],
+    partidas: [partida],
+    ingresos: [], prestamos: [], metas: [], comercios: [], resumenes: [], grupos: [],
+  });
+  carpeta.poner('finanzas-2026.json', {
+    esquema: 2,
+    anio: 2026,
+    apertura: null,
+    movimientos: [{ id: 'm1', tipo: 'gasto', fecha: '2026-09-12', periodo: '2026-09', cuentaId: 'gastos', monto: 2000, moneda: 'L', categoriaId: 'comida', partidaId: 'super', ...s }],
+    recibos: [],
+    ajustesPartida: [],
+  });
+  return carpeta;
+}
+
+test('una carpeta del esquema 2 se respalda con su número y sube todo con el esquema de hoy', async () => {
+  const carpeta = carpetaV2();
+  const a = dispositivo(carpeta, 'moises');
+  await a.sincronizar();
+
+  // El respaldo lleva el esquema que se deja atrás, no siempre "e1".
+  assert.deepEqual([...carpeta.respaldos.keys()], ['finanzas-e2-2026-09-20-1000.json']);
+  assert.equal(JSON.parse(carpeta.respaldos.get('finanzas-e2-2026-09-20-1000.json')).esquema, 2);
+  assert.equal(carpeta.leer('finanzas.json').esquema, ESQUEMA);
+  assert.equal(carpeta.leer('finanzas-2026.json').esquema, ESQUEMA);
+  // Los datos no cambian; la partida solo dice ahora en qué moneda se lleva.
+  const super2 = carpeta.leer('finanzas.json').partidas.find((x) => x.id === 'super');
+  assert.deepEqual([super2.monto, super2.moneda, super2.suscripcion, super2.actualizado], [6000, 'L', false, T]);
+  assert.equal(carpeta.leer('finanzas-2026.json').movimientos.length, 1);
+  assert.deepEqual(a.estado.pendientes, []);
+
+  // Una segunda pasada no respalda ni sube de nuevo.
+  const eTags = [...carpeta.archivos.values()].map((x) => x.eTag);
+  await a.sincronizar();
+  assert.deepEqual([...carpeta.respaldos.keys()], ['finanzas-e2-2026-09-20-1000.json']);
   assert.deepEqual([...carpeta.archivos.values()].map((x) => x.eTag), eTags);
 });
 
@@ -167,7 +214,7 @@ test('dos celulares que migran a la vez llegan al mismo resultado', async () => 
   await Promise.all([a.sincronizar(), b.sincronizar()]);
   await a.sincronizar();
   await b.sincronizar();
-  assert.equal(carpeta.leer('finanzas.json').esquema, 2);
+  assert.equal(carpeta.leer('finanzas.json').esquema, ESQUEMA);
   assert.deepEqual(ordenado(a.doc()), ordenado(b.doc()));
   assert.deepEqual(ordenado(carpeta.unido()), ordenado(a.doc()));
 });

@@ -1,4 +1,8 @@
-// Validación de documentos y migración del esquema 1 al 2.
+// Validación de documentos y migración hasta el esquema 3.
+//   1 → 2: las plantillas se reparten en partidas e ingresos, los movimientos de salario pasan a
+//          recibos, las categorías se agrupan y la meta de una cuenta se vuelve una meta aparte.
+//   2 → 3: cada partida dice en qué moneda se lleva y si es una suscripción, en vez de dejarlo
+//          al que la lea. Nada cambia de valor: lo que no decía nada estaba en lempiras.
 // `migrar` es pura y determinista: no cambia "actualizado", no crea ids al azar y no mira
 // la fecha de hoy. Así dos celulares que migran el mismo archivo llegan al mismo resultado,
 // y aplicarla dos veces no cambia nada.
@@ -40,6 +44,7 @@ export function partidaDesdePlantilla(t) {
     moneda: 'L',
     suscripcion: false,
     ciclo: null,
+    mesCobro: null,
     pruebaHasta: null,
     meses: Array.isArray(t.meses) ? t.meses : [],
     montoAnual: t.montoAnual ?? null,
@@ -80,6 +85,19 @@ export function ingresoDesdePlantilla(t) {
   };
 }
 
+// Esquema 3: la partida dice su moneda y su ciclo de cobro. Una partida del esquema 2 no decía
+// nada, y lo que no dice nada está en lempiras y no es una suscripción.
+export function partidaDelEsquema3(p) {
+  return {
+    ...p,
+    moneda: p.moneda === 'USD' ? 'USD' : 'L',
+    suscripcion: !!p.suscripcion && p.tipo === 'gasto',
+    ciclo: p.ciclo ?? null,
+    mesCobro: p.mesCobro ?? null,
+    pruebaHasta: p.pruebaHasta ?? null,
+  };
+}
+
 // Un ingreso registrado en el esquema 1 (movimiento de un salario) pasa a ser un recibo.
 function reciboDesdeMovimiento(m, ingreso) {
   const periodo = m.periodo || periodoDe(m.fecha);
@@ -106,7 +124,7 @@ export function migrar(entrada) {
   const { plantillas: plantillasV1, ...doc } = entrada;
   const plantillas = Array.isArray(plantillasV1) ? plantillasV1 : [];
 
-  const partidas = [...(doc.partidas || [])];
+  const partidas = (doc.partidas || []).map(partidaDelEsquema3);
   const ingresos = [...(doc.ingresos || [])];
   for (const t of plantillas) {
     if (t.clase === 'ingreso') conRegistro(ingresos, ingresoDesdePlantilla(t));
@@ -154,8 +172,9 @@ export function migrar(entrada) {
   });
 
   const out = { ...doc, esquema: Math.max(ESQUEMA, Number(doc.esquema) || 1), grupos, categorias, cuentas, partidas, ingresos, metas, movimientos, recibos };
-  // Marca que los datos vienen de una versión anterior: la app ofrece revisar la configuración.
-  if ((Number(doc.esquema) || 1) < ESQUEMA && doc.config) out.config = { ...doc.config, migradoDesde: Number(doc.esquema) || 1 };
+  // Marca que los datos vienen de la versión 1: la app ofrece revisar la configuración, y sus
+  // pasos son los de ese cambio. Pasar del 2 al 3 no deja nada que revisar.
+  if ((Number(doc.esquema) || 1) < 2 && doc.config) out.config = { ...doc.config, migradoDesde: 1 };
   for (const c of COLECCIONES) if (!Array.isArray(out[c])) out[c] = [];
   return out;
 }

@@ -1,10 +1,10 @@
-// Estructura de los datos (esquema 2) y fusión entre copias.
+// Estructura de los datos (esquema 3) y fusión entre copias.
 // En memoria todo es un solo documento. En OneDrive se guarda repartido en un archivo
 // principal (configuración y catálogos) y un archivo por año (ver anios.js).
 import { periodoActual } from './util.js';
 import { GRUPOS_BASE, CATEGORIAS_BASE } from './catalogos.js';
 
-export const ESQUEMA = 2;
+export const ESQUEMA = 3;
 export const COLECCIONES_PRINCIPAL = ['personas', 'grupos', 'categorias', 'cuentas', 'partidas', 'ingresos', 'prestamos', 'metas', 'comercios', 'resumenes'];
 export const COLECCIONES_ANIO = ['movimientos', 'recibos', 'ajustesPartida'];
 export const COLECCIONES = [...COLECCIONES_PRINCIPAL, ...COLECCIONES_ANIO];
