@@ -4,9 +4,9 @@
 //
 // Una pasada: (1) baja los archivos que cambiaron y los fusiona con lo local: el principal y los
 // años desde `desde` (si el año más viejo no trae apertura, también el anterior); (2) si el
-// principal es del esquema 1, guarda un respaldo antes de tocar nada; (3) sube los archivos con
-// cambios, primero los años y al final el principal. Si alguien guardó al mismo tiempo (412 o 409),
-// vuelve a empezar. Un año que existe en OneDrive y no se bajó nunca se sube: se perderían sus datos.
+// principal es de un esquema anterior, guarda un respaldo antes de tocar nada; (3) sube los archivos
+// con cambios, primero los años y al final el principal. Si alguien guardó al mismo tiempo (412 o
+// 409), vuelve a empezar. Un año que existe en OneDrive y no se bajó nunca se sube: se perderían sus datos.
 import { ESQUEMA, COLECCIONES_ANIO, fusionar, fusionarEn } from './core/modelo.js';
 import { normalizar } from './core/migraciones.js';
 import { PRINCIPAL, claveDeNombre, nombreArchivo, contenidoArchivo, aniosDelDoc, normalizarAnio, tieneCopiasViejas } from './core/anios.js';
@@ -16,10 +16,13 @@ const MAX_INTENTOS = 4;
 
 const errorCon = (mensaje, extra) => Object.assign(new Error(mensaje), extra);
 
-// Datos de una versión vieja de la app dentro de un archivo principal.
-const tieneRestosV1 = (contenido) => (Number(contenido?.esquema) || 1) < ESQUEMA
-  || (Array.isArray(contenido?.plantillas) && contenido.plantillas.length > 0)
+// Datos de la versión 1 de la app dentro de un archivo principal (plantillas, o registros de año
+// que ahora van en su propio archivo), aunque el archivo diga que es de un esquema posterior.
+const tieneRestosV1 = (contenido) => (Array.isArray(contenido?.plantillas) && contenido.plantillas.length > 0)
   || COLECCIONES_ANIO.some((c) => Array.isArray(contenido?.[c]) && contenido[c].length > 0);
+
+// Esquema de un archivo principal, para saber si hay que respaldarlo antes de escribirlo.
+const esquemaDe = (contenido) => (tieneRestosV1(contenido) ? 1 : Math.min(ESQUEMA, Number(contenido?.esquema) || 1));
 
 export function marcarPendiente(estado, clave) {
   if (!estado.pendientes.includes(clave)) estado.pendientes.push(clave);
@@ -68,13 +71,13 @@ export async function sincronizarCarpeta({ libro, estado, ops, sello, desde = nu
     const aniosRemotos = [...remotos.keys()].filter((k) => k !== PRINCIPAL).sort();
 
     // 1. Bajar lo que cambió. El principal va primero: dice de qué versión son los datos.
-    let originalV1 = null;
+    let original = null;
     if (estado.archivos[PRINCIPAL]?.eTag !== principal.eTag) {
       const contenido = await ops.descargar(principal);
-      const viejo = tieneRestosV1(contenido);
-      if (viejo) originalV1 = contenido;
+      const esquema = esquemaDe(contenido);
+      if (esquema < ESQUEMA) original = contenido;
       libro.adoptar(fusionar(libro.doc(), normalizar(contenido)));
-      estado.archivos[PRINCIPAL] = { itemId: principal.itemId, eTag: principal.eTag, esquema: viejo ? 1 : ESQUEMA };
+      estado.archivos[PRINCIPAL] = { itemId: principal.itemId, eTag: principal.eTag, esquema };
     }
     const aniosBajados = [];
     const bajar = async (clave) => {
@@ -103,10 +106,11 @@ export async function sincronizarCarpeta({ libro, estado, ops, sello, desde = nu
     // Un registro que se movió de año puede seguir en el archivo viejo: se vuelve a subir sin él.
     for (const [clave, anio] of aniosBajados) if (tieneCopiasViejas(libro.doc(), clave, anio)) marcarPendiente(estado, clave);
 
-    // 2. Principal del esquema 1 (o con datos de una app vieja): respaldo y se sube todo.
-    if ((estado.archivos[PRINCIPAL]?.esquema || 1) < ESQUEMA) {
-      const original = originalV1 ?? await ops.descargar(principal);
-      await ops.respaldar(`finanzas-e1-${sello}.json`, original);
+    // 2. Principal de un esquema anterior (o con datos de una app vieja): respaldo con el nombre
+    // del esquema que se deja atrás, y se sube todo con el nuevo.
+    const esquemaPrevio = estado.archivos[PRINCIPAL]?.esquema || 1;
+    if (esquemaPrevio < ESQUEMA) {
+      await ops.respaldar(`finanzas-e${esquemaPrevio}-${sello}.json`, original ?? await ops.descargar(principal));
       for (const clave of [PRINCIPAL, ...aniosDelDoc(libro.doc())]) marcarPendiente(estado, clave);
     }
 

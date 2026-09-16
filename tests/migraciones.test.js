@@ -161,6 +161,58 @@ test('un documento nuevo con restos de una versión vieja de la app los migra y 
   assert.equal(d.plantillas, undefined);
 });
 
+// ---------------------------------------------------------------- Esquema 2 a 3
+
+// Documento del esquema 2: las partidas no decían su moneda ni si eran suscripciones. Uno que
+// nació en el 2 tampoco lleva `migradoDesde`, que es la marca de haber venido de la versión 1.
+function docV2() {
+  const { config, ...d } = normalizar(docV1());
+  const { migradoDesde, ...restoConfig } = config;
+  return {
+    ...d,
+    config: restoConfig,
+    esquema: 2,
+    partidas: d.partidas.map(({ moneda, suscripcion, ciclo, mesCobro, pruebaHasta, ...resto }) => resto),
+  };
+}
+
+test('del 2 al 3: cada partida dice su moneda, sin cambiar de valor ni de fecha de edición', () => {
+  const antes = docV2();
+  const d = migrar(antes);
+  assert.equal(d.esquema, ESQUEMA);
+  assert.ok(d.partidas.length);
+  for (const p of d.partidas) {
+    assert.deepEqual([p.moneda, p.suscripcion, p.ciclo, p.mesCobro, p.pruebaHasta], ['L', false, null, null, null]);
+    assert.equal(p.actualizado, T0); // migrar no cambia la fecha de edición
+    assert.equal(p.monto, antes.partidas.find((x) => x.id === p.id).monto);
+  }
+  // Nada que revisar: el asistente es el del cambio de la versión 1.
+  assert.equal(d.config.migradoDesde, undefined);
+  assert.deepEqual(ordenado(migrar(d)), ordenado(d));
+});
+
+test('del 2 al 3: una partida que ya venía en dólares o como suscripción se respeta', () => {
+  const d = docV2();
+  d.partidas = [
+    { ...d.partidas[0], id: 'netflix', tipo: 'gasto', moneda: 'USD', monto: 9.99, suscripcion: true, ciclo: 'mensual' },
+    { ...d.partidas[0], id: 'raro', tipo: 'aporte', suscripcion: true }, // solo un gasto puede ser suscripción
+  ];
+  const [netflix, raro] = migrar(d).partidas;
+  assert.deepEqual([netflix.moneda, netflix.monto, netflix.suscripcion, netflix.ciclo], ['USD', 9.99, true, 'mensual']);
+  assert.equal(raro.suscripcion, false);
+});
+
+test('del 2 al 3: dos celulares, uno migrado y otro no, llegan a lo mismo', () => {
+  const a = migrar(docV2());
+  const b = docV2();
+  b.partidas = b.partidas.map((p) => (p.id === 'agua' ? { ...p, monto: 420, actualizado: '2026-09-25T10:00:00Z' } : p));
+  const ab = ordenado(fusionar(a, migrar(b)));
+  const ba = ordenado(fusionar(migrar(b), a));
+  assert.deepEqual(ab, ba);
+  const agua = ab.partidas.find((p) => p.id === 'agua');
+  assert.deepEqual([agua.monto, agua.moneda], [420, 'L']);
+});
+
 test('normalizar valida el formato, completa lo que falte y rechaza versiones más nuevas', () => {
   assert.throws(() => normalizar({ hola: 1 }));
   assert.throws(() => normalizar([]));
@@ -168,5 +220,5 @@ test('normalizar valida el formato, completa lo que falte y rechaza versiones m�
   assert.equal(d.cuentas.length, 4);
   assert.equal(d.movimientos.length, 1);
   assert.equal(d.config.simboloExt, 'US$');
-  assert.throws(() => normalizar({ esquema: 3 }), (e) => e.codigo === 'esquema_nuevo');
+  assert.throws(() => normalizar({ esquema: 4 }), (e) => e.codigo === 'esquema_nuevo');
 });
