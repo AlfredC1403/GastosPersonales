@@ -31,6 +31,7 @@ export const CATEGORIAS_BASE = [
   ['ropa', 'Ropa', 'personal'],
   ['regalos', 'Regalos', 'personal'],
   ['entretenimiento', 'Entretenimiento', 'personal'],
+  ['suscripciones', 'Suscripciones', 'personal'],
   ['otros', 'Otros', 'personal'],
   ['impuestos', 'Impuestos', 'impuestos'],
   ['ihss', 'IHSS', 'impuestos'],

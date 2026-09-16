@@ -287,8 +287,15 @@ export function crearIndice(docCargado, { hoy = '', apertura = null } = {}) {
     }
   }
 
-  // Pagos de cada partida por mes: `${partidaId}|${periodo}` → [{ m, c }]. Una compra a cuotas
-  // cuenta en cada mes en que se cobra una cuota.
+  // Pagos de cada partida por mes: `${partidaId}|${periodo}` → [{ m, c, u }], en centavos de
+  // lempira y de dólar. Una partida en dólares se mide en dólares, y un pago hecho en lempiras se
+  // pasa con la tasa del registro o, si no tiene, la de referencia. Una compra a cuotas cuenta en
+  // cada mes en que se cobra una cuota.
+  const enDolares = (m, c) => {
+    if (ix.monedaDeMovimiento(m) === 'USD') return aCentavos(m.monto);
+    const t = Number(m.tasa) || tasaReferencia;
+    return t ? Math.round(c / t) : 0;
+  };
   ix.pagosPartida = new Map();
   ix.usoComercios = new Map(); // comercioId → veces que se usó
   for (const m of doc.movimientos || []) {
@@ -298,11 +305,12 @@ export function crearIndice(docCargado, { hoy = '', apertura = null } = {}) {
     const t = ix.tarjetas.get(m.cuentaId);
     if (t && m.cuotas && m.tipo === 'gasto') {
       for (const q of t.cuotas.get(m.id) || []) {
-        if (!(previos?.has(m.id) && q.periodo < ap.mes)) agregar(ix.pagosPartida, `${m.partidaId}|${q.periodo}`, { m, c: q.capital });
+        if (!(previos?.has(m.id) && q.periodo < ap.mes)) agregar(ix.pagosPartida, `${m.partidaId}|${q.periodo}`, { m, c: q.capital, u: enDolares(m, q.capital) });
       }
       continue;
     }
-    agregar(ix.pagosPartida, `${m.partidaId}|${m.periodo || periodoDe(m.fecha)}`, { m, c: ix.montoEnLempiras(m).c });
+    const { c } = ix.montoEnLempiras(m);
+    agregar(ix.pagosPartida, `${m.partidaId}|${m.periodo || periodoDe(m.fecha)}`, { m, c, u: enDolares(m, c) });
   }
   for (const lista of ix.pagosPartida.values()) lista.sort((a, b) => porFecha(a.m, b.m) || (a.m.creado || '').localeCompare(b.m.creado || ''));
 

@@ -102,7 +102,7 @@ export const VistaInicio = {
             <span class="fila-titulo">{{ it.nombre }}</span>
             <span class="fila-sub">{{ subPendiente(it) }}</span>
           </div>
-          <span class="monto">{{ fmt(it.queda || it.esperado) }}</span>
+          <span class="monto">{{ montoItem(it) }}</span>
         </li>
       </ul>
       <div v-else style="display: flex; flex-direction: column; gap: 2px; margin-top: 10px">
@@ -116,7 +116,7 @@ export const VistaInicio = {
                 <div class="fila-titulo" style="font-size: 0.93rem">{{ it.nombre }}</div>
                 <div class="fila-sub">{{ subPendiente(it) }}</div>
               </div>
-              <span class="monto">{{ fmt(it.queda || it.esperado) }}</span>
+              <span class="monto">{{ montoItem(it) }}</span>
             </div>
           </div>
         </div>
@@ -318,8 +318,17 @@ export const VistaInicio = {
 
     const pendientes = computed(() => r.value.pendientes.slice(0, MAX_PENDIENTES));
     const pctItem = (it) => (it.esperado ? Math.min(100, Math.round((it.real / it.esperado) * 100)) : 0);
+    // Una partida en dólares se ve en dólares, igual que en Mes.
+    const enMonedaDe = (it) => (it.moneda === 'USD' ? it.enMoneda : it);
+    const montoItem = (it) => {
+      const x = enMonedaDe(it);
+      return fmtMoneda(x.queda || x.esperado, it.moneda || 'L');
+    };
     const subPendiente = (it) => {
-      if (it.estado === 'parcial') return `${fmt(it.real)} de ${fmt(it.esperado)}`;
+      if (it.estado === 'parcial') {
+        const x = enMonedaDe(it);
+        return `${fmtMoneda(x.real, it.moneda || 'L')} de ${fmtMoneda(x.esperado, it.moneda || 'L')}`;
+      }
       return `${nombrePersona(it.responsableId)}${it.dia ? ' · día ' + it.dia : ''}${it.forma === 'abonos' ? ' · en abonos' : ''}`;
     };
     const agenda = computed(() => {
@@ -468,7 +477,7 @@ export const VistaInicio = {
     const asistentePendiente = computed(() => !!store.doc.config.migradoDesde && pasosPendientes.value > 0);
 
     return {
-      store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
+      store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, montoItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
       textoRitmo, variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
       avisosHoy, totalAvisos, tramo, descontado, textoIngresos, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,

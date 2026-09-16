@@ -1,6 +1,7 @@
 import { store, fmtEntero, indice, vivos, cuentasDinero, tarjetas, buscar, filtro, bloquear, avisos } from '../store.js';
 import { saldosCuentas, enLempirasAprox } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
+import { estadoSuscripciones, resumenSuscripciones } from '../core/suscripciones.js';
 import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { resumenTarjeta, comprometidoEnCuotas } from '../core/tarjetas.js';
@@ -27,6 +28,7 @@ export const GRUPOS_MENU = [
   ] },
   { nombre: 'Planificar', items: [
     { id: 'presupuesto', nombre: 'Presupuesto', icono: 'pastel', valor: 'presupuesto' },
+    { id: 'suscripciones', nombre: 'Suscripciones', icono: 'repetir', valor: 'suscripciones' },
     { id: 'plan-deudas', nombre: 'Plan de deudas', icono: 'objetivo' },
     { id: 'metas', nombre: 'Metas', icono: 'bandera', valor: 'metas' },
     { id: 'reparto', nombre: 'Reparto de gastos', icono: 'balanza' },
@@ -127,6 +129,10 @@ export const MenuLateral = {
           return objetivo ? `${Math.round((lista.reduce((a, e) => a + Math.min(e.ahorrado, e.objetivo), 0) / objetivo) * 100)}%` : '';
         })(),
         presupuesto: `${fmtEntero(presupuestoMensual(ix, store.periodo, f).egresos)}/mes`,
+        suscripciones: (() => {
+          const r = resumenSuscripciones(estadoSuscripciones(ix, { hoy: store.hoy, filtro: f, periodo: store.periodo }));
+          return r.cuantas ? `${fmtEntero(r.alMes)}/mes` : '';
+        })(),
         avisos: avisos().length ? String(avisos().length) : '',
       };
     });

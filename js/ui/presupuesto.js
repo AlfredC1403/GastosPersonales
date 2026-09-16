@@ -1,14 +1,16 @@
-import { store, fmt, fmtEntero, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
-import { presupuestoMensual, equivalenteMensual } from '../core/presupuesto.js';
+import { store, fmt, fmtEntero, fmtMoneda, indice, vivos, grupos, nombrePersona, nombreCuenta, nombreCategoria, filtro, personaFiltro, colorPersona, personas, cuentas } from '../store.js';
+import { presupuestoMensual, equivalenteMensual, equivalenteMensualL, esSuscripcion, monedaDe } from '../core/presupuesto.js';
+import { estadoSuscripciones, resumenSuscripciones, cicloDe } from '../core/suscripciones.js';
 import { ingresoMensual, pagosPorMes, planillaDe } from '../core/nomina.js';
 import { estadoDe } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { colorGrupo } from '../core/reportes.js';
-import { FORMAS } from '../core/modelo.js';
+import { FORMAS, CICLOS } from '../core/modelo.js';
 import { nombreMes, nombrePeriodo, redondear } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { BarraSegmentos } from './graficos.js';
+import { Icono } from './componentes.js';
 import { editarPartida, editarPrestamo, editarIngreso } from './formularios.js';
 
 const { computed } = Vue;
@@ -16,7 +18,7 @@ const { computed } = Vue;
 const VISTAS = { grupo: 'Por grupo', persona: 'Por persona', medio: 'Por medio' };
 
 export const VistaPresupuesto = {
-  components: { BarraSegmentos },
+  components: { BarraSegmentos, Icono },
   template: `
   <section class="pila">
     <p class="nota">Lo que el hogar paga, aparta o recibe cada mes. Los montos son promedios: un seguro de 10 meses cuenta 10/12 por mes y los décimos se reparten en el año.</p>
@@ -68,6 +70,14 @@ export const VistaPresupuesto = {
       </div>
     </article>
 
+    <a v-if="susc.cuantas" class="tarjeta enlace-tarjeta" href="#/suscripciones">
+      <div class="fila-info">
+        <span style="font-weight: 600">Suscripciones: {{ fmt(susc.alMes) }} al mes</span>
+        <span class="fila-sub envuelve">{{ textoSuscripciones }}</span>
+      </div>
+      <icono n="der" :t="20"/>
+    </a>
+
     <div class="segmentos" role="group" aria-label="Ver partidas">
       <button v-for="(n, k) in vistas" :key="k" type="button" :class="{ activo: prefs.vistaPresupuesto === k }" :aria-pressed="prefs.vistaPresupuesto === k" @click="definirVista('vistaPresupuesto', k)">{{ n }}</button>
     </div>
@@ -110,6 +120,15 @@ export const VistaPresupuesto = {
           pct: `${Math.round((valor / total) * 100)}%`, titulo: `${id === 'sin' ? 'El hogar' : nombrePersona(id)} ${fmt(valor)}`,
         }));
     });
+    const suscripciones = computed(() => estadoSuscripciones(ix.value, { hoy: store.hoy, filtro: filtro(), periodo: store.periodo }));
+    const susc = computed(() => resumenSuscripciones(suscripciones.value));
+    const textoSuscripciones = computed(() => {
+      const r = susc.value;
+      const partes = [`${r.cuantas} ${r.cuantas === 1 ? 'activa' : 'activas'}`, `${fmt(r.alAnio)} al año`];
+      if (r.enDolares) partes.push(`${fmtMoneda(r.enDolares, 'USD')}/mes en dólares`);
+      if (r.enPrueba) partes.push(`${r.enPrueba} en prueba gratis`);
+      return partes.join(' · ');
+    });
     const sinDefinir = computed(() => [
       ...vivos('partidas').filter((t) => t.activo !== false && !Number(t.tipo === 'anual' ? t.montoAnual : t.monto)).map((t) => t.nombre),
       ...vivos('ingresos').filter((t) => t.activo !== false && !Number(t.netoEsperado)).map((t) => t.nombre),
@@ -132,30 +151,38 @@ export const VistaPresupuesto = {
     function filaPartida(t) {
       const chips = [];
       const meses = t.meses?.length || 12;
+      const moneda = monedaDe(t);
+      const suscripcion = esSuscripcion(t);
+      const f = (n) => fmtMoneda(n, moneda);
       if (prefs.vistaPresupuesto !== 'persona') chips.push({ t: nombrePersona(t.responsableId), c: '' });
       if (t.activo === false) chips.push({ t: 'inactiva', c: '' });
       if (!Number(t.tipo === 'anual' ? t.montoAnual : t.monto)) chips.push({ t: 'sin monto', c: 'aviso' });
-      if (t.tipo === 'gasto' && t.forma !== 'fijo') chips.push({ t: FORMAS[t.forma].toLowerCase(), c: t.forma === 'abonos' ? 'acento' : '' });
+      if (suscripcion) chips.push({ t: `suscripción · ${CICLOS[cicloDe(t)].toLowerCase()}`, c: 'acento' });
+      if (moneda === 'USD') chips.push({ t: 'US$', c: 'acento' });
+      if (t.tipo === 'gasto' && !suscripcion && t.forma !== 'fijo') chips.push({ t: FORMAS[t.forma].toLowerCase(), c: t.forma === 'abonos' ? 'acento' : '' });
       if (t.tipo === 'aporte') chips.push({ t: 'aporte', c: 'acento' });
-      if (t.tipo !== 'anual' && meses < 12) chips.push({ t: `${meses} meses`, c: '' });
-      if (t.dia) chips.push({ t: `día ${t.dia}`, c: '' });
+      if (t.tipo !== 'anual' && !suscripcion && meses < 12) chips.push({ t: `${meses} meses`, c: '' });
+      if (t.dia) chips.push({ t: suscripcion ? `renueva el ${t.dia}` : `día ${t.dia}`, c: '' });
       if (t.acumula) chips.push({ t: 'acumula', c: 'ok' });
       if (prefs.vistaPresupuesto !== 'medio' && t.medioPagoId && t.medioPagoId !== 'gastos') chips.push({ t: nombreCuenta(t.medioPagoId), c: '' });
       if (t.tipo === 'anual' && !t.mesPago) chips.push({ t: 'sin mes de pago', c: 'aviso' });
       if (prefs.vistaPresupuesto !== 'grupo' && t.categoriaId) chips.push({ t: nombreCategoria(t.categoriaId), c: '' });
-      let monto = fmt(t.monto);
-      let detalle = '';
+      const alMes = redondear(equivalenteMensualL(ix.value, t));
+      let monto = f(t.monto);
+      const detalles = [];
       if (t.tipo === 'anual') {
-        monto = `${fmt(t.montoAnual)} al año`;
-        detalle = `aparta ${fmt(t.monto)}/mes${t.mesPago ? ' · se paga en ' + nombreMes(t.mesPago) : ''}`;
+        monto = `${f(t.montoAnual)} al año`;
+        detalles.push(`aparta ${f(t.monto)}/mes${t.mesPago ? ' · se paga en ' + nombreMes(t.mesPago) : ''}`);
       } else if (t.tipo === 'aporte' && t.cuentaDestinoId) {
-        detalle = `a ${nombreCuenta(t.cuentaDestinoId)}`;
-      } else if (meses < 12) {
-        detalle = `≈ ${fmt(equivalenteMensual(t))}/mes`;
+        detalles.push(`a ${nombreCuenta(t.cuentaDestinoId)}`);
+      } else if (meses < 12 && moneda === 'L') {
+        detalles.push(`≈ ${f(equivalenteMensual(t))}/mes`);
       }
+      // En dólares, el equivalente en lempiras: es lo que suma en los totales del presupuesto.
+      if (moneda === 'USD') detalles.push(`≈ ${fmt(alMes)}/mes`);
       const inactiva = t.activo === false || (t.hasta && store.periodo > t.hasta);
       return { id: t.id, nombre: t.nombre, persona: t.responsableId || null, grupoId: ix.value.grupoDe(t.categoriaId), medioId: t.medioPagoId || 'sin',
-        valor: inactiva ? 0 : redondear(equivalenteMensual(t)), inactiva, chips, monto, detalle, abrir: () => editarPartida(t) };
+        valor: inactiva ? 0 : alMes, inactiva, chips, monto, detalle: detalles.join(' · '), abrir: () => editarPartida(t) };
     }
     function filaPrestamo(x) {
       const fin = estadoDe(ix.value, x).finEstimado;
@@ -199,6 +226,6 @@ export const VistaPresupuesto = {
       }).filter((s) => s.filas.length);
     });
 
-    return { store, prefs, p, libre, porPersona, sinDefinir, filasIngresos, secciones, vistas: VISTAS, definirVista, fmt, fmtEntero, editarPartida, editarIngreso, personaFiltro };
+    return { store, prefs, p, libre, porPersona, susc, textoSuscripciones, sinDefinir, filasIngresos, secciones, vistas: VISTAS, definirVista, fmt, fmtEntero, fmtMoneda, editarPartida, editarIngreso, personaFiltro };
   },
 };

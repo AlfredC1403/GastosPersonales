@@ -37,6 +37,24 @@ export const TIPOS_PARTIDA = {
   anual: 'Pago anual',
 };
 
+// Lo que se elige al crear una partida. Una suscripción (Netflix, iCloud, el hosting) se guarda
+// como un gasto con `suscripcion: true` y su ciclo de cobro: así todo lo que ya sabe tratar un
+// gasto la trata igual, y se administra aparte en core/suscripciones.js.
+export const CLASES_PARTIDA = {
+  gasto: 'Gasto',
+  suscripcion: 'Suscripción',
+  aporte: 'Aporte a una cuenta',
+  anual: 'Pago anual',
+};
+
+// Cada cuánto cobra una suscripción.
+export const CICLOS = {
+  mensual: 'Cada mes',
+  trimestral: 'Cada 3 meses',
+  semestral: 'Cada 6 meses',
+  anual: 'Cada año',
+};
+
 // Qué hace el círculo de la partida en la pantalla Mes.
 export const FORMAS = {
   fijo: 'Monto fijo',

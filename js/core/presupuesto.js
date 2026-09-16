@@ -1,7 +1,10 @@
 // Partidas del presupuesto (con abonos, cierre, sobrante y "solo este mes"), ingresos
 // esperados de cada mes y presupuesto mensual promedio.
+// Una partida puede estar en lempiras o en dólares: se mide en su moneda (US$9.99 pagados a otra
+// tasa siguen siendo US$9.99) y sale también en lempiras, con la tasa de referencia, que es lo que
+// suman el mes, los reportes y el reparto.
 import { vivo } from './modelo.js';
-import { mesDe, periodoDe, sumarMeses, fechaEnMes, aCentavos, deCentavos } from './util.js';
+import { mesDe, periodoDe, sumarMeses, fechaEnMes, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
 import { parteDe, claveRecibo } from './asientos.js';
 import { prestamoActivoEn } from './prestamos.js';
@@ -9,6 +12,37 @@ import { pagosProgramados, pagosPorMes, ingresoMensual, planillaDe, estadoRecibo
 
 const TODOS_LOS_MESES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const MAX_MESES_ARRASTRE = 240;
+
+// Cada cuántos meses cobra una suscripción.
+export const PASO_CICLO = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 };
+
+// Una suscripción es un gasto con ciclo de cobro (Netflix, iCloud, el hosting): se paga como
+// cualquier gasto y se administra aparte (ver core/suscripciones.js).
+export const esSuscripcion = (p) => !!p?.suscripcion && p.tipo === 'gasto';
+
+// Meses en que cobra un ciclo que empieza en `mesCobro`: trimestral desde febrero → [2, 5, 8, 11].
+// Mensual no filtra meses (lista vacía = todos).
+export function mesesDeCiclo(ciclo, mesCobro) {
+  const paso = PASO_CICLO[ciclo] || 1;
+  if (paso === 1) return [];
+  const inicio = Math.min(12, Math.max(1, Math.round(Number(mesCobro)) || 1));
+  const out = [];
+  for (let m = (inicio - 1) % paso; m < 12; m += paso) out.push(m + 1);
+  return out;
+}
+
+// Día en que cobra la partida en un mes (el de renovación de una suscripción).
+export const diaDeCobro = (p, periodo) => fechaEnMes(periodo, p.dia || 1);
+
+// Prueba gratis: mientras dura no se cobra nada, así que ese mes no aparta nada para ella.
+export const enPruebaGratis = (p, periodo) => esSuscripcion(p) && !!p.pruebaHasta && diaDeCobro(p, periodo) <= p.pruebaHasta;
+
+// Moneda de una partida ('L' mientras no diga otra cosa).
+export const monedaDe = (p) => (p?.moneda === 'USD' ? 'USD' : 'L');
+// Tasa con la que se pasan a lempiras las partidas en dólares (la de la configuración).
+export const tasaDe = (ix) => Number(ix.config?.tasaReferencia) || 0;
+// Un monto de la partida, en lempiras.
+export const enLempirasDe = (ix, p, monto) => (monedaDe(p) === 'USD' ? redondear((Number(monto) || 0) * tasaDe(ix)) : redondear(Number(monto) || 0));
 
 export function partidaActivaEn(p, periodo) {
   if (!vivo(p) || p.activo === false) return false;
@@ -24,7 +58,9 @@ export function partesDelMes(p, periodo) {
     return partes;
   }
   const meses = p.meses?.length ? p.meses : TODOS_LOS_MESES;
-  return meses.includes(mesDe(periodo)) ? [{ parte: null, base: aCentavos(p.monto) }] : [];
+  if (!meses.includes(mesDe(periodo))) return [];
+  // En la prueba gratis la suscripción sigue en el plan, pero no cobra nada.
+  return [{ parte: null, base: enPruebaGratis(p, periodo) ? 0 : aCentavos(p.monto) }];
 }
 
 // "Solo este mes": el ajuste cambia el monto de la parte principal (en un pago anual, la
@@ -35,6 +71,7 @@ function parteAjustable(p, periodo) {
 }
 
 function calcular(ix, p, periodo, parte, base, arrastre) {
+  const enDolares = monedaDe(p) === 'USD';
   const pagos = (ix.pagosPartida.get(`${p.id}|${periodo}`) || []).filter((x) => parteDe(x.m) === parte);
   const ajuste = ix.ajustes.get(`${p.id}:${periodo}`) || null;
   const omitida = !!ajuste?.omitir;
@@ -44,7 +81,10 @@ function calcular(ix, p, periodo, parte, base, arrastre) {
     monto = aCentavos(ajuste.monto);
   }
   const esperado = monto + arrastre;
-  const real = pagos.reduce((a, x) => a + x.c, 0);
+  // Todo va en centavos de la moneda de la partida; `realL` guarda además lo que costó de verdad
+  // en lempiras, que es lo que se suma en el mes y en los reportes.
+  const real = pagos.reduce((a, x) => a + (enDolares ? x.u : x.c), 0);
+  const realL = enDolares ? pagos.reduce((a, x) => a + x.c, 0) : real;
   const cierra = pagos.some((x) => x.m.cierra);
   let estado;
   if (omitida && !real) estado = 'omitida';
@@ -54,7 +94,7 @@ function calcular(ix, p, periodo, parte, base, arrastre) {
   else estado = 'parcial';
   const abierta = estado === 'pendiente' || estado === 'parcial';
   return {
-    base: monto, arrastre, esperado, real, cierra, omitida, ajuste, estado, pagos: pagos.map((x) => x.m),
+    base: monto, arrastre, esperado, real, realL, cierra, omitida, ajuste, estado, pagos: pagos.map((x) => x.m),
     queda: abierta ? esperado - real : 0,
     sobrante: estado === 'completo' && real < esperado ? esperado - real : 0,
   };
@@ -93,13 +133,19 @@ function calcularArrastre(ix, p, periodo) {
 
 const nombreParte = (p, parte) => (parte === 'apartar' ? `Apartar para ${p.nombre}` : parte === 'pagar' ? `Pagar ${p.nombre}` : p.nombre);
 
-// Estado de cada partida en `periodo`. Los montos salen en lempiras.
+// Estado de cada partida en `periodo`. Los montos salen en lempiras (lo que suman el mes, los
+// reportes y el reparto); una partida en dólares trae además `enMoneda` con sus cifras en dólares,
+// que son las exactas: lo de lempiras es un estimado con la tasa de referencia.
 export function estadoPartidas(ix, periodo, filtro) {
+  const tasa = tasaDe(ix);
   const items = [];
   for (const p of ix.doc.partidas || []) {
     if (!partidaActivaEn(p, periodo) || !coincidePersona(p.responsableId, filtro)) continue;
+    const moneda = monedaDe(p);
+    const aLempiras = (c) => (moneda === 'USD' ? Math.round(c * tasa) : c);
     for (const { parte, base } of partesDelMes(p, periodo)) {
       const r = calcular(ix, p, periodo, parte, base, parte === null ? arrastreDe(ix, p, periodo) : 0);
+      const medioId = parte === 'pagar' ? p.cuentaDestinoId || 'reservas' : p.medioPagoId || null;
       items.push({
         clave: `${p.id}:${parte || 'principal'}`,
         tipoItem: 'partida',
@@ -107,11 +153,18 @@ export function estadoPartidas(ix, periodo, filtro) {
         parte,
         nombre: nombreParte(p, parte),
         tipo: p.tipo,
+        suscripcion: esSuscripcion(p),
+        enPrueba: enPruebaGratis(p, periodo),
         forma: p.tipo === 'anual' || p.tipo === 'aporte' ? (p.forma === 'abonos' ? 'abonos' : 'fijo') : p.forma || 'fijo',
         responsableId: p.responsableId || null,
         categoriaId: p.categoriaId || null,
         grupoId: ix.grupoDe(p.categoriaId),
-        medioId: parte === 'pagar' ? p.cuentaDestinoId || 'reservas' : p.medioPagoId || null,
+        medioId,
+        moneda,
+        // Una partida en dólares se registra en dólares si el medio los maneja (una tarjeta o una
+        // cuenta en dólares); si sale de una cuenta en lempiras, con su equivalente.
+        monedaPago: moneda === 'USD' && (ix.esTarjeta(medioId) || ix.monedaDe(medioId) === 'USD') ? 'USD' : 'L',
+        estimado: moneda === 'USD',
         dia: p.dia || null,
         acumula: !!p.acumula && p.tipo === 'gasto',
         estado: r.estado,
@@ -120,17 +173,24 @@ export function estadoPartidas(ix, periodo, filtro) {
         cierra: r.cierra,
         ajuste: r.ajuste,
         pagos: r.pagos,
-        base: deCentavos(r.base),
-        arrastre: deCentavos(r.arrastre),
-        esperado: deCentavos(r.esperado),
-        real: deCentavos(r.real),
-        queda: deCentavos(r.queda),
-        sobrante: deCentavos(r.sobrante),
+        base: deCentavos(aLempiras(r.base)),
+        arrastre: deCentavos(aLempiras(r.arrastre)),
+        esperado: deCentavos(aLempiras(r.esperado)),
+        real: deCentavos(r.realL),
+        queda: deCentavos(aLempiras(r.queda)),
+        sobrante: deCentavos(aLempiras(r.sobrante)),
+        enMoneda: {
+          base: deCentavos(r.base), arrastre: deCentavos(r.arrastre), esperado: deCentavos(r.esperado),
+          real: deCentavos(r.real), queda: deCentavos(r.queda), sobrante: deCentavos(r.sobrante),
+        },
       });
     }
   }
   return items;
 }
+
+// Lo que queda por pagar de un item, en la moneda en que se registra su pago.
+export const quedaParaPagar = (it) => (it.monedaPago === 'USD' ? it.enMoneda.queda : it.queda);
 
 // Partidas que aplican en `periodo` (de todo el hogar), para saber si un gasto está en el plan.
 export function partidasDelMes(ix, periodo) {
@@ -209,17 +269,21 @@ function itemIngreso(ingreso, pago, recibos, ordinariosEnMes) {
 
 // ---------------------------------------------------------------- Presupuesto mensual
 
-// Equivalente mensual de una partida (un seguro de 10 meses cuenta 10/12 por mes).
+// Equivalente mensual de una partida, en su moneda (un seguro de 10 meses cuenta 10/12 por mes,
+// una suscripción anual, 1/12).
 export function equivalenteMensual(p) {
   if (p.tipo === 'anual') return Number(p.monto) || 0;
   const meses = p.meses?.length ? p.meses.length : 12;
   return ((Number(p.monto) || 0) * meses) / 12;
 }
 
+// Lo mismo, en lempiras: lo que está en dólares pasa con la tasa de referencia.
+export const equivalenteMensualL = (ix, p) => enLempirasDe(ix, p, equivalenteMensual(p));
+
 // Presupuesto promedio del mes por grupo, persona y medio de pago. Los aportes no cuentan
 // como esenciales (sirven para el fondo de emergencia).
 export function presupuestoMensual(ix, periodo, filtro) {
-  const r = { ingresos: 0, egresos: 0, esenciales: 0, aportes: 0, prestamos: 0, planilla: 0, porGrupo: {}, porPersona: {}, porMedio: {} };
+  const r = { ingresos: 0, egresos: 0, esenciales: 0, aportes: 0, prestamos: 0, planilla: 0, suscripciones: 0, porGrupo: {}, porPersona: {}, porMedio: {} };
   const sumar = (persona, grupoId, medioId, monto, aporte) => {
     if (!coincidePersona(persona, filtro)) return;
     const v = aCentavos(monto);
@@ -236,7 +300,9 @@ export function presupuestoMensual(ix, periodo, filtro) {
     if (vivo(ingreso) && ingreso.activo !== false && coincidePersona(ingreso.personaId || null, filtro)) r.ingresos += aCentavos(ingresoMensual(ingreso));
   }
   for (const p of ix.doc.partidas || []) {
-    if (partidaActivaEn(p, periodo)) sumar(p.responsableId, ix.grupoDe(p.categoriaId), p.medioPagoId, equivalenteMensual(p), p.tipo === 'aporte');
+    if (!partidaActivaEn(p, periodo)) continue;
+    sumar(p.responsableId, ix.grupoDe(p.categoriaId), p.medioPagoId, equivalenteMensualL(ix, p), p.tipo === 'aporte');
+    if (esSuscripcion(p) && coincidePersona(p.responsableId, filtro)) r.suscripciones += aCentavos(equivalenteMensualL(ix, p));
   }
   for (const p of ix.doc.prestamos || []) {
     if (!vivo(p) || !prestamoActivoEn(ix, p, periodo)) continue;
@@ -249,7 +315,7 @@ export function presupuestoMensual(ix, periodo, filtro) {
     if (coincidePersona(p.responsableId, filtro)) r.prestamos += aCentavos(cuota);
     sumar(p.responsableId, ix.grupoDe(p.categoriaId || 'prestamos'), p.cuentaId, cuota, false);
   }
-  for (const k of ['ingresos', 'egresos', 'esenciales', 'aportes', 'prestamos', 'planilla']) r[k] = deCentavos(r[k]);
+  for (const k of ['ingresos', 'egresos', 'esenciales', 'aportes', 'prestamos', 'planilla', 'suscripciones']) r[k] = deCentavos(r[k]);
   for (const k of ['porGrupo', 'porPersona', 'porMedio']) r[k] = Object.fromEntries(Object.entries(r[k]).map(([id, c]) => [id, deCentavos(c)]));
   return r;
 }
@@ -264,8 +330,13 @@ function fechaSugerida(periodo, dia, hoy) {
 // Movimiento listo para guardar al registrar un pago de una partida o de una cuota. Sin
 // `monto`, lo que queda por pagar; con `monto: null`, vacío (para escribirlo).
 export function movimientoParaItem(it, periodo, { hoy, monto, cierra = false } = {}) {
+  // Una partida en dólares que se paga con tarjeta o desde una cuenta en dólares se registra en
+  // dólares; si sale de una cuenta en lempiras, con su equivalente a la tasa de referencia.
+  const enDolares = it.monedaPago === 'USD';
+  const propuesto = enDolares ? it.enMoneda.queda || it.enMoneda.esperado : it.queda || it.esperado;
   const base = {
-    fecha: fechaSugerida(periodo, it.dia, hoy), periodo, monto: monto === undefined ? it.queda || it.esperado : monto,
+    fecha: fechaSugerida(periodo, it.dia, hoy), periodo, monto: monto === undefined ? propuesto : monto,
+    ...(enDolares ? { moneda: 'USD' } : {}),
     personaId: it.responsableId || null, nota: '',
   };
   if (it.tipoItem === 'prestamo') {

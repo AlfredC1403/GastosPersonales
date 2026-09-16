@@ -45,6 +45,7 @@ const TRAZOS = {
   barras: 'M5 20v-9M10 20V5M15 20v-6M20 20V9M3 20h18',
   comparar: 'M4 20v-7M8 20V8M14 20v-5M18 20V6M2 20h20',
   archivo: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
+  repetir: 'M17 2l3 3-3 3M20 5H8a4 4 0 0 0 0 8h1M7 22l-3-3 3-3M4 19h12a4 4 0 0 0 0-8h-1',
 };
 
 export const Icono = {

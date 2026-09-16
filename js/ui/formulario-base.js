@@ -1,6 +1,6 @@
 // Piezas comunes de los formularios de edición: pie con Guardar y Eliminar, texto de quién
 // registró, opciones de categoría y el guardado con Deshacer.
-import { guardar, borrar, aviso, confirmar, buscar, indice, fmt } from '../store.js';
+import { guardar, borrar, aviso, confirmar, buscar, indice, fmt, fmtMoneda } from '../store.js';
 import { nombrePeriodo } from '../core/util.js';
 import { estadoPartidas } from '../core/presupuesto.js';
 import { redondear } from '../core/util.js';
@@ -87,24 +87,34 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
 
 // ---------------------------------------------------------------- Partidas del mes
 
-// Estado de una partida en un mes, sin contar el movimiento que se está editando.
+// Montos de una partida en su propia moneda (en dólares, los exactos; en lempiras son un estimado).
+const montosDe = (it) => (it.moneda === 'USD' ? it.enMoneda : it);
+
+// Estado de una partida en un mes, sin contar el movimiento que se está editando. Los montos van
+// en la moneda de la partida (`moneda`), que es la que se compara con lo que se está escribiendo.
 export function estadoSinEste(partidaId, parte, periodo, movimientoId) {
   if (!partidaId || !periodo) return null;
   const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
   if (!it) return null;
-  // Lo que este movimiento aporta en ese mes (en lempiras; en una compra a cuotas, su cuota).
-  const propio = (indice().pagosPartida.get(`${partidaId}|${periodo}`) || []).filter((x) => x.m.id === movimientoId).reduce((a, x) => a + x.c, 0);
-  const real = redondear(it.real - propio / 100);
-  return { ...it, realSinEste: real, quedaSinEste: redondear(Math.max(0, it.esperado - real)) };
+  const enDolares = it.moneda === 'USD';
+  // Lo que este movimiento aporta en ese mes (en una compra a cuotas, su cuota).
+  const propio = (indice().pagosPartida.get(`${partidaId}|${periodo}`) || [])
+    .filter((x) => x.m.id === movimientoId)
+    .reduce((a, x) => a + (enDolares ? x.u : x.c), 0);
+  const total = montosDe(it);
+  const real = redondear(total.real - propio / 100);
+  return { ...it, realSinEste: real, quedaSinEste: redondear(Math.max(0, total.esperado - real)) };
 }
 
 // Texto del aviso después de registrar un pago de una partida.
 export function textoDePartida(partidaId, parte, periodo) {
   const it = estadoPartidas(indice(), periodo).find((x) => x.partida.id === partidaId && x.parte === parte);
   if (!it) return '';
-  if (it.estado === 'parcial') return `Quedan ${fmt(it.queda)} en ${it.nombre}.`;
-  if (it.estado === 'excedido') return `${it.nombre}: ${fmt(it.real - it.esperado)} más de lo previsto.`;
-  if (it.sobrante > 0) return `${it.nombre} cerrada. Sobran ${fmt(it.sobrante)}${it.acumula ? ' para el mes siguiente' : ''}.`;
+  const x = montosDe(it);
+  const f = (n) => fmtMoneda(n, it.moneda);
+  if (it.estado === 'parcial') return `Quedan ${f(x.queda)} en ${it.nombre}.`;
+  if (it.estado === 'excedido') return `${it.nombre}: ${f(x.real - x.esperado)} más de lo previsto.`;
+  if (it.sobrante > 0) return `${it.nombre} cerrada. Sobran ${f(x.sobrante)}${it.acumula ? ' para el mes siguiente' : ''}.`;
   return `${it.nombre} completa.`;
 }
 

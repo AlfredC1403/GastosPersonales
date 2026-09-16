@@ -7,9 +7,9 @@
 //   formularios-catalogos.js   préstamos, cuentas, personas, grupos y categorías
 //   formularios-tarjetas.js    la tarjeta de crédito y el pago de la tarjeta
 import {
-  store, guardar, borrar, aviso, abrirModal, cerrarModal, indice, vivos, buscar, nombreCuenta, nombrePersona, fmt,
+  store, guardar, borrar, aviso, abrirModal, cerrarModal, indice, vivos, buscar, nombreCuenta, nombrePersona, fmt, fmtMoneda,
 } from '../store.js';
-import { partesDelMes, movimientoParaItem } from '../core/presupuesto.js';
+import { partesDelMes, movimientoParaItem, quedaParaPagar } from '../core/presupuesto.js';
 import { reciboSugerido, pagosParaRegistrar, estadoRecibo } from '../core/nomina.js';
 import { itemDeRecordatorio } from '../core/recordatorios.js';
 import { resumenMes } from '../core/reportes.js';
@@ -49,15 +49,16 @@ export const DetalleItem = {
   <div v-if="it" class="formulario">
     <div>
       <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
-        <span class="hero-num md">{{ fmt(it.real) }}</span>
-        <span class="tenue">de {{ fmt(it.esperado) }}</span>
+        <span class="hero-num md">{{ f(x.real) }}</span>
+        <span class="tenue">de {{ f(x.esperado) }}</span>
         <span class="espacio"></span>
         <span class="chip" :class="estado.clase">{{ estado.texto }}</span>
       </div>
       <div class="progreso" style="margin-top: 10px"><div :style="{ width: pct + '%', background: it.estado === 'excedido' ? 'var(--ambar)' : null }"></div></div>
       <p class="nota" style="margin-top: 8px">{{ resumen }}</p>
-      <p v-if="it.arrastre > 0" class="nota chica">Incluye {{ fmt(it.arrastre) }} que sobraron de meses anteriores.</p>
-      <p v-if="it.ajuste && !it.omitida" class="nota chica">Este mes: {{ fmt(it.base) }} en vez del monto de siempre.</p>
+      <p v-if="enDolares" class="nota chica">En lempiras: {{ fmt(it.real) }} pagados de {{ fmt(it.esperado) }} estimados con la tasa de referencia.</p>
+      <p v-if="x.arrastre > 0" class="nota chica">Incluye {{ f(x.arrastre) }} que sobraron de meses anteriores.</p>
+      <p v-if="it.ajuste && !it.omitida" class="nota chica">Este mes: {{ f(x.base) }} en vez del monto de siempre.</p>
       <p v-if="it.planilla" class="nota chica">Se descuenta de {{ it.planilla.ingreso.nombre }}: {{ it.planilla.descontados }} de {{ it.planilla.esperados }} {{ it.planilla.esperados === 1 ? 'descuento' : 'descuentos' }} este mes.</p>
     </div>
 
@@ -69,7 +70,7 @@ export const DetalleItem = {
             <span class="fila-titulo" style="font-size: 0.92rem">{{ fechaCorta(r.fecha) }}{{ r.cierra ? ' · cerró la partida' : '' }}</span>
             <span class="fila-sub">{{ r.texto }}</span>
           </div>
-          <span class="monto">{{ fmt(r.monto) }}</span>
+          <span class="monto">{{ fmtMoneda(r.monto, r.moneda) }}</span>
         </li>
       </ul>
       <p v-else class="nota chica" style="padding: 6px 0">Todavía no hay nada registrado.</p>
@@ -90,14 +91,19 @@ export const DetalleItem = {
     const estado = computed(() => (it.value?.tipoItem === 'ingreso'
       ? (it.value.hecho ? { texto: 'Recibido', clase: 'ok' } : { texto: 'Pendiente', clase: '' })
       : ESTADOS[it.value?.estado] || ESTADOS.pendiente));
-    const pct = computed(() => (it.value?.esperado ? Math.min(100, (it.value.real / it.value.esperado) * 100) : it.value?.real ? 100 : 0));
+    // Un item en dólares se mide en dólares; lo de lempiras se ve aparte, como estimado.
+    const enDolares = computed(() => it.value?.moneda === 'USD');
+    const x = computed(() => (enDolares.value ? it.value.enMoneda : it.value));
+    const f = (v) => fmtMoneda(v, it.value?.moneda || 'L');
+    const pct = computed(() => (x.value?.esperado ? Math.min(100, (x.value.real / x.value.esperado) * 100) : x.value?.real ? 100 : 0));
     const resumen = computed(() => {
-      const x = it.value;
-      if (x.tipoItem === 'ingreso') return x.hecho ? `Se esperaban ${fmt(x.esperado)}.` : `Se esperan ${fmt(x.esperado)} el ${fechaCorta(x.fecha)}.`;
-      if (x.estado === 'omitida') return 'Este mes no se paga.';
-      if (x.estado === 'parcial' || x.estado === 'pendiente') return `Quedan ${fmt(x.queda)}.`;
-      if (x.estado === 'excedido') return `${fmt(x.real - x.esperado)} más de lo previsto.`;
-      return x.sobrante > 0 ? `Cerrada con ${fmt(x.sobrante)} de sobra${x.acumula ? ', que pasan al mes siguiente' : ''}.` : 'Pagada completa.';
+      const v = x.value;
+      if (it.value.tipoItem === 'ingreso') return it.value.hecho ? `Se esperaban ${f(v.esperado)}.` : `Se esperan ${f(v.esperado)} el ${fechaCorta(it.value.fecha)}.`;
+      if (it.value.estado === 'omitida') return 'Este mes no se paga.';
+      if (it.value.enPrueba) return `En prueba gratis hasta el ${fechaCorta(it.value.partida.pruebaHasta)}: este mes no cobra.`;
+      if (it.value.estado === 'parcial' || it.value.estado === 'pendiente') return `Quedan ${f(v.queda)}.`;
+      if (it.value.estado === 'excedido') return `${f(v.real - v.esperado)} más de lo previsto.`;
+      return v.sobrante > 0 ? `Cerrada con ${f(v.sobrante)} de sobra${it.value.acumula ? ', que pasan al mes siguiente' : ''}.` : 'Pagada completa.';
     });
     const subtitulo = (r, verbo) => {
       const partes = [];
@@ -114,19 +120,26 @@ export const DetalleItem = {
         return x.recibos.map((r) => {
           const e = estadoRecibo(r);
           const falta = e.pendientes === 1 ? 'falta 1 deducción' : `faltan ${e.pendientes} deducciones`;
-          return { id: r.id, fecha: r.fecha, monto: r.neto, texto: e.pendientes ? `${falta} · ${nombreCuenta(r.cuentaId)}` : subtitulo(r, 'recibió'), abrir: () => editarRecibo(r) };
+          return { id: r.id, fecha: r.fecha, monto: r.neto, moneda: 'L', texto: e.pendientes ? `${falta} · ${nombreCuenta(r.cuentaId)}` : subtitulo(r, 'recibió'), abrir: () => editarRecibo(r) };
         });
       }
       return x.pagos.map((p) => {
-        if (p.neto === undefined) return { id: p.id, fecha: p.fecha, monto: p.monto, cierra: p.cierra, texto: subtitulo(p, 'pagó'), abrir: () => editarMovimiento(p) };
+        if (p.neto === undefined) {
+          return {
+            id: p.id, fecha: p.fecha, monto: p.monto, moneda: indice().monedaDeMovimiento(p), cierra: p.cierra,
+            texto: subtitulo(p, 'pagó'), abrir: () => editarMovimiento(p),
+          };
+        }
         const descontado = (p.deducciones || []).filter((d) => !d.noAplica && d.prestamoId === x.prestamo?.id).reduce((a, d) => a + (Number(d.monto) || 0), 0);
-        return { id: p.id, fecha: p.fecha, monto: descontado, texto: `descontado de ${buscar('ingresos', p.ingresoId)?.nombre || 'un salario'}`, abrir: () => editarRecibo(p) };
+        return { id: p.id, fecha: p.fecha, monto: descontado, moneda: 'L', texto: `descontado de ${buscar('ingresos', p.ingresoId)?.nombre || 'un salario'}`, abrir: () => editarRecibo(p) };
       });
     });
     const faltanDeducciones = computed(() => it.value?.tipoItem === 'ingreso' && it.value.recibos.some((r) => estadoRecibo(r).pendientes));
     const completar = () => completarDeducciones(it.value.recibos.find((r) => estadoRecibo(r).pendientes));
     const puedeRegistrar = computed(() => it.value && !it.value.planilla && (it.value.tipoItem === 'ingreso' ? !it.value.recibos.length : it.value.estado !== 'omitida'));
-    const textoEditar = computed(() => ({ partida: 'Editar partida', prestamo: 'Editar préstamo', ingreso: 'Editar ingreso' })[it.value?.tipoItem]);
+    const textoEditar = computed(() => (it.value?.suscripcion
+      ? 'Editar suscripción'
+      : ({ partida: 'Editar partida', prestamo: 'Editar préstamo', ingreso: 'Editar ingreso' })[it.value?.tipoItem]));
 
     function registrar() {
       const x = it.value;
@@ -144,8 +157,8 @@ export const DetalleItem = {
       else editarIngreso(x.ingreso);
     }
     return {
-      it, estado, pct, resumen, registros, faltanDeducciones, completar, puedeRegistrar, textoEditar, registrar, cerrarPartida, solo, editarPlantilla,
-      fmt, fechaCorta, nombrePeriodo,
+      it, x, f, enDolares, estado, pct, resumen, registros, faltanDeducciones, completar, puedeRegistrar, textoEditar, registrar, cerrarPartida, solo, editarPlantilla,
+      fmt, fmtMoneda, fechaCorta, nombrePeriodo,
     };
   },
 };
@@ -191,15 +204,17 @@ export function cerrarPartidaDelMes(it, periodo, { avisar = true } = {}) {
 export function pasarAlSiguiente(it, periodo) {
   const p = it.partida;
   const siguiente = sumarMeses(periodo, 1);
+  const queda = it.moneda === 'USD' ? it.enMoneda.queda : it.queda;
   if (!it.acumula) {
     const id = `${p.id}:${siguiente}`;
     const ajuste = buscar('ajustesPartida', id);
     const vigente = ajuste && !ajuste.borrado && !ajuste.omitir && hayValor(ajuste.monto);
     const base = vigente ? Number(ajuste.monto) : (partesDelMes(p, siguiente)[0]?.base || 0) / 100;
-    guardar('ajustesPartida', { ...(ajuste || {}), id, partidaId: p.id, periodo: siguiente, omitir: false, monto: redondear(base + it.queda), borrado: false });
+    // El ajuste se guarda en la moneda de la partida, igual que su monto.
+    guardar('ajustesPartida', { ...(ajuste || {}), id, partidaId: p.id, periodo: siguiente, omitir: false, monto: redondear(base + queda), borrado: false });
   }
   cerrarPartidaDelMes(it, periodo, { avisar: false });
-  aviso(`${fmt(it.queda)} de ${p.nombre} pasan a ${nombrePeriodo(siguiente)}.`, 'ok', 5000);
+  aviso(`${fmtMoneda(queda, it.moneda)} de ${p.nombre} pasan a ${nombrePeriodo(siguiente)}.`, 'ok', 5000);
 }
 export const abrirDetalle = (it, periodo) => abrirModal(`${it.nombre} · ${nombrePeriodo(periodo)}`, DetalleItem, { clave: it.clave, periodo });
 
@@ -212,11 +227,11 @@ export function marcarItem(it, periodo) {
   if (it.hecho || it.planilla) return abrirDetalle(it, periodo);
   const variable = it.forma === 'variable' || it.parte === 'pagar';
   if (it.forma === 'abonos' || variable || it.estado === 'parcial') {
-    const inicial = movimientoParaItem(it, periodo, { hoy: store.hoy, monto: it.forma === 'abonos' ? null : it.queda, cierra: variable && it.tipoItem === 'partida' });
+    const inicial = movimientoParaItem(it, periodo, { hoy: store.hoy, monto: it.forma === 'abonos' ? null : quedaParaPagar(it), cierra: variable && it.tipoItem === 'partida' });
     return abrirModal(`Registrar: ${it.nombre}`, MovimientoForm, { inicial, sugerirMontos: it.forma === 'abonos' });
   }
   const m = guardar('movimientos', movimientoParaItem(it, periodo, { hoy: store.hoy }));
-  aviso(`Registrado: ${it.nombre}, ${fmt(m.monto)}`, 'ok', 6000, { texto: 'Deshacer', fn: () => borrar('movimientos', m.id) });
+  aviso(`Registrado: ${it.nombre}, ${fmtMoneda(m.monto, it.monedaPago)}`, 'ok', 6000, { texto: 'Deshacer', fn: () => borrar('movimientos', m.id) });
 }
 
 // Toque en el nombre: el detalle del mes (pagos, "solo este mes", editar). Un ingreso sin
@@ -230,7 +245,10 @@ export function abrirItem(it, periodo) {
   return abrirDetalle(it, periodo);
 }
 
-export const editarPartida = (p = {}) => abrirModal(p.id ? 'Editar partida' : 'Nueva partida', PartidaForm, { inicial: p });
+export const editarPartida = (p = {}) => {
+  const que = p.suscripcion ? 'suscripción' : 'partida';
+  return abrirModal(p.id ? `Editar ${que}` : `Nueva ${que}`, PartidaForm, { inicial: p });
+};
 export const editarIngreso = (i = {}) => abrirModal(i.id ? 'Editar ingreso' : 'Nuevo ingreso', IngresoForm, { inicial: i });
 export const editarPrestamo = (p = {}) => abrirModal(p.id ? 'Editar préstamo' : 'Nuevo préstamo', PrestamoForm, { inicial: p });
 export const editarCuenta = (c = {}) => (c.tipo === 'tarjeta' ? editarTarjeta(c) : abrirModal(c.id ? 'Editar cuenta' : 'Nueva cuenta', CuentaForm, { inicial: c }));
