@@ -194,3 +194,73 @@ export const ColumnasComparadas = {
     return { elegido, slot, ancho, columnas, info, elegir };
   },
 };
+
+// Curva del saldo proyectado mes a mes. A diferencia de LineaPlan, el saldo puede bajar de cero
+// (que es justo lo que hay que ver), así que el eje tiene la línea del cero marcada y los tramos
+// en rojo se pintan aparte. `serie2`, si viene, es el escenario del simulador.
+export const CurvaSaldo = {
+  props: {
+    periodos: { type: Array, required: true },
+    serie: { type: Array, required: true },
+    serie2: { type: Array, default: null },
+    formatearMes: { type: Function, required: true },
+    formatear: { type: Function, required: true },
+    etiqueta: { type: String, default: 'Saldo proyectado mes a mes' },
+  },
+  template: `
+  <div>
+    <svg ref="lienzo" class="grafico" viewBox="0 0 336 170" preserveAspectRatio="none" style="height: 180px; touch-action: pan-y"
+         role="img" :aria-label="descripcion" @pointermove="mover" @pointerdown="mover" @pointerleave="i = null">
+      <line v-for="g in guias" :key="g" x1="0" x2="336" :y1="g" :y2="g" stroke="var(--linea)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <rect v-if="hayRojo" x="0" :y="yCero" width="336" :height="Math.max(0, 170 - yCero)" fill="var(--mal)" opacity="0.08"/>
+      <line x1="0" x2="336" :y1="yCero" :y2="yCero" stroke="var(--mal)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
+      <polyline v-if="serie2" :points="puntos2" fill="none" stroke="var(--tinta3)" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+      <polyline :points="puntos1" fill="none" stroke="var(--acento)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <circle v-for="p in enRojo" :key="p.i" :cx="p.x" :cy="p.y" r="3.5" fill="var(--mal)"/>
+      <line v-if="i !== null" :x1="x(i)" :x2="x(i)" y1="0" y2="170" stroke="var(--tinta2)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="eje-anios"><span v-for="m in marcas" :key="m">{{ m }}</span></div>
+    <p class="grafico-info">{{ info }}</p>
+  </div>`,
+  setup(props) {
+    const lienzo = ref(null);
+    const i = ref(null);
+    const n = computed(() => props.periodos.length);
+    const todos = computed(() => [...props.serie, ...(props.serie2 || []), 0]);
+    const alto = computed(() => Math.max(...todos.value));
+    const bajo = computed(() => Math.min(...todos.value));
+    const rango = computed(() => Math.max(1, (alto.value - bajo.value) * 1.1));
+    const x = (k) => (n.value > 1 ? (k * 336) / (n.value - 1) : 168);
+    const y = (v) => 160 - (((v || 0) - bajo.value + rango.value * 0.05) / rango.value) * 150;
+    const puntos = (s) => s.map((v, k) => `${x(k).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const puntos1 = computed(() => puntos(props.serie));
+    const puntos2 = computed(() => (props.serie2 ? puntos(props.serie2) : ''));
+    const yCero = computed(() => y(0));
+    const hayRojo = computed(() => props.serie.some((v) => v < 0));
+    const enRojo = computed(() => props.serie.map((v, k) => ({ i: k, v, x: x(k), y: y(v) })).filter((p) => p.v < 0));
+    const guias = computed(() => [10, 47.5, 85, 122.5, 160]);
+    const marcas = computed(() => {
+      if (!n.value) return [];
+      const paso = Math.max(1, Math.ceil(n.value / 6));
+      const lista = [];
+      for (let k = 0; k < n.value; k += paso) lista.push(props.formatearMes(props.periodos[k]));
+      return lista;
+    });
+    function mover(e) {
+      const r = lienzo.value.getBoundingClientRect();
+      const k = Math.round(((e.clientX - r.left) / r.width) * (n.value - 1));
+      i.value = Math.min(n.value - 1, Math.max(0, k));
+    }
+    const descripcion = computed(() => {
+      const meses = props.serie.filter((v) => v < 0).length;
+      return `${props.etiqueta}. ${meses ? `${meses} ${meses === 1 ? 'mes queda' : 'meses quedan'} en rojo.` : 'Ningún mes queda en rojo.'}`;
+    });
+    const info = computed(() => {
+      if (i.value === null) return 'Toca o pasa el cursor sobre el gráfico para ver cada mes.';
+      const mes = props.formatearMes(props.periodos[i.value]);
+      const base = `${mes} · ${props.formatear(props.serie[i.value])}`;
+      return props.serie2 ? `${base} · hoy ${props.formatear(props.serie2[i.value])}` : base;
+    });
+    return { lienzo, i, x, puntos1, puntos2, yCero, hayRojo, enRojo, guias, marcas, mover, info, descripcion, Math };
+  },
+};

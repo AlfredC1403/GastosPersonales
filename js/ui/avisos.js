@@ -21,6 +21,11 @@ export function ejecutarAccionAviso(accion) {
     if (ingreso) abrirModal(`Registrar: ${ingreso.nombre}`, ReciboForm, { inicial: reciboSugerido(indice(), ingreso, accion.pago, { hoy: store.hoy }) });
     return;
   }
+  if (accion.tipo === 'renovar') {
+    // A demanda: la pantalla de renovaciones no hace falta para abrir la app.
+    import('./renovaciones.js').then((m) => m.marcarRenovada(accion.renovacionId)).catch(() => aviso('No se pudo cargar esto. Revisa tu conexión.', 'error'));
+    return;
+  }
   if (accion.tipo === 'pagarTarjeta') {
     pagarTarjeta(accion.tarjetaId);
     return;

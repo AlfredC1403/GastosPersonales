@@ -46,6 +46,14 @@ const TRAZOS = {
   comparar: 'M4 20v-7M8 20V8M14 20v-5M18 20V6M2 20h20',
   archivo: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
   repetir: 'M17 2l3 3-3 3M20 5H8a4 4 0 0 0 0 8h1M7 22l-3-3 3-3M4 19h12a4 4 0 0 0 0-8h-1',
+  medidor: 'M4 19a8 8 0 1 1 16 0M12 19l4-6',
+  basura: 'M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v5M14 11v5',
+  escudo: 'M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6z',
+  linea: 'M3 3v18h18M7 14l4-4 3 3 5-6',
+  lupa: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
+  microfono: 'M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
+  pegar: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h4',
+  imprimir: 'M7 9V4h10v5M7 18H5v-7h14v7h-2M7 14h10v6H7z',
 };
 
 export const Icono = {

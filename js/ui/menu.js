@@ -6,6 +6,9 @@ import { deudaAl } from '../core/prestamos.js';
 import { coincidePersona } from '../core/filtro.js';
 import { resumenTarjeta, comprometidoEnCuotas } from '../core/tarjetas.js';
 import { estadoMetas } from '../core/metas.js';
+import { resumenTopes } from '../core/topes.js';
+import { renovacionesPendientes } from '../core/renovaciones.js';
+import { papelera } from '../core/papelera.js';
 import { RECORDATORIOS_INICIAL } from '../core/recordatorios.js';
 import { VERSION } from '../version.js';
 import { Icono } from './componentes.js';
@@ -28,6 +31,9 @@ export const GRUPOS_MENU = [
   ] },
   { nombre: 'Planificar', items: [
     { id: 'presupuesto', nombre: 'Presupuesto', icono: 'pastel', valor: 'presupuesto' },
+    { id: 'proyeccion', nombre: 'Proyección', icono: 'linea' },
+    { id: 'topes', nombre: 'Topes', icono: 'medidor', valor: 'topes' },
+    { id: 'renovaciones', nombre: 'Renovaciones', icono: 'escudo', valor: 'renovaciones' },
     { id: 'suscripciones', nombre: 'Suscripciones', icono: 'repetir', valor: 'suscripciones' },
     { id: 'plan-deudas', nombre: 'Plan de deudas', icono: 'objetivo' },
     { id: 'metas', nombre: 'Metas', icono: 'bandera', valor: 'metas' },
@@ -47,6 +53,7 @@ export const GRUPOS_MENU = [
     { id: 'recordatorios', nombre: 'Recordatorios', icono: 'reloj', valor: 'recordatorios' },
     { id: 'seguridad', nombre: 'Seguridad', icono: 'candado' },
     { id: 'datos', nombre: 'Datos y OneDrive', icono: 'nube' },
+    { id: 'papelera', nombre: 'Papelera', icono: 'basura', valor: 'papelera' },
     { id: 'apariencia', nombre: 'Apariencia', icono: 'paleta' },
   ] },
 ];
@@ -134,6 +141,19 @@ export const MenuLateral = {
           return r.cuantas ? `${fmtEntero(r.alMes)}/mes` : '';
         })(),
         avisos: avisos().length ? String(avisos().length) : '',
+        topes: (() => {
+          const r = resumenTopes(ix, store.periodo, f);
+          if (!r.lista.length) return '';
+          return r.pasados ? `${r.pasados} pasado${r.pasados === 1 ? '' : 's'}` : `${fmtEntero(r.gastado)}/${fmtEntero(r.techo)}`;
+        })(),
+        renovaciones: (() => {
+          const n = renovacionesPendientes(ix, { hoy: store.hoy, filtro: f }).length;
+          return n ? String(n) : '';
+        })(),
+        papelera: (() => {
+          const n = papelera(store.doc, { hoy: store.hoy }).length;
+          return n ? String(n) : '';
+        })(),
       };
     });
     const bloquearAhora = () => {

@@ -63,6 +63,9 @@ const VISTAS = [
   { id: 'financiamientos', nombre: 'Financiamientos', componente: aDemanda(() => import('./ui/financiamientos.js'), 'VistaFinanciamientos') },
   { id: 'prestamos', nombre: 'Préstamos', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPrestamos') },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: aDemanda(() => import('./ui/presupuesto.js'), 'VistaPresupuesto') },
+  { id: 'topes', nombre: 'Topes', componente: aDemanda(() => import('./ui/topes.js'), 'VistaTopes'), porMes: true },
+  { id: 'renovaciones', nombre: 'Renovaciones', componente: aDemanda(() => import('./ui/renovaciones.js'), 'VistaRenovaciones') },
+  { id: 'proyeccion', nombre: 'Proyección', componente: aDemanda(() => import('./ui/proyeccion.js'), 'VistaProyeccion') },
   { id: 'suscripciones', nombre: 'Suscripciones', componente: aDemanda(() => import('./ui/suscripciones.js'), 'VistaSuscripciones') },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPlanDeudas') },
   { id: 'metas', nombre: 'Metas', componente: aDemanda(() => import('./ui/metas.js'), 'VistaMetas') },
@@ -78,6 +81,7 @@ const VISTAS = [
   { id: 'configurar', nombre: 'Revisar configuración', componente: aDemanda(() => import('./ui/configurar.js'), 'VistaConfigurar') },
   { id: 'seguridad', nombre: 'Seguridad', componente: aDemanda(() => import('./ui/seguridad.js'), 'VistaSeguridad') },
   { id: 'datos', nombre: 'Datos y OneDrive', componente: aDemanda(() => import('./ui/datos.js'), 'VistaDatos') },
+  { id: 'papelera', nombre: 'Papelera', componente: aDemanda(() => import('./ui/papelera.js'), 'VistaPapelera') },
   { id: 'apariencia', nombre: 'Apariencia', componente: aDemanda(() => import('./ui/apariencia.js'), 'VistaApariencia') },
 ].map((v) => ({ ...v, componente: markRaw(v.componente) }));
 
