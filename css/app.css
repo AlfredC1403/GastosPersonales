@@ -90,9 +90,13 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 }
 .cab-dentro { max-width: 840px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 6px; min-height: 58px; }
 .cab-titulos { display: flex; flex-direction: column; min-width: 0; }
-.cab-titulo { font-family: var(--cifra); font-weight: var(--pc); font-size: 1.32rem; letter-spacing: var(--tr-cifra); line-height: 1.1; white-space: nowrap; }
+/* El título no puede empujar a la campana ni al botón de sincronizar fuera de la pantalla: el
+   nombre de una tarjeta («Banco Atlántida Visa Signature») es tan largo como quiera su dueño.
+   Un nombre se corta con puntos suspensivos sin perder nada; un mes o un año no, así que el
+   mes va corto desde js/app.js y aquí solo queda la red. */
+.cab-titulo { font-family: var(--cifra); font-weight: var(--pc); font-size: 1.32rem; letter-spacing: var(--tr-cifra); line-height: 1.1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cab-titulo::first-letter { text-transform: uppercase; }
-.cab-sub { font-size: 0.72rem; color: var(--tinta3); letter-spacing: 0.04em; text-transform: uppercase; }
+.cab-sub { font-size: 0.72rem; color: var(--tinta3); letter-spacing: 0.04em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cab-espacio { flex: 1; }
 .btn-icono { border: 0; background: transparent; color: var(--tinta2); width: 32px; height: 32px; display: grid; place-items: center; cursor: pointer; border-radius: 50%; flex: none; }
 .btn-icono:hover { background: var(--sup2); }

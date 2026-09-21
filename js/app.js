@@ -148,7 +148,8 @@ const App = {
         <template v-if="vista.porMes">
           <button type="button" class="btn-icono" aria-label="Mes anterior" @click="mover(-1)"><icono n="izq" :t="20"/></button>
           <div class="cab-titulos">
-            <span class="cab-titulo">{{ nombrePeriodo(store.periodo) }}</span>
+            <!-- Mes corto: «septiembre 2027» no cabe en la cabecera del teléfono y se comía el año. -->
+            <span class="cab-titulo">{{ nombrePeriodo(store.periodo, true) }}</span>
             <span class="cab-sub">{{ subtituloMes }}</span>
           </div>
           <button type="button" class="btn-icono" aria-label="Mes siguiente" @click="mover(1)"><icono n="der" :t="20"/></button>
