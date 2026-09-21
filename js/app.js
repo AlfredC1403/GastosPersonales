@@ -55,6 +55,7 @@ const VISTAS = [
   { id: 'mes', nombre: 'Mes', componente: VistaMes, porMes: true },
   { id: 'movimientos', nombre: 'Movimientos', componente: VistaMovimientos, porMes: true },
   { id: 'avisos', nombre: 'Avisos', componente: VistaAvisos },
+  { id: 'rapido', nombre: 'Registro rápido', componente: aDemanda(() => import('./ui/rapido.js'), 'VistaRapido') },
   { id: 'salarios', nombre: 'Salarios y deducciones', componente: aDemanda(() => import('./ui/salarios.js'), 'VistaSalarios') },
   { id: 'cuentas', nombre: 'Cuentas', componente: aDemanda(() => import('./ui/cuentas.js'), 'VistaCuentas') },
   { id: 'tarjetas', nombre: 'Tarjetas', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjetas') },

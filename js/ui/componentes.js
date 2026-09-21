@@ -53,6 +53,7 @@ const TRAZOS = {
   lupa: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
   microfono: 'M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
   pegar: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h4',
+  rayo: 'M13 3 5 13h5l-1 8 8-10h-5z',
   imprimir: 'M7 9V4h10v5M7 18H5v-7h14v7h-2M7 14h10v6H7z',
 };
 

@@ -21,6 +21,7 @@ export const GRUPOS_MENU = [
     { id: 'inicio', nombre: 'Inicio', icono: 'casa' },
     { id: 'mes', nombre: 'Mes', icono: 'calendario' },
     { id: 'movimientos', nombre: 'Movimientos', icono: 'flechas' },
+    { id: 'rapido', nombre: 'Registro rápido', icono: 'rayo' },
     { id: 'avisos', nombre: 'Avisos', icono: 'campana', valor: 'avisos' },
   ] },
   { nombre: 'Dinero', items: [

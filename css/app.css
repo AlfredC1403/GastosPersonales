@@ -515,3 +515,13 @@ dialog.modal.confirmar { max-width: 420px; }
   a[href]::after { content: ''; }
   body { background: #fff; color: #000; }
 }
+
+/* Registro rápido: fichas grandes, pensadas para el pulgar en el teléfono. */
+.rejilla-rapido { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ficha-rapida { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 14px; min-height: 92px; cursor: pointer;
+  background: var(--sup); border: 1px solid var(--linea); border-radius: var(--radio); color: inherit; font: inherit; }
+.ficha-rapida:hover { border-color: var(--acento); }
+.ficha-rapida.elegida { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+.ficha-rapida-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ficha-rapida-monto { font-family: var(--cifra); font-size: 1.15rem; }
+.ficha-rapida-sub { font-size: 0.8rem; color: var(--tinta2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
