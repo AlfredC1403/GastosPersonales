@@ -1,193 +1,37 @@
-// Estado de la app: el documento de datos, quién está usando el dispositivo y la
-// sincronización con OneDrive. Todo cambio se guarda al instante en el navegador y se
-// sube a OneDrive unos segundos después, al archivo que le toca (principal o del año).
-import { ESQUEMA, COLECCIONES_ANIO, docVacio, sellar, fusionar, esPristino, vivo } from './core/modelo.js';
+// Guardar, sincronizar con OneDrive y abrir años anteriores. Es la puerta de todo esto: cada
+// pantalla importa './store.js' y de aquí salen también las otras partes, que son
+//   js/store/estado.js     el objeto reactivo con el documento y lo demás
+//   js/store/consultas.js  preguntas cortas sobre el documento y el formato del dinero
+//   js/store/dialogos.js   el aviso de abajo, el diálogo y la pregunta de sí o no
+// La cadena de importaciones va en un solo sentido (estado ← consultas y diálogos ← esto), así
+// que no hay vueltas. Lo que quedó aquí no se pudo separar sin hacerlas: guardar, sincronizar,
+// el PIN y los años se llaman entre sí.
+//
+// Todo cambio se guarda al instante en el navegador y se sube a OneDrive unos segundos después,
+// al archivo que le toca (principal o del año).
+import { ESQUEMA, COLECCIONES_ANIO, sellar, fusionar, esPristino, vivo } from './core/modelo.js';
 import { normalizar } from './core/migraciones.js';
-import { crearIndice } from './core/asientos.js';
 import { resumenDelAnio } from './core/reportes.js';
 import { PRINCIPAL, archivoDe, aniosDelDoc, contenidoArchivo, claveDeNombre } from './core/anios.js';
 import {
-  aniosCargados, aperturaActiva, quitarAnios, cierresPendientes, anioMasViejoNecesario, aniosParaSoltar, bloqueoDeAnio,
+  aniosCargados, quitarAnios, cierresPendientes, anioMasViejoNecesario, aniosParaSoltar, bloqueoDeAnio,
 } from './core/cierres.js';
-import { periodoActual, hoy, dinero, dineroCorto } from './core/util.js';
+import { hoy } from './core/util.js';
 import { sincronizarCarpeta, marcarPendiente } from './sincronizacion.js';
-import { calcularAvisos, avisosVisibles } from './core/avisos.js';
-import { coincidePersona } from './core/filtro.js';
 import * as od from './onedrive.js';
 import * as almacen from './almacen.js';
-import { pinActivo, quitarPin } from './bloqueo.js';
-import { prefs } from './tema.js';
+import { pinActivo, quitarPin, cifradoActivo, claveDeCifrado, definirCifrado } from './bloqueo.js';
+import { store, CLAVES, docCrudo, indice } from './store/estado.js';
 
-const { reactive, markRaw, computed, toRaw } = Vue;
+const { toRaw } = Vue;
+import { vivos, buscar } from './store/consultas.js';
+import { aviso } from './store/dialogos.js';
 
-const CLAVES = { yo: 'gastos.yo', pinOlvidado: 'gastos.pinOlvidado', recordatorios: 'gastos.recordatorios' };
+export * from './store/estado.js';
+export * from './store/consultas.js';
+export * from './store/dialogos.js';
 
-function leerTexto(clave) {
-  try {
-    return localStorage.getItem(clave);
-  } catch {
-    return null;
-  }
-}
 
-function leerRecordatorios() {
-  try {
-    const { ultima = null, dia = '', huella = '', error = '', resultado = null } = JSON.parse(leerTexto(CLAVES.recordatorios) || '{}');
-    return { ultima, dia, huella, error, resultado };
-  } catch {
-    return { ultima: null, dia: '', huella: '', error: '', resultado: null };
-  }
-}
-
-export const store = reactive({
-  listo: false, // true cuando ya se cargaron los datos guardados en el navegador
-  conPin: pinActivo(),
-  bloqueada: pinActivo(),
-  actualizacion: null, // 'app' | 'esquema': hay una versión nueva de la app
-  // El documento guardado es de una versión más nueva de la app: no se puede escribir nada (ni en
-  // este navegador ni en OneDrive) hasta actualizar, porque se pisarían datos que no sabemos leer.
-  soloLectura: false,
-  doc: docVacio(),
-  rev: 0, // cambia con cada edición: el índice se rehace
-  hoy: hoy(),
-  yo: leerTexto(CLAVES.yo),
-  periodo: periodoActual(),
-  anio: periodoActual().slice(0, 4), // año que se ve en el resumen anual
-  usuario: null, // cuenta de Microsoft conectada: { nombre, email }
-  // archivos: { [clave]: { itemId, eTag, esquema } }; pendientes: claves con cambios por subir;
-  // cargados: años cuyo archivo está en el documento (con OneDrive se cargan el año actual y el anterior)
-  sync: { estado: 'local', mensaje: '', codigo: '', ultima: null, ubicacion: null, archivos: {}, pendientes: [], cargados: undefined },
-  carpeta: [], // archivos de la carpeta de OneDrive en la última sincronización
-  // Años anteriores abiertos en esta sesión (se cargan de OneDrive) y los que se pueden editar.
-  anios: { abiertos: [], editar: [], cargando: '' },
-  modal: null,
-  confirmacion: null, // pregunta de sí o no pendiente (ver confirmar)
-  avisos: [],
-  // Recordatorios en Outlook de este dispositivo: la última pasada y su resultado (ver js/recordatorios.js).
-  recordatorios: { ...leerRecordatorios(), trabajando: false, prueba: null },
-});
-
-export function guardarEstadoRecordatorios() {
-  const { ultima, dia, huella, error, resultado } = store.recordatorios;
-  try {
-    localStorage.setItem(CLAVES.recordatorios, JSON.stringify({ ultima, dia, huella, error, resultado }));
-  } catch {
-    /* sin almacenamiento: se revisa de nuevo en la próxima apertura */
-  }
-}
-
-const docCrudo = () => toRaw(store.doc);
-
-// Índice con asientos, estados y totales. Se rehace solo cuando cambian los datos o el día. Si los
-// años anteriores no están cargados, el más viejo empieza con su apertura.
-const indiceActual = computed(() => {
-  void store.rev;
-  const doc = docCrudo();
-  return markRaw(crearIndice(doc, { hoy: store.hoy, apertura: aperturaActiva(doc) }));
-});
-export const indice = () => indiceActual.value;
-
-// Avisos visibles en este dispositivo (sin los pospuestos ni los descartados), de todo el hogar.
-const avisosActuales = computed(() => avisosVisibles(calcularAvisos(indice(), { hoy: store.hoy, sync: store.sync, recordatorios: store.recordatorios }), prefs.avisosOcultos, store.hoy));
-// Con filtro de persona: los de esa persona y los que no son de nadie.
-export const avisos = () => avisosActuales.value.filter((a) => !a.personaId || coincidePersona(a.personaId, filtro()));
-
-// ---------------------------------------------------------------- Consultas
-
-export const vivos = (coleccion) => store.doc[coleccion].filter(vivo);
-export const buscar = (coleccion, id) => (id ? store.doc[coleccion].find((r) => r.id === id) : undefined);
-export const nombrePersona = (id) => buscar('personas', id)?.nombre || 'Hogar';
-export const nombreCuenta = (id) => buscar('cuentas', id)?.nombre || '—';
-export const nombreCategoria = (id) => buscar('categorias', id)?.nombre || 'Sin categoría';
-export const nombreGrupo = (id) => buscar('grupos', id)?.nombre || 'Sin grupo';
-export const nombrePartida = (id) => buscar('partidas', id)?.nombre || '';
-export const simbolo = () => store.doc.config.moneda || 'L';
-export const simboloDe = (moneda) => (moneda === 'USD' ? store.doc.config.simboloExt || 'US$' : simbolo());
-export const monedaDeCuenta = (id) => buscar('cuentas', id)?.moneda || 'L';
-export const fmt = (n) => dinero(n, { simbolo: simbolo() });
-export const fmtEntero = (n) => dinero(n, { simbolo: simbolo(), decimales: false });
-export const fmtCorto = (n) => dineroCorto(n, simbolo());
-export const fmtMoneda = (n, moneda) => dinero(n, { simbolo: simboloDe(moneda) });
-export const personas = () => vivos('personas').sort((a, b) => a.nombre.localeCompare(b.nombre));
-export const cuentas = () => vivos('cuentas');
-// Cuentas con saldo (sin las tarjetas de crédito, que tienen deuda) y tarjetas.
-export const cuentasDinero = () => cuentas().filter((c) => c.tipo !== 'tarjeta');
-export const tarjetas = () => cuentas().filter((c) => c.tipo === 'tarjeta');
-// Comercios, del más usado al menos usado.
-export const comercios = () => {
-  const uso = indice().usoComercios;
-  return vivos('comercios').sort((a, b) => (uso.get(b.id) || 0) - (uso.get(a.id) || 0) || a.nombre.localeCompare(b.nombre));
-};
-export const categorias = () => vivos('categorias').sort((a, b) => a.nombre.localeCompare(b.nombre));
-export const grupos = () => vivos('grupos').sort((a, b) => (Number(a.orden) || 99) - (Number(b.orden) || 99) || a.nombre.localeCompare(b.nombre));
-export const partidas = () => vivos('partidas').sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-// Categorías agrupadas para los selectores: [{ grupo, categorias }], en el orden de los grupos.
-export function categoriasPorGrupo(tipo = 'gasto') {
-  const lista = categorias().filter((c) => (c.tipo || 'gasto') === tipo);
-  const out = grupos().map((g) => ({ grupo: g, categorias: lista.filter((c) => c.grupoId === g.id) })).filter((x) => x.categorias.length);
-  const sueltas = lista.filter((c) => !grupos().some((g) => g.id === c.grupoId));
-  if (sueltas.length) out.push({ grupo: { id: 'sin-grupo', nombre: 'Sin grupo' }, categorias: sueltas });
-  return out;
-}
-
-// Persona elegida en el filtro de este dispositivo (null = todo el hogar).
-export const personaFiltro = () => (prefs.persona && vivo(buscar('personas', prefs.persona)) ? prefs.persona : null);
-export const filtro = () => (personaFiltro() ? { personaId: personaFiltro() } : null);
-
-// Orden fijo de las personas (por fecha de creación y nombre) para darles siempre el mismo color.
-export function colorPersona(id) {
-  const orden = vivos('personas').sort((a, b) => (a.creado || '').localeCompare(b.creado || '') || a.nombre.localeCompare(b.nombre));
-  const i = orden.findIndex((p) => p.id === id);
-  return i < 0 ? 'var(--tinta3)' : ['var(--s2)', 'var(--s5)', 'var(--s4)', 'var(--s1)'][i % 4];
-}
-
-// ---------------------------------------------------------------- Avisos y modal
-
-let siguienteAviso = 1;
-export function aviso(texto, tipo = 'info', ms = 3500, accion = null) {
-  const id = siguienteAviso++;
-  store.avisos.push({ id, texto, tipo, accion });
-  setTimeout(() => cerrarAviso(id), ms);
-}
-export function cerrarAviso(id) {
-  const i = store.avisos.findIndex((a) => a.id === id);
-  if (i >= 0) store.avisos.splice(i, 1);
-}
-
-let siguienteModal = 1;
-export function abrirModal(titulo, componente, props = {}) {
-  store.modal = { id: siguienteModal++, titulo, componente: markRaw(componente), props };
-}
-export function cerrarModal() {
-  store.modal = null;
-}
-
-// ---------------------------------------------------------------- Confirmaciones
-
-// Pregunta de sí o no, con el diálogo de la app en vez del confirm() del navegador (que en la app
-// instalada sale con la dirección del sitio y sin el estilo de la app). Devuelve una promesa:
-//
-//   if (!await confirmar('¿Eliminar esta cuenta?', { peligro: true })) return;
-//
-// Vive en su propio <dialog> (ver ConfirmHost), así que se puede abrir encima de un formulario:
-// el navegador apila los diálogos y al cerrar la pregunta el formulario sigue ahí.
-let siguienteConfirmacion = 1;
-
-export function confirmar(texto, { titulo = 'Confirmar', aceptar = 'Sí', peligro = false } = {}) {
-  // Si ya había una pregunta abierta, se responde "no" para no dejar su promesa colgada.
-  responderConfirmacion(false);
-  return new Promise((resolver) => {
-    store.confirmacion = { id: siguienteConfirmacion++, titulo, texto, aceptar, peligro, resolver };
-  });
-}
-
-export function responderConfirmacion(valor) {
-  const actual = store.confirmacion;
-  if (!actual) return;
-  store.confirmacion = null;
-  actual.resolver(valor);
-}
 
 // ---------------------------------------------------------------- Guardado local
 
@@ -331,6 +175,7 @@ export function importar(texto) {
 export const exportar = () => JSON.stringify(docCrudo(), null, 2);
 
 export async function borrarDatosLocales() {
+  almacen.definirClave(null);
   await almacen.borrarTodo();
   try {
     localStorage.removeItem(CLAVES.yo);
@@ -383,6 +228,35 @@ export const bloquear = () => {
 export const actualizarEstadoPin = () => {
   store.conPin = pinActivo();
 };
+
+// La pantalla de bloqueo, al acertar el PIN, entrega la clave con la que se abre lo guardado
+// aquí. Sin cifrado no hay nada que hacer: el documento ya se cargó al iniciar.
+export async function abrirConPin(pin) {
+  if (!cifradoActivo()) return;
+  almacen.definirClave(await claveDeCifrado(pin));
+  if (store.listo) return;
+  await cargarLocal();
+  // La sincronización no pudo arrancar al iniciar porque no había documento con qué comparar.
+  if (store.sync.ubicacion) sincronizar();
+}
+
+// Activa el cifrado del documento local y lo vuelve a guardar cifrado. `pin` es el que ya se
+// verificó. Al desactivarlo, se guarda en claro otra vez.
+export async function cambiarCifrado(activar, pin) {
+  await definirCifrado(activar);
+  almacen.definirClave(activar ? await claveDeCifrado(pin) : null);
+  await almacen.guardarDoc(docCrudo());
+  persistirSync();
+  // La agenda de avisos no se puede cifrar (ver almacen.js): al activar el cifrado se borra.
+  if (activar) await almacen.borrarAgenda();
+  store.cifrado = cifradoActivo();
+}
+
+// Después de cambiar el PIN con el cifrado puesto, la clave es otra y hay que volver a guardar.
+export async function reCifrarCon(clave) {
+  almacen.definirClave(clave);
+  await almacen.guardarDoc(docCrudo());
+}
 
 // "Olvidé mi PIN": con OneDrive, se vuelve a iniciar sesión con Microsoft (pidiendo la
 // contraseña). Sin OneDrive, la única salida es borrar los datos de este navegador.
@@ -640,6 +514,9 @@ export async function respaldarAhora() {
 
 export const listarRespaldos = async () => od.listarRespaldos(await conCarpeta());
 
+// Lee un respaldo sin tocar nada: la pantalla lo compara con lo de hoy y trae solo lo que falte.
+export const leerRespaldo = async (r) => normalizar(await od.descargarArchivo(await conCarpeta(), r));
+
 // ---------------------------------------------------------------- Inicio
 
 function marcarActualizacion() {
@@ -647,7 +524,9 @@ function marcarActualizacion() {
 }
 
 export async function iniciar() {
-  await cargarLocal();
+  // Con el cifrado activado, lo guardado aquí no se puede leer hasta que se escriba el PIN:
+  // la pantalla de bloqueo llama a `abrirConPin` y ahí se carga (ver js/ui/bloqueo.js).
+  if (!cifradoActivo()) await cargarLocal();
   almacen.pedirPersistencia();
 
   if (window.__gastosActualizacion) marcarActualizacion();
@@ -674,8 +553,12 @@ export async function iniciar() {
 
   if (pinOlvidado && volvio && store.usuario) {
     if (cuentaDelHogar(store.usuario.email)) {
+      // Con el cifrado puesto, lo guardado aquí ya no se puede abrir: se borra y OneDrive lo
+      // vuelve a bajar. El estado de sincronización se guarda en claro justamente para esto.
+      if (cifradoActivo()) await almacen.borrarCifrado();
       quitarPin();
       actualizarEstadoPin();
+      store.cifrado = false;
       store.bloqueada = false;
       location.hash = '#/seguridad';
       aviso('Iniciaste sesión con Microsoft y se quitó el PIN. Puedes crear uno nuevo.', 'ok', 9000);

@@ -1,6 +1,6 @@
 import {
   store, iniciar, sincronizar, soyYo, aviso, confirmar, personas, buscar, vivos, avisos, anioCargado, aniosDeLaCarpeta, abrirAnio, editarAnio,
-  cerrarAniosAbiertos,
+  cerrarAniosAbiertos, abrirModal,
 } from './store.js';
 import { nombrePeriodo, sumarMeses, periodoActual, hoy, periodoDe } from './core/util.js';
 import { estadoVisible } from './sincronizacion.js';
@@ -55,6 +55,7 @@ const VISTAS = [
   { id: 'mes', nombre: 'Mes', componente: VistaMes, porMes: true },
   { id: 'movimientos', nombre: 'Movimientos', componente: VistaMovimientos, porMes: true },
   { id: 'avisos', nombre: 'Avisos', componente: VistaAvisos },
+  { id: 'rapido', nombre: 'Registro rápido', componente: aDemanda(() => import('./ui/rapido.js'), 'VistaRapido') },
   { id: 'salarios', nombre: 'Salarios y deducciones', componente: aDemanda(() => import('./ui/salarios.js'), 'VistaSalarios') },
   { id: 'cuentas', nombre: 'Cuentas', componente: aDemanda(() => import('./ui/cuentas.js'), 'VistaCuentas') },
   { id: 'tarjetas', nombre: 'Tarjetas', componente: aDemanda(() => import('./ui/tarjetas.js'), 'VistaTarjetas') },
@@ -63,6 +64,9 @@ const VISTAS = [
   { id: 'financiamientos', nombre: 'Financiamientos', componente: aDemanda(() => import('./ui/financiamientos.js'), 'VistaFinanciamientos') },
   { id: 'prestamos', nombre: 'Préstamos', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPrestamos') },
   { id: 'presupuesto', nombre: 'Presupuesto', componente: aDemanda(() => import('./ui/presupuesto.js'), 'VistaPresupuesto') },
+  { id: 'topes', nombre: 'Topes', componente: aDemanda(() => import('./ui/topes.js'), 'VistaTopes'), porMes: true },
+  { id: 'renovaciones', nombre: 'Renovaciones', componente: aDemanda(() => import('./ui/renovaciones.js'), 'VistaRenovaciones') },
+  { id: 'proyeccion', nombre: 'Proyección', componente: aDemanda(() => import('./ui/proyeccion.js'), 'VistaProyeccion') },
   { id: 'suscripciones', nombre: 'Suscripciones', componente: aDemanda(() => import('./ui/suscripciones.js'), 'VistaSuscripciones') },
   { id: 'plan-deudas', nombre: 'Plan de deudas', componente: aDemanda(() => import('./ui/prestamos.js'), 'VistaPlanDeudas') },
   { id: 'metas', nombre: 'Metas', componente: aDemanda(() => import('./ui/metas.js'), 'VistaMetas') },
@@ -78,6 +82,7 @@ const VISTAS = [
   { id: 'configurar', nombre: 'Revisar configuración', componente: aDemanda(() => import('./ui/configurar.js'), 'VistaConfigurar') },
   { id: 'seguridad', nombre: 'Seguridad', componente: aDemanda(() => import('./ui/seguridad.js'), 'VistaSeguridad') },
   { id: 'datos', nombre: 'Datos y OneDrive', componente: aDemanda(() => import('./ui/datos.js'), 'VistaDatos') },
+  { id: 'papelera', nombre: 'Papelera', componente: aDemanda(() => import('./ui/papelera.js'), 'VistaPapelera') },
   { id: 'apariencia', nombre: 'Apariencia', componente: aDemanda(() => import('./ui/apariencia.js'), 'VistaApariencia') },
 ].map((v) => ({ ...v, componente: markRaw(v.componente) }));
 
@@ -166,6 +171,7 @@ const App = {
         </template>
         <span v-else class="cab-titulo">{{ tituloVista }}</span>
         <span class="cab-espacio"></span>
+        <button type="button" class="btn-icono" aria-label="Buscar en todo" title="Buscar (/)" @click="abrirBuscador"><icono n="lupa" :t="18"/></button>
         <a href="#/avisos" class="btn-persona campana" :class="{ activo: ruta === 'avisos' }" :aria-label="cuentaAvisos ? cuentaAvisos + ' avisos' : 'Avisos'">
           <icono n="campana" :t="17"/><span v-if="cuentaAvisos" class="insignia">{{ cuentaAvisos > 9 ? '9+' : cuentaAvisos }}</span>
         </a>
@@ -319,6 +325,26 @@ const App = {
       }
     }
 
+    // El buscador se trae cuando se abre: no hace falta para arrancar la app.
+    function abrirBuscador() {
+      import('./ui/buscador.js')
+        .then((m) => abrirModal('Buscar', m.Buscador))
+        .catch(() => aviso('No se pudo abrir el buscador. Revisa tu conexión.', 'error'));
+    }
+    // "/" en cualquier parte, y Ctrl/⌘+K en la computadora. Se ignora si se está escribiendo.
+    document.addEventListener('keydown', (e) => {
+      if (store.bloqueada || store.modal) return;
+      const en = e.target?.tagName;
+      if (en === 'INPUT' || en === 'TEXTAREA' || en === 'SELECT' || e.target?.isContentEditable) return;
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        abrirBuscador();
+      } else if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        abrirBuscador();
+      }
+    });
+
     // Con PIN: al salir de la app se tapa el contenido (para que no se vea en el selector de
     // apps) y al volver se bloquea si pasó el tiempo elegido.
     let ocultoDesde = null;
@@ -344,7 +370,7 @@ const App = {
     return {
       store, prefs, vista, tituloVista, claveVista, parametros, ruta, accesos: ACCESOS, esAcceso, escritorio, menuAbierto, dlgMenu, fueraDelMenu, tocarMenu, alternarMenuContraido,
       listaPersonas, cuentaAvisos, preguntarQuien, actual, subtituloMes, sync, tocarSync, soyYo, nombrePeriodo,
-      anioAbierto, editandoAnio, anioNoCargado, editarEsteAnio, volverAHoy, abrirAqui,
+      anioAbierto, editandoAnio, anioNoCargado, editarEsteAnio, volverAHoy, abrirAqui, abrirBuscador,
       actualizar: () => location.reload(),
       mover: (n) => { store.periodo = sumarMeses(store.periodo, n); },
       anioActual: actual.slice(0, 4),

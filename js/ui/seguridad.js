@@ -1,13 +1,16 @@
-import { store, aviso, bloquear, actualizarEstadoPin } from '../store.js';
+import { store, aviso, bloquear, actualizarEstadoPin, cambiarCifrado, reCifrarCon } from '../store.js';
 import {
-  pinActivo, minutosBloqueo, activarPin, cambiarPin, desactivarPin, definirMinutos, esPinValido, MINUTOS,
+  pinActivo, minutosBloqueo, activarPin, cambiarPin, desactivarPin, definirMinutos, esPinValido, verificarPin, cifradoActivo, MINUTOS,
 } from '../bloqueo.js';
+import { hayBiometria, biometriaActiva, abreElCifrado, registrar, olvidar } from '../biometria.js';
+import { Icono } from './componentes.js';
 
-const { ref, reactive } = Vue;
+const { ref, reactive, onMounted } = Vue;
 
 const NOMBRE_MINUTOS = { 0: 'Inmediatamente', 1: 'Después de 1 minuto', 5: 'Después de 5 minutos', 15: 'Después de 15 minutos' };
 
 export const VistaSeguridad = {
+  components: { Icono },
   template: `
   <section class="pila">
     <article class="tarjeta">
@@ -59,6 +62,55 @@ export const VistaSeguridad = {
         </form>
       </template>
     </article>
+
+    <article v-if="activo && puedeHuella" class="tarjeta">
+      <div class="tarjeta-cab centro">
+        <h2>Entrar con huella</h2>
+        <span class="chip" :class="huellaActiva ? 'ok' : ''">{{ huellaActiva ? 'Activa' : 'Sin registrar' }}</span>
+      </div>
+      <p class="nota">Abre la app con la huella o la cara de este dispositivo en vez de escribir el PIN. El PIN no se quita: sigue siendo el respaldo.</p>
+      <p v-if="huellaActiva && cifrado && !huellaAbreCifrado" class="nota chica" style="margin-top: 8px">
+        Este navegador no deja guardar el PIN junto a la huella, así que con el cifrado puesto se te va a seguir pidiendo el PIN para abrir los datos.
+      </p>
+
+      <form v-if="!huellaActiva" class="formulario" style="margin-top: 14px" novalidate @submit.prevent="activarHuella">
+        <label class="campo"><span>Tu PIN</span>
+          <input v-model="fh.pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" pattern="[0-9]*"></label>
+        <p class="nota chica">Se pide una vez para poder guardarlo, cifrado, junto a la huella.</p>
+        <p v-if="errorHuella" class="error" role="alert">{{ errorHuella }}</p>
+        <div class="acciones">
+          <span class="espacio"></span>
+          <button type="submit" class="btn primario" :disabled="ocupadoHuella || !fh.pin"><icono n="huella" :t="17"/> Registrar la huella</button>
+        </div>
+      </form>
+      <div v-else class="botones">
+        <button type="button" class="btn peligro" @click="quitarHuella">Quitar la huella</button>
+      </div>
+    </article>
+
+    <article v-if="activo" class="tarjeta">
+      <div class="tarjeta-cab centro">
+        <h2>Cifrar los datos de este dispositivo</h2>
+        <span class="chip" :class="cifrado ? 'ok' : ''">{{ cifrado ? 'Cifrado' : 'En claro' }}</span>
+      </div>
+      <p class="nota">El PIN tapa la pantalla; el cifrado esconde los datos. Con esto activado, lo que se guarda en este navegador solo se puede leer con tu PIN.</p>
+      <div class="caja-ambar">
+        <p><b>Si olvidas el PIN se pierde la copia de este dispositivo.</b> La de OneDrive no se toca, así que con OneDrive conectado se vuelve a bajar todo. Sin OneDrive, no hay vuelta.</p>
+        <p style="margin-top: 6px">Los avisos que llegan con la app cerrada se apagan: el aviso se prepara fuera de la app y no tiene tu PIN. Los de dentro de la app siguen igual.</p>
+      </div>
+
+      <form class="formulario" style="margin-top: 14px" novalidate @submit.prevent="alternarCifrado">
+        <label class="campo"><span>Tu PIN</span>
+          <input v-model="fc.pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" pattern="[0-9]*"></label>
+        <p v-if="errorCifrado" class="error" role="alert">{{ errorCifrado }}</p>
+        <div class="acciones">
+          <span class="espacio"></span>
+          <button type="submit" class="btn" :class="cifrado ? 'peligro' : 'primario'" :disabled="ocupadoCifrado || !fc.pin">
+            {{ cifrado ? 'Dejar de cifrar' : 'Cifrar ahora' }}
+          </button>
+        </div>
+      </form>
+    </article>
   </section>`,
   setup() {
     const activo = ref(pinActivo());
@@ -67,6 +119,62 @@ export const VistaSeguridad = {
     const ocupado = ref(false);
     const error = ref('');
     const f = reactive({ actual: '', nuevo: '', repetido: '', minutos: 1 });
+    const cifrado = ref(cifradoActivo());
+    const puedeHuella = ref(false);
+    const huellaActiva = ref(biometriaActiva());
+    const huellaAbreCifrado = ref(abreElCifrado());
+    const fh = reactive({ pin: '' });
+    const errorHuella = ref('');
+    const ocupadoHuella = ref(false);
+    onMounted(async () => { puedeHuella.value = await hayBiometria(); });
+
+    async function activarHuella() {
+      errorHuella.value = '';
+      ocupadoHuella.value = true;
+      try {
+        const r = await verificarPin(fh.pin);
+        if (!r.ok) throw new Error(r.espera ? `Demasiados intentos. Espera ${Math.ceil(r.espera / 1000)} segundos.` : 'Ese no es tu PIN.');
+        const { guardoPin } = await registrar(fh.pin);
+        huellaActiva.value = biometriaActiva();
+        huellaAbreCifrado.value = guardoPin;
+        fh.pin = '';
+        aviso('Listo: ya puedes entrar con la huella.', 'ok', 6000);
+      } catch (e) {
+        errorHuella.value = e.name === 'NotAllowedError' ? 'No se registró la huella. Vuelve a intentarlo.' : e.message;
+      } finally {
+        ocupadoHuella.value = false;
+      }
+    }
+
+    function quitarHuella() {
+      olvidar();
+      huellaActiva.value = false;
+      huellaAbreCifrado.value = false;
+      aviso('La huella se quitó de este dispositivo.', 'ok');
+    }
+    const fc = reactive({ pin: '' });
+    const errorCifrado = ref('');
+    const ocupadoCifrado = ref(false);
+
+    // Cifrar o dejar de cifrar vuelve a guardar el documento entero, así que primero hay que
+    // estar seguros de que el PIN es el correcto: con el equivocado quedaría ilegible.
+    async function alternarCifrado() {
+      errorCifrado.value = '';
+      ocupadoCifrado.value = true;
+      try {
+        const r = await verificarPin(fc.pin);
+        if (!r.ok) throw new Error(r.espera ? `Demasiados intentos. Espera ${Math.ceil(r.espera / 1000)} segundos.` : 'Ese no es tu PIN.');
+        const activar = !cifrado.value;
+        await cambiarCifrado(activar, fc.pin);
+        cifrado.value = cifradoActivo();
+        fc.pin = '';
+        aviso(activar ? 'Los datos de este dispositivo quedaron cifrados.' : 'Los datos de este dispositivo ya no están cifrados.', 'ok', 6000);
+      } catch (e) {
+        errorCifrado.value = e.message;
+      } finally {
+        ocupadoCifrado.value = false;
+      }
+    }
 
     const limpiar = () => Object.assign(f, { actual: '', nuevo: '', repetido: '' });
     const abrir = (m) => { modo.value = m; error.value = ''; limpiar(); };
@@ -97,15 +205,43 @@ export const VistaSeguridad = {
 
     return {
       store, activo, minutosActual, modo, ocupado, error, f, minutos: MINUTOS, nombreMinutos: NOMBRE_MINUTOS, abrir, cerrar, bloquear,
+      cifrado, fc, errorCifrado, ocupadoCifrado, alternarCifrado,
+      puedeHuella, huellaActiva, huellaAbreCifrado, fh, errorHuella, ocupadoHuella, activarHuella, quitarHuella,
       activar: () => {
         error.value = validarNuevo();
         if (!error.value) ejecutar(() => activarPin(f.nuevo, f.minutos), 'PIN activado en este dispositivo.');
       },
       cambiar: () => {
         error.value = validarNuevo();
-        if (!error.value) ejecutar(() => cambiarPin(f.actual, f.nuevo), 'PIN cambiado.');
+        // Con el cifrado puesto, el PIN nuevo da una clave nueva: hay que volver a guardar.
+        if (!error.value) {
+          ejecutar(async () => {
+            const clave = await cambiarPin(f.actual, f.nuevo);
+            if (clave) await reCifrarCon(clave);
+            // La huella tenía guardado el PIN anterior: hay que volver a registrarla.
+            if (biometriaActiva()) {
+              olvidar();
+              huellaActiva.value = false;
+              huellaAbreCifrado.value = false;
+            }
+          }, 'PIN cambiado. Vuelve a registrar la huella si la usabas.');
+        }
       },
-      desactivar: () => ejecutar(() => desactivarPin(f.actual), 'PIN desactivado.'),
+      desactivar: () => ejecutar(async () => {
+        // Sin PIN no hay clave, así que los datos vuelven a quedar en claro antes de quitarlo.
+        // El PIN se comprueba primero: con el equivocado no se descifra nada.
+        if (cifradoActivo()) {
+          const r = await verificarPin(f.actual);
+          if (!r.ok) throw new Error(r.espera ? `Demasiados intentos. Espera ${Math.ceil(r.espera / 1000)} segundos.` : 'El PIN actual no es correcto.');
+          await cambiarCifrado(false, f.actual);
+        }
+        await desactivarPin(f.actual);
+        cifrado.value = false;
+        // Sin PIN no hay nada que la huella abra, y guardaba el PIN: se olvida.
+        olvidar();
+        huellaActiva.value = false;
+        huellaAbreCifrado.value = false;
+      }, 'PIN desactivado.'),
       cambiarMinutos: (m) => {
         definirMinutos(m);
         minutosActual.value = minutosBloqueo();

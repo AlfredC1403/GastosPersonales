@@ -46,6 +46,16 @@ const TRAZOS = {
   comparar: 'M4 20v-7M8 20V8M14 20v-5M18 20V6M2 20h20',
   archivo: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
   repetir: 'M17 2l3 3-3 3M20 5H8a4 4 0 0 0 0 8h1M7 22l-3-3 3-3M4 19h12a4 4 0 0 0 0-8h-1',
+  medidor: 'M4 19a8 8 0 1 1 16 0M12 19l4-6',
+  basura: 'M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v5M14 11v5',
+  escudo: 'M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6z',
+  linea: 'M3 3v18h18M7 14l4-4 3 3 5-6',
+  lupa: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
+  microfono: 'M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
+  pegar: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h4',
+  rayo: 'M13 3 5 13h5l-1 8 8-10h-5z',
+  imprimir: 'M7 9V4h10v5M7 18H5v-7h14v7h-2M7 14h10v6H7z',
+  huella: 'M12 4a8 8 0 0 0-8 8v3M20 12a8 8 0 0 0-4-6.9M8 20a8 8 0 0 1-1-4v-4a5 5 0 0 1 10 0v4M12 12v5a5 5 0 0 0 .6 2.4',
 };
 
 export const Icono = {
@@ -63,9 +73,44 @@ export const Icono = {
   },
 };
 
+// El foco de un diálogo. `showModal()` ya lo atrapa en los navegadores actuales, pero no todos
+// lo devuelven a donde estaba al cerrarse, y quien abre un formulario desde una fila de una lista
+// se queda sin saber dónde iba. Además, si el diálogo queda vacío un instante (Vue lo vuelve a
+// dibujar), el Tab se escapa al fondo, así que la vuelta se hace a mano.
+export function usarFoco() {
+  let previo = null;
+  const enfocables = (d) => [...d.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.offsetParent !== null || el === document.activeElement);
+  return {
+    recordar() {
+      previo = document.activeElement;
+    },
+    devolver() {
+      // Solo si el elemento sigue en la página: puede haberse borrado con lo que se guardó.
+      if (previo?.isConnected) previo.focus?.();
+      previo = null;
+    },
+    // Tab en el último lleva al primero, y Shift+Tab en el primero al último.
+    atrapar(e, d) {
+      if (e.key !== 'Tab' || !d) return;
+      const lista = enfocables(d);
+      if (!lista.length) return;
+      const primero = lista[0];
+      const ultimo = lista[lista.length - 1];
+      if (!e.shiftKey && document.activeElement === ultimo) {
+        e.preventDefault();
+        primero.focus();
+      } else if (e.shiftKey && document.activeElement === primero) {
+        e.preventDefault();
+        ultimo.focus();
+      }
+    },
+  };
+}
+
 export const ModalHost = {
   components: { Icono },
-  template: `<dialog ref="dlg" class="modal" aria-labelledby="titulo-modal" @cancel.prevent="cerrarModal" @close="alCerrar" @click="fuera">
+  template: `<dialog ref="dlg" class="modal" aria-labelledby="titulo-modal" @cancel.prevent="cerrarModal" @close="alCerrar" @click="fuera" @keydown="foco.atrapar($event, dlg)">
     <div v-if="store.modal" class="modal-caja">
       <header class="modal-cab">
         <h2 id="titulo-modal">{{ store.modal.titulo }}</h2>
@@ -76,7 +121,10 @@ export const ModalHost = {
   </dialog>`,
   setup() {
     const dlg = ref(null);
-    watch(() => store.modal, async (m) => {
+    const foco = usarFoco();
+    watch(() => store.modal, async (m, antes) => {
+      // Se recuerda antes del nextTick: después, el foco ya se movió.
+      if (m && !antes) foco.recordar();
       await nextTick();
       const d = dlg.value;
       if (!d) return;
@@ -87,7 +135,10 @@ export const ModalHost = {
         campo?.focus();
         campo?.select?.();
       }
-      if (!m && d.open) d.close();
+      if (!m && d.open) {
+        d.close();
+        foco.devolver();
+      }
     });
     const fuera = (e) => {
       if (e.target === dlg.value) cerrarModal();
@@ -95,8 +146,9 @@ export const ModalHost = {
     // Algunos navegadores cierran el diálogo con Escape sin avisar con "cancel".
     const alCerrar = () => {
       if (store.modal) cerrarModal();
+      foco.devolver();
     };
-    return { store, dlg, cerrarModal, fuera, alCerrar };
+    return { store, dlg, foco, cerrarModal, fuera, alCerrar };
   },
 };
 
@@ -104,7 +156,7 @@ export const ModalHost = {
 // poder abrirse encima de un formulario, y fuera del marco para servir también en la pantalla del PIN.
 export const ConfirmHost = {
   template: `<dialog ref="dlg" class="modal confirmar" aria-labelledby="titulo-confirmar"
-                     @cancel.prevent="responder(false)" @close="alCerrar" @click="fuera">
+                     @cancel.prevent="responder(false)" @close="alCerrar" @click="fuera" @keydown="foco.atrapar($event, dlg)">
     <div v-if="c" class="modal-caja">
       <header class="modal-cab"><h2 id="titulo-confirmar">{{ c.titulo }}</h2></header>
       <p style="margin-bottom: 16px">{{ c.texto }}</p>
@@ -120,7 +172,9 @@ export const ConfirmHost = {
     const btnSi = ref(null);
     const btnNo = ref(null);
     const c = computed(() => store.confirmacion);
-    watch(c, async (actual) => {
+    const foco = usarFoco();
+    watch(c, async (actual, antes) => {
+      if (actual && !antes) foco.recordar();
       await nextTick();
       const d = dlg.value;
       if (!d) return;
@@ -129,15 +183,21 @@ export const ConfirmHost = {
         // En lo que se puede deshacer, el botón de seguir; en lo que no, Cancelar.
         (actual.peligro ? btnNo : btnSi).value?.focus();
       }
-      if (!actual && d.open) d.close();
+      if (!actual && d.open) {
+        d.close();
+        foco.devolver();
+      }
     });
     const responder = (valor) => responderConfirmacion(valor);
     const fuera = (e) => {
       if (e.target === dlg.value) responder(false);
     };
     // Escape en algunos navegadores cierra el diálogo sin pasar por "cancel".
-    const alCerrar = () => responder(false);
-    return { c, dlg, btnSi, btnNo, responder, fuera, alCerrar };
+    const alCerrar = () => {
+      responder(false);
+      foco.devolver();
+    };
+    return { c, dlg, btnSi, btnNo, foco, responder, fuera, alCerrar };
   },
 };
 
@@ -230,3 +290,106 @@ export function descargar(nombre, contenido, tipo) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// Campo de etiquetas: se escriben, se confirman con Enter o coma y quedan como fichas que se
+// pueden quitar. Debajo, las que el hogar ya usó, porque escribir "roatán" dos veces distinto
+// parte el total en dos y el campo deja de servir para lo que es.
+export const CampoEtiquetas = {
+  components: { Icono },
+  props: { modelValue: { type: Array, default: () => [] }, sugerencias: { type: Array, default: () => [] } },
+  emits: ['update:modelValue'],
+  template: `
+  <div class="campo">
+    <span :id="idEtiqueta">Etiquetas</span>
+    <div class="fichas" @click="enfocar">
+      <span v-for="e in modelValue" :key="e" class="ficha">
+        {{ e }}
+        <button type="button" class="ficha-x" :aria-label="'Quitar ' + e" @click.stop="quitar(e)"><icono n="x" :t="12" :g="2.4"/></button>
+      </span>
+      <input ref="campo" v-model="texto" type="text" class="ficha-campo" :maxlength="largo" autocomplete="off"
+             :aria-labelledby="idEtiqueta" :placeholder="modelValue.length ? '' : 'viaje a Roatán, remodelación…'"
+             @keydown.enter.prevent="agregar()" @keydown="alTeclear" @blur="agregar()">
+    </div>
+    <div v-if="visibles.length" class="chips-filtro" role="group" aria-label="Etiquetas ya usadas">
+      <button v-for="x in visibles" :key="x.etiqueta" type="button" class="chip-filtro" @click="agregar(x.etiqueta)">{{ x.etiqueta }}</button>
+    </div>
+    <p v-if="lleno" class="nota chica">Ocho etiquetas es el máximo: más que eso deja de clasificar.</p>
+  </div>`,
+  setup(props, { emit }) {
+    const texto = ref('');
+    const campo = ref(null);
+    const idEtiqueta = `etiquetas-${Math.random().toString(36).slice(2, 8)}`;
+    const lleno = computed(() => props.modelValue.length >= 8);
+    const visibles = computed(() => props.sugerencias.slice(0, 8));
+    const enfocar = () => campo.value?.focus();
+    function agregar(valor = texto.value) {
+      const limpio = String(valor ?? '').replace(/^#/, '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
+      texto.value = '';
+      if (!limpio || lleno.value) return;
+      const sinTildes = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+      if (props.modelValue.some((e) => sinTildes(e) === sinTildes(limpio))) return;
+      emit('update:modelValue', [...props.modelValue, limpio]);
+    }
+    const quitar = (e) => emit('update:modelValue', props.modelValue.filter((x) => x !== e));
+    function alTeclear(e) {
+      if (e.key === ',') {
+        e.preventDefault();
+        agregar();
+      } else if (e.key === 'Backspace' && !texto.value && props.modelValue.length) {
+        quitar(props.modelValue[props.modelValue.length - 1]);
+      }
+    }
+    return { texto, campo, idEtiqueta, lleno, visibles, enfocar, agregar, quitar, alTeclear, largo: 30 };
+  },
+};
+
+// Dictado por voz para un campo de texto. El reconocimiento de voz del navegador no está en
+// todos (en iOS solo en Safari), así que `hay` dice si se puede y el botón se esconde si no.
+// El texto llega en trozos: se va pegando al final de lo que ya hubiera escrito.
+export function dictado({ alTexto, alTerminar } = {}) {
+  const Motor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Motor) return { hay: false, empezar: () => {}, parar: () => {} };
+  let motor = null;
+  const parar = () => {
+    motor?.stop();
+    motor = null;
+  };
+  function empezar() {
+    if (motor) return parar();
+    motor = new Motor();
+    motor.lang = 'es-HN';
+    motor.interimResults = false;
+    motor.continuous = false;
+    motor.onresult = (e) => {
+      const texto = [...e.results].map((r) => r[0].transcript).join(' ').trim();
+      if (texto) alTexto?.(texto);
+    };
+    motor.onend = () => {
+      motor = null;
+      alTerminar?.();
+    };
+    motor.onerror = () => {
+      motor = null;
+      alTerminar?.();
+    };
+    motor.start();
+  }
+  return { hay: true, empezar, parar };
+}
+
+// Un reporte para guardar o mandar por correo: el navegador ya sabe imprimir y guardar en PDF,
+// así que basta una hoja de estilos y un encabezado que diga qué es y de cuándo.
+// El botón no sale impreso (es un `.btn`) y el encabezado no se ve en pantalla.
+export const Imprimir = {
+  components: { Icono },
+  props: { titulo: { type: String, required: true }, detalle: { type: String, default: '' } },
+  template: `
+  <div class="fila-imprimir">
+    <div class="solo-imprimir">
+      <h1>{{ titulo }}</h1>
+      <p v-if="detalle">{{ detalle }}</p>
+    </div>
+    <button type="button" class="btn" @click="imprimir"><icono n="imprimir" :t="17"/> Imprimir o guardar en PDF</button>
+  </div>`,
+  setup: () => ({ imprimir: () => globalThis.print?.() }),
+};

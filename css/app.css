@@ -177,6 +177,9 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 
 .caja-ambar { margin-top: 14px; padding: 12px 14px; background: var(--ambar-sup); border-radius: var(--radio); font-size: 0.9rem; }
 .caja-ambar b { font-family: var(--cifra); font-weight: 600; }
+/* Un número que destaca dentro de una tarjeta, sin ser otra tarjeta (lo que costó deber). */
+.resalte { padding: 12px 14px; background: var(--sup2); border-radius: var(--radio); }
+
 .aviso-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--acento-sup); border-radius: var(--radio); padding: 12px 14px; font-size: 0.9rem; }
 .aviso-banner.ambar { background: var(--ambar-sup); }
 .aviso-banner p { flex: 1 1 220px; }
@@ -475,3 +478,58 @@ dialog.modal.confirmar { max-width: 420px; }
 .detalle-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 64px; gap: 10px; align-items: baseline; }
 .detalle-fila > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detalle-fila > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Etiquetas, topes, renovaciones, proyección y buscador global */
+.fichas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; min-height: 42px; border: 1px solid var(--linea2); border-radius: var(--radio); background: var(--sup); cursor: text; }
+.fichas:focus-within { border-color: var(--acento); }
+.ficha { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px 3px 10px; border-radius: 999px; background: var(--acento-sup); color: var(--acento); font-size: 0.82rem; }
+.ficha-x { display: inline-flex; border: 0; background: transparent; color: inherit; padding: 2px; cursor: pointer; border-radius: 999px; }
+.ficha-x:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
+.ficha-campo { flex: 1; min-width: 90px; border: 0; background: transparent; color: inherit; font: inherit; padding: 2px 0; outline: none; }
+.etiquetas-fila { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.etiqueta-chip { padding: 1px 7px; border-radius: 999px; background: var(--sup2); color: var(--tinta3); font-size: 0.74rem; }
+.btn-enlace { border: 0; background: transparent; color: var(--acento); font: inherit; font-size: 0.85rem; cursor: pointer; padding: 2px 0; }
+.con-sufijo { display: flex; align-items: center; gap: 6px; }
+.con-sufijo input { flex: 1; min-width: 0; }
+.con-sufijo > span { font-size: 0.82rem; color: var(--tinta3); }
+.fila-cambio { padding: 12px 0; border-top: 1px solid var(--linea); display: flex; flex-direction: column; gap: 10px; }
+.progreso.mal > div { background: var(--mal); }
+.progreso.aviso > div { background: var(--ambar); }
+.tarjeta.tenue { opacity: 0.65; }
+.fila.tenue { opacity: 0.6; }
+
+/* Buscador global */
+.busqueda-caja { display: flex; flex-direction: column; gap: 10px; }
+.busqueda-grupo { display: flex; flex-direction: column; gap: 2px; }
+.busqueda-grupo > p { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tinta3); margin: 8px 0 2px; }
+.busqueda-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: var(--radio); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: none; }
+.busqueda-item:hover, .busqueda-item.activo { background: var(--sup2); }
+.busqueda-item .fila-info { flex: 1; min-width: 0; }
+.busqueda-vacio { padding: 18px 4px; color: var(--tinta3); font-size: 0.9rem; }
+
+/* Encabezado del reporte: solo existe en la hoja impresa (ver el bloque @media print). */
+.solo-imprimir { display: none; }
+.fila-imprimir { display: flex; justify-content: flex-end; }
+
+/* Solo para imprimir: el reporte sale sin menú, sin botones y en una hoja */
+@media print {
+  .cabecera, .menu, .menu-fijo, .barra-abajo, .avisos, .btn, .btn-icono, .btn-punteado, .segmentos, .chips-filtro, .no-imprimir { display: none !important; }
+  .marco, .contenido { display: block; padding: 0; margin: 0; max-width: none; }
+  .tarjeta { break-inside: avoid; border: 1px solid #ddd; box-shadow: none; }
+  a[href]::after { content: ''; }
+  body { background: #fff; color: #000; }
+  .solo-imprimir { display: block; margin-bottom: 14px; }
+  .solo-imprimir h1 { font-size: 1.4rem; }
+  .solo-imprimir p { font-size: 0.9rem; color: #444; }
+  .pila { gap: 12px; }
+}
+
+/* Registro rápido: fichas grandes, pensadas para el pulgar en el teléfono. */
+.rejilla-rapido { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ficha-rapida { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 14px; min-height: 92px; cursor: pointer;
+  background: var(--sup); border: 1px solid var(--linea); border-radius: var(--radio); color: inherit; font: inherit; }
+.ficha-rapida:hover { border-color: var(--acento); }
+.ficha-rapida.elegida { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+.ficha-rapida-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ficha-rapida-monto { font-family: var(--cifra); font-size: 1.15rem; }
+.ficha-rapida-sub { font-size: 0.8rem; color: var(--tinta2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

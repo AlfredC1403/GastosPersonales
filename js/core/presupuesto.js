@@ -39,10 +39,11 @@ export const enPruebaGratis = (p, periodo) => esSuscripcion(p) && !!p.pruebaHast
 
 // Moneda de una partida ('L' mientras no diga otra cosa).
 export const monedaDe = (p) => (p?.moneda === 'USD' ? 'USD' : 'L');
-// Tasa con la que se pasan a lempiras las partidas en dólares (la de la configuración).
-export const tasaDe = (ix) => Number(ix.config?.tasaReferencia) || 0;
-// Un monto de la partida, en lempiras.
-export const enLempirasDe = (ix, p, monto) => (monedaDe(p) === 'USD' ? redondear((Number(monto) || 0) * tasaDe(ix)) : redondear(Number(monto) || 0));
+// Tasa con la que se pasan a lempiras las partidas en dólares: la del mes que se está viendo
+// (ver core/tasas.js). Sin mes, la de hoy.
+export const tasaDe = (ix, periodo = '') => (ix.tasaEn ? ix.tasaEn(periodo) : Number(ix.config?.tasaReferencia) || 0);
+// Un monto de la partida, en lempiras, con la tasa de `periodo`.
+export const enLempirasDe = (ix, p, monto, periodo = '') => (monedaDe(p) === 'USD' ? redondear((Number(monto) || 0) * tasaDe(ix, periodo)) : redondear(Number(monto) || 0));
 
 export function partidaActivaEn(p, periodo) {
   if (!vivo(p) || p.activo === false) return false;
@@ -137,7 +138,7 @@ const nombreParte = (p, parte) => (parte === 'apartar' ? `Apartar para ${p.nombr
 // reportes y el reparto); una partida en dólares trae además `enMoneda` con sus cifras en dólares,
 // que son las exactas: lo de lempiras es un estimado con la tasa de referencia.
 export function estadoPartidas(ix, periodo, filtro) {
-  const tasa = tasaDe(ix);
+  const tasa = tasaDe(ix, periodo);
   const items = [];
   for (const p of ix.doc.partidas || []) {
     if (!partidaActivaEn(p, periodo) || !coincidePersona(p.responsableId, filtro)) continue;
@@ -279,8 +280,8 @@ export function equivalenteMensual(p) {
   return ((Number(p.monto) || 0) * meses) / 12;
 }
 
-// Lo mismo, en lempiras: lo que está en dólares pasa con la tasa de referencia.
-export const equivalenteMensualL = (ix, p) => enLempirasDe(ix, p, equivalenteMensual(p));
+// Lo mismo, en lempiras: lo que está en dólares pasa con la tasa del mes.
+export const equivalenteMensualL = (ix, p, periodo = '') => enLempirasDe(ix, p, equivalenteMensual(p), periodo);
 
 // Presupuesto promedio del mes por grupo, persona y medio de pago. Los aportes no cuentan
 // como esenciales (sirven para el fondo de emergencia).
@@ -303,8 +304,8 @@ export function presupuestoMensual(ix, periodo, filtro) {
   }
   for (const p of ix.doc.partidas || []) {
     if (!partidaActivaEn(p, periodo)) continue;
-    sumar(p.responsableId, ix.grupoDe(p.categoriaId), p.medioPagoId, equivalenteMensualL(ix, p), p.tipo === 'aporte');
-    if (esSuscripcion(p) && coincidePersona(p.responsableId, filtro)) r.suscripciones += aCentavos(equivalenteMensualL(ix, p));
+    sumar(p.responsableId, ix.grupoDe(p.categoriaId), p.medioPagoId, equivalenteMensualL(ix, p, periodo), p.tipo === 'aporte');
+    if (esSuscripcion(p) && coincidePersona(p.responsableId, filtro)) r.suscripciones += aCentavos(equivalenteMensualL(ix, p, periodo));
   }
   for (const p of ix.doc.prestamos || []) {
     if (!vivo(p) || !prestamoActivoEn(ix, p, periodo)) continue;

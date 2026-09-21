@@ -1,11 +1,11 @@
-// Estructura de los datos (esquema 3) y fusión entre copias.
+// Estructura de los datos (esquema 4) y fusión entre copias.
 // En memoria todo es un solo documento. En OneDrive se guarda repartido en un archivo
 // principal (configuración y catálogos) y un archivo por año (ver anios.js).
 import { periodoActual } from './util.js';
 import { GRUPOS_BASE, CATEGORIAS_BASE } from './catalogos.js';
 
-export const ESQUEMA = 3;
-export const COLECCIONES_PRINCIPAL = ['personas', 'grupos', 'categorias', 'cuentas', 'partidas', 'ingresos', 'prestamos', 'metas', 'comercios', 'resumenes'];
+export const ESQUEMA = 4;
+export const COLECCIONES_PRINCIPAL = ['personas', 'grupos', 'categorias', 'cuentas', 'partidas', 'ingresos', 'prestamos', 'metas', 'comercios', 'resumenes', 'topes', 'renovaciones', 'tasas'];
 export const COLECCIONES_ANIO = ['movimientos', 'recibos', 'ajustesPartida'];
 export const COLECCIONES = [...COLECCIONES_PRINCIPAL, ...COLECCIONES_ANIO];
 
@@ -64,6 +64,16 @@ export const FORMAS = {
 
 export const FRECUENCIAS = { quincenal: 'Quincenal', mensual: 'Mensual' };
 
+// Un tope es el techo que el hogar se pone para una categoría o un grupo entero. A diferencia
+// de una partida, no planea un pago: solo avisa cuando el gasto del mes se acerca al techo,
+// y por eso alcanza también lo que se gasta fuera del plan.
+export const AMBITOS_TOPE = { categoria: 'Una categoría', grupo: 'Un grupo entero' };
+
+// Una renovación vence y hay que hacer algo antes de esa fecha (el seguro del carro, la
+// licencia, el pasaporte, la garantía del refrigerador). No es una suscripción: nadie la
+// cobra solo, y por eso lo que importa es el aviso con tiempo, no el monto del mes.
+export const REPETICIONES = { ninguna: 'No se repite', meses: 'Cada cierto número de meses' };
+
 export const TIPOS_RECIBO = {
   ordinario: 'Pago',
   decimo14: 'Décimo cuarto mes',
@@ -112,6 +122,9 @@ export function docVacio() {
     metas: [],
     comercios: [],
     resumenes: [],
+    topes: [],
+    renovaciones: [],
+    tasas: [],
     movimientos: [],
     recibos: [],
     ajustesPartida: [],

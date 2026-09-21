@@ -3,14 +3,17 @@
 // cuotas y en dólares. Los de tarjeta están en formularios-tarjetas.js.
 import {
   store, guardar, indice, personas, cuentas, cuentasDinero, tarjetas, comercios, categoriasPorGrupo, vivos, buscar,
-  nombreCuenta, nombrePartida, fmt, fmtMoneda, simboloDe, monedaDeCuenta,
+  nombreCuenta, nombrePartida, fmt, fmtMoneda, simboloDe, monedaDeCuenta, confirmar, nombrePersona,
 } from '../store.js';
 import { TIPOS_MOVIMIENTO } from '../core/modelo.js';
 import { partidaActivaEn } from '../core/presupuesto.js';
 import { saldosCuentas } from '../core/reportes.js';
 import { parteDe } from '../core/asientos.js';
-import { hoy, periodoDe, nombrePeriodo, fechaCorta, sumarMeses, redondear, slug } from '../core/util.js';
+import { periodoDe, nombrePeriodo, sumarMeses, redondear, slug } from '../core/util.js';
+import { limpiar as limpiarEtiquetas, sugerir as sugerirEtiquetas } from '../core/etiquetas.js';
+import { parecidosA } from '../core/duplicados.js';
 import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida } from './formulario-base.js';
+import { CampoEtiquetas, Icono, dictado } from './componentes.js';
 import { pagarTarjeta } from './formularios-tarjetas.js';
 import { nuevaQuincena } from './formularios-nomina.js';
 import { nuevoFinanciamiento } from './formularios-financiamientos.js';
@@ -22,10 +25,26 @@ const TIPOS_CORTOS = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Trans
 // ---------------------------------------------------------------- Movimiento
 
 export const MovimientoForm = {
+  components: { CampoEtiquetas, Icono },
   props: { inicial: Object, sugerirMontos: Boolean },
   emits: ['listo'],
   template: `
   <form class="formulario" novalidate @submit.prevent="enviar(false)">
+    <template v-if="!existe && !tipoFijo">
+      <div v-if="!pegando" class="botones" style="margin-bottom: 2px">
+        <button type="button" class="btn-enlace" @click="abrirPegado"><icono n="pegar" :t="15"/> Pegar el aviso del banco</button>
+      </div>
+      <div v-else class="caja-corte">
+        <label class="campo"><span>Pega aquí el SMS o la notificación del banco</span>
+          <textarea ref="campoAviso" v-model="textoAviso" rows="3" placeholder="BAC Credomatic le informa: Compra por L1,234.56 en…"></textarea></label>
+        <p v-if="leido" class="nota chica">{{ textoLeido }}</p>
+        <p v-else-if="textoAviso.trim()" class="nota chica">De ahí no se saca un movimiento. Revisa que el texto traiga el monto.</p>
+        <div class="botones">
+          <button type="button" class="btn" @click="pegando = false">Cancelar</button>
+          <button type="button" class="btn primario" :disabled="!leido" @click="aplicarAviso">Usar estos datos</button>
+        </div>
+      </div>
+    </template>
     <template v-if="!tipoFijo">
       <div class="segmentos" role="group" aria-label="Tipo de movimiento">
         <button type="button" :class="{ activo: m.tipo === 'gasto' }" :aria-pressed="m.tipo === 'gasto'" @click="m.tipo = 'gasto'; verMas = false">Gasto</button>
@@ -119,7 +138,29 @@ export const MovimientoForm = {
           <option v-for="p in listaPersonas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
     </div>
 
-    <label class="campo"><span>Nota</span><input v-model.trim="m.nota" type="text" maxlength="140" placeholder="Opcional"></label>
+    <!-- No es un <label> que envuelva: dentro hay dos controles (el campo y el micrófono) y
+         entonces no se sabe a cuál nombra. El campo lleva su nombre con aria-label. -->
+    <div class="campo"><span>Nota</span>
+      <span class="con-sufijo">
+        <input v-model.trim="m.nota" type="text" maxlength="140" placeholder="Opcional" aria-label="Nota">
+        <button v-if="hayDictado" type="button" class="btn-icono" :class="{ activo: dictando }"
+                :aria-label="dictando ? 'Dejar de dictar' : 'Dictar la nota'" @click="alternarDictado"><icono n="microfono" :t="18"/></button>
+      </span></div>
+    <campo-etiquetas v-if="usaEtiquetas" v-model="m.etiquetas" :sugerencias="sugerenciasEtiqueta"/>
+
+    <div v-if="parecidos.length" class="caja-ambar" role="status">
+      <p>{{ textoParecidos }}</p>
+      <ul class="lista">
+        <li v-for="x in parecidos" :key="x.movimiento.id" class="fila compacta">
+          <div class="fila-info">
+            <span style="font-size: 0.9rem">{{ tituloDe(x.movimiento) }}</span>
+            <span class="fila-sub">{{ subtituloDe(x.movimiento) }}</span>
+          </div>
+          <span class="monto">{{ fmtMoneda(x.movimiento.monto, x.movimiento.moneda) }}</span>
+        </li>
+      </ul>
+    </div>
+
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="auditoria" class="meta">{{ auditoria }}</p>
     <div class="acciones">
@@ -135,8 +176,10 @@ export const MovimientoForm = {
     const m = reactive({
       tipo: 'gasto', fecha: store.hoy, monto: null, moneda: null, cuentaId: cuentasDinero()[0]?.id || 'gastos', cuentaDestinoId: null, montoDestino: null, tasa: null,
       categoriaId: null, personaId: store.yo, nota: '', prestamoId: null, partidaId: null, parte: null, periodo: null, cierra: false, comercioId: null, metaId: null,
+      etiquetas: [],
       ...original,
     });
+    if (!Array.isArray(m.etiquetas)) m.etiquetas = [];
     const campoMonto = ref(null);
     const verMas = ref(false);
     const otroTipo = computed(() => ['ingreso', 'abono', 'ajuste'].includes(m.tipo));
@@ -269,6 +312,101 @@ export const MovimientoForm = {
       nuevoFinanciamiento({ cuentaId, monto: Number(monto) > 0 ? monto : null, fecha, categoriaId, nota, personaId });
     }
 
+    // ---------------------------------------------------------- Etiquetas
+    // Solo donde tienen sentido: una cuota de préstamo o la parte de un pago anual ya vienen
+    // clasificadas por lo que las generó.
+    const usaEtiquetas = computed(() => !tipoFijo.value);
+    const sugerenciasEtiqueta = computed(() => sugerirEtiquetas(store.doc, '', { excluir: m.etiquetas }));
+
+    // ---------------------------------------------------------- Movimientos repetidos
+    // Dos personas anotando el mismo pago del súper deja el mes con plata que nadie gastó. Aquí
+    // no se impide nada: se muestra lo que ya existe y la persona decide.
+    const parecidos = computed(() => {
+      if (original.id || !(Number(m.monto) > 0) || !m.fecha || m.tipo === 'ajuste') return [];
+      return parecidosA(indice(), { ...m, monto: Number(m.monto), moneda: monedaOrigen.value }).slice(0, 3);
+    });
+    const textoParecidos = computed(() => (parecidos.value.length === 1
+      ? 'Ya hay un movimiento muy parecido. Revisa que no sea el mismo pago anotado dos veces.'
+      : `Ya hay ${parecidos.value.length} movimientos muy parecidos. Revisa que no sea el mismo pago anotado dos veces.`));
+    const tituloDe = (x) => x.nota || buscar('comercios', x.comercioId)?.nombre || nombrePartida(x.partidaId) || nombreCuenta(x.cuentaId);
+    const subtituloDe = (x) => [x.fecha, nombreCuenta(x.cuentaId), x.creadoPor ? `anotado por ${nombrePersona(x.creadoPor)}` : ''].filter(Boolean).join(' · ');
+
+    // ---------------------------------------------------------- Pegar el aviso del banco
+    const pegando = ref(false);
+    const textoAviso = ref('');
+    const campoAviso = ref(null);
+    // El lector de avisos se trae solo cuando se usa: no hace falta para abrir la app.
+    const lector = ref(null);
+    const leido = computed(() => (lector.value && textoAviso.value.trim() ? lector.value.interpretarAviso(textoAviso.value, { hoy: store.hoy }) : null));
+    const textoLeido = computed(() => {
+      const a = leido.value;
+      if (!a) return '';
+      const cuenta = lector.value.cuentaDelAviso(indice(), a);
+      const partes = [`${fmtMoneda(a.monto, a.moneda)}`];
+      if (a.comercio) partes.push(a.comercio);
+      if (cuenta) partes.push(cuenta.nombre);
+      else if (a.ultimos4) partes.push(`tarjeta ${a.ultimos4} (no está en el hogar)`);
+      if (a.fechaDelAviso) partes.push(a.fechaDelAviso);
+      return `${a.banco || 'Aviso'}: ${partes.join(' · ')}.`;
+    });
+    async function abrirPegado() {
+      pegando.value = true;
+      if (!lector.value) {
+        try {
+          lector.value = await import('../core/avisos-banco.js');
+        } catch {
+          pegando.value = false;
+          return;
+        }
+      }
+      await nextTick();
+      campoAviso.value?.focus();
+      // En los navegadores que lo permiten, el portapapeles se lee solo: un toque menos.
+      try {
+        const texto = await navigator.clipboard?.readText?.();
+        if (texto && !textoAviso.value && lector.value.interpretarAviso(texto, { hoy: store.hoy })) textoAviso.value = texto;
+      } catch { /* sin permiso: se pega a mano */ }
+    }
+    function aplicarAviso() {
+      const a = leido.value;
+      if (!a) return;
+      const ix = indice();
+      m.tipo = a.tipo === 'retiro' ? 'gasto' : a.tipo === 'pago_tarjeta' ? 'gasto' : a.tipo;
+      m.monto = a.monto;
+      m.fecha = a.fecha;
+      const cuenta = lector.value.cuentaDelAviso(ix, a);
+      if (cuenta) {
+        m.cuentaId = cuenta.id;
+        if (cuenta.tipo === 'tarjeta') m.moneda = a.moneda;
+      }
+      const comercio = lector.value.comercioDelAviso(ix, a);
+      if (comercio) {
+        comercioTexto.value = comercio.nombre;
+        aplicarComercio();
+      } else if (a.comercio) {
+        comercioTexto.value = a.comercio;
+      }
+      if (!m.nota && !comercio && !a.comercio) m.nota = a.banco ? `Aviso de ${a.banco}` : '';
+      pegando.value = false;
+      textoAviso.value = '';
+    }
+
+    // ---------------------------------------------------------- Dictado de la nota
+    const dictando = ref(false);
+    const voz = dictado({
+      alTexto: (texto) => { m.nota = (m.nota ? `${m.nota} ${texto}` : texto).slice(0, 140); },
+      alTerminar: () => { dictando.value = false; },
+    });
+    function alternarDictado() {
+      if (dictando.value) {
+        voz.parar();
+        dictando.value = false;
+        return;
+      }
+      dictando.value = true;
+      voz.empezar();
+    }
+
     const saldos = computed(() => saldosCuentas(indice()));
     const saldoSinEste = computed(() => {
       const propio = original.tipo === 'ajuste' && original.cuentaId === m.cuentaId && original.creado ? Number(original.monto) : 0;
@@ -324,16 +462,26 @@ export const MovimientoForm = {
       // llegara un registro con cuotas, se conservan tal cual en vez de deshacerlo.
       r.cuotas = original.cuotas || null;
       r.comercioId = usaComercio.value ? comercioDe(r) : null;
+      r.etiquetas = usaEtiquetas.value ? limpiarEtiquetas(m.etiquetas) : (original.etiquetas || []);
 
       const mensaje = r.partidaId
         ? (g) => `${f.existe ? 'Cambios guardados.' : 'Guardado.'} ${textoDePartida(g.partidaId, parteDe(g), g.periodo)}`
         : undefined;
-      f.terminar(r, { deshacer: true, cerrar: !otro, mensaje });
-      if (otro) {
-        Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null, comercioId: null });
+      const guardarYa = () => {
+        f.terminar(r, { deshacer: true, cerrar: !otro, mensaje });
+        if (!otro) return;
+        Object.assign(m, { monto: null, nota: '', partidaId: null, cierra: false, categoriaId: null, montoDestino: null, tasa: null, comercioId: null, etiquetas: [] });
         comercioTexto.value = '';
         nextTick(() => campoMonto.value?.focus());
-      }
+      };
+
+      // Un parecido muy seguro se pregunta antes de guardar; uno flojo ya se está viendo arriba.
+      const repetido = parecidos.value.find((x) => x.confianza >= 85);
+      if (!repetido) return guardarYa();
+      return confirmar(
+        `Ya hay uno casi igual: ${tituloDe(repetido.movimiento)}, ${fmtMoneda(repetido.movimiento.monto, repetido.movimiento.moneda)} el ${repetido.movimiento.fecha}.`,
+        { titulo: '¿Guardarlo igual?', aceptar: 'Guardar igual' },
+      ).then((si) => si && guardarYa());
     }
 
     return {
@@ -342,6 +490,9 @@ export const MovimientoForm = {
       montosRapidos, listaOrigen, listaDestino, origenEsTarjeta, monedaOrigen, monedaDestino, monedasDistintas, hayTarjetas, pagoDeTarjeta,
       usaComercio, comercioTexto, aplicarComercio, sugerenciasComercio, elegirComercio, esTarjetaConCuotas, pasarAFinanciamiento,
       saldoSinEste, saldoReal, diferencia, etiquetaCuenta, enviar,
+      usaEtiquetas, sugerenciasEtiqueta, parecidos, textoParecidos, tituloDe, subtituloDe,
+      pegando, textoAviso, campoAviso, leido, textoLeido, abrirPegado, aplicarAviso,
+      dictando, hayDictado: voz.hay, alternarDictado,
       fmt, fmtMoneda, simboloDe, nombreCuenta, nombrePartida, nombrePeriodo, tipos: TIPOS_CORTOS, nombresTipo: TIPOS_MOVIMIENTO,
       listaPersonas: computed(personas), listaPrestamos: computed(() => vivos('prestamos')),
       categoriasGasto: computed(() => categoriasPorGrupo('gasto')), categoriasIngreso: computed(() => categoriasPorGrupo('ingreso')), ...f,

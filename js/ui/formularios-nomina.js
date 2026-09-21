@@ -7,7 +7,7 @@ import { FRECUENCIAS, TIPOS_RECIBO } from '../core/modelo.js';
 import {
   DEDUCCIONES_SUGERIDAS, NATURALEZAS, APLICA_EN, quincenaDe, reciboSugerido, valoresAnteriores, estadoRecibo, pagosParaRegistrar, montoEsperado,
 } from '../core/nomina.js';
-import { hoy, periodoDe, fechaCorta, redondear } from '../core/util.js';
+import { periodoDe, fechaCorta, redondear } from '../core/util.js';
 import { copia, hayValor, PIE, opcionesCategoria, usarFormulario } from './formulario-base.js';
 
 const { reactive, ref, computed } = Vue;

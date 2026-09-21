@@ -1,9 +1,10 @@
 // Formularios del presupuesto: una partida (con su forma de pago, sus abonos, su moneda y, si es
 // una suscripción, su ciclo de cobro) y el ajuste de una partida para un solo mes.
 import {
-  store, guardar, borrar, aviso, personas, cuentas, cuentasDinero, tarjetas, categoriasPorGrupo, vivos, buscar, nombreCuenta, fmt, fmtMoneda, simboloDe,
+  store, indice, guardar, borrar, aviso, personas, cuentas, cuentasDinero, tarjetas, categoriasPorGrupo, vivos, buscar, nombreCuenta, nombreCategoria, fmt, fmtMoneda, simboloDe,
 } from '../store.js';
 import { CLASES_PARTIDA, CICLOS, FORMAS, MONEDAS } from '../core/modelo.js';
+import { sugerirMonto } from '../core/reportes.js';
 import { partesDelMes, mesesDeCiclo, monedaDe, esSuscripcion } from '../core/presupuesto.js';
 import { cicloDe } from '../core/suscripciones.js';
 import { nombrePeriodo, nombreMes, periodoActual, redondear } from '../core/util.js';
@@ -64,6 +65,10 @@ export const PartidaForm = {
           <input v-model.number="p.dia" type="number" min="1" max="31" placeholder="Opcional"></label>
       </div>
       <p v-if="p.moneda === 'USD'" class="nota chica">{{ textoTasa }}</p>
+      <p v-if="sugerencia" class="nota chica">
+        {{ sugerencia.texto }}
+        <button type="button" class="btn-enlace" @click="p.monto = sugerencia.mediana">Usar {{ fmt(sugerencia.mediana) }}</button>
+      </p>
 
       <template v-if="clase === 'suscripcion'">
         <div class="fila-campos">
@@ -165,10 +170,20 @@ export const PartidaForm = {
     }
     const formas = computed(() => (p.tipo === 'aporte' ? { fijo: FORMAS.fijo, abonos: FORMAS.abonos } : FORMAS));
     const etiquetaMonto = computed(() => (clase.value === 'suscripcion' ? 'Lo que cobra cada vez' : p.tipo === 'aporte' ? 'Aporte al mes' : 'Monto al mes'));
-    const tasa = computed(() => Number(store.doc.config.tasaReferencia) || 0);
+    const tasa = computed(() => indice().tasaEn(store.periodo));
     const textoTasa = computed(() => (tasa.value
-      ? `En el mes y en los reportes cuenta en lempiras con la tasa de referencia (${tasa.value}): ${fmt((Number(p.tipo === 'anual' ? p.montoAnual : p.monto) || 0) * tasa.value)}. Lo que se pague queda con la tasa real de ese día.`
-      : 'Falta la tasa de referencia del dólar: sin ella no se puede estimar en lempiras. Se anota en Datos y OneDrive.'));
+      ? `En el mes y en los reportes cuenta en lempiras con la tasa de su mes (hoy ${tasa.value}): ${fmt((Number(p.tipo === 'anual' ? p.montoAnual : p.monto) || 0) * tasa.value)}. Lo que se pague queda con la tasa real de ese día.`
+      : 'Falta la tasa del dólar: sin ella no se puede estimar en lempiras. Se anota en Datos y OneDrive.'));
+    // Cuánto se ha gastado de verdad en esto: la partida misma si ya existe, y si no, su
+    // categoría. Es lo que evita un presupuesto puesto "a ojo" que nunca se cumple.
+    const sugerencia = computed(() => {
+      if (p.moneda !== 'L' || p.tipo !== 'gasto') return null;
+      const propia = original.id ? sugerirMonto(indice(), { partidaId: original.id }) : null;
+      const s = propia && propia.mesesConGasto >= 2 ? propia : (p.categoriaId ? sugerirMonto(indice(), { categoriaId: p.categoriaId }) : null);
+      if (!s || !s.mesesConGasto) return null;
+      const de = s === propia ? 'en esta partida' : `en ${nombreCategoria(p.categoriaId)}`;
+      return { ...s, texto: `En los últimos ${s.meses} meses se gastó ${fmt(s.promedio)} al mes ${de} (mediana ${fmt(s.mediana)}, máximo ${fmt(s.maximo)}).` };
+    });
     const textoCiclo = computed(() => {
       const meses = mesesDeCiclo(p.ciclo, p.mesCobro);
       const monto = Number(p.monto) || 0;
@@ -237,7 +252,7 @@ export const PartidaForm = {
     });
     return {
       p, clase, todos, alternarMes, cambiarClase, formas, enviar, fmt, fmtMoneda, simboloDe, nombreMes, nombreCuenta,
-      clases: CLASES_PARTIDA, ciclos: CICLOS, monedas: MONEDAS, etiquetaMonto, textoTasa, textoCiclo,
+      clases: CLASES_PARTIDA, ciclos: CICLOS, monedas: MONEDAS, etiquetaMonto, textoTasa, textoCiclo, sugerencia,
       ayudaForma: AYUDA_FORMA, hayQuincenas, conTarjeta, listaMetas,
       lista: computed(() => categoriasPorGrupo('gasto')), listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaDestinos: computed(cuentasDinero), ...f,
     };

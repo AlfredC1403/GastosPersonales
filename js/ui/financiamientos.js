@@ -3,7 +3,7 @@
 // y cuánto falta. Un financiamiento no aparece en el mes en que se registra —su primera cuota cae
 // cuando la tarjeta hace corte—, así que esta es la pantalla donde se encuentra siempre.
 import { store, fmt, fmtEntero, indice, tarjetas, nombrePersona, filtro, personaFiltro } from '../store.js';
-import { financiamientos, comprometidoEnCuotas, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
+import { financiamientos, TIPOS_FINANCIAMIENTO } from '../core/tarjetas.js';
 import { coincidePersona } from '../core/filtro.js';
 import { nombrePeriodo, fechaCorta, cuandoVence } from '../core/util.js';
 import { Icono, FranjaPersona } from './componentes.js';

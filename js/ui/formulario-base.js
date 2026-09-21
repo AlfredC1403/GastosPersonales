@@ -1,9 +1,8 @@
 // Piezas comunes de los formularios de edición: pie con Guardar y Eliminar, texto de quién
 // registró, opciones de categoría y el guardado con Deshacer.
-import { guardar, borrar, aviso, confirmar, buscar, indice, fmt, fmtMoneda } from '../store.js';
-import { nombrePeriodo } from '../core/util.js';
+import { guardar, borrar, aviso, confirmar, buscar, indice, fmt, fmtMoneda, nombrePersona } from '../store.js';
+import { nombrePeriodo, redondear } from '../core/util.js';
 import { estadoPartidas } from '../core/presupuesto.js';
-import { redondear } from '../core/util.js';
 
 const { ref } = Vue;
 
@@ -43,6 +42,22 @@ export const opcionesCategoria = (lista) => `
     <option v-for="c in g.categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option>
   </optgroup>`;
 
+// ¿Cambió este registro en otro dispositivo desde que se abrió el formulario? La fusión se queda
+// con la edición más reciente, así que guardar encima borraría en silencio lo que hizo la otra
+// persona. Aquí se pregunta antes, que es lo único que hace falta para no perderlo.
+export function cambioDeOtro(coleccion, original) {
+  if (!original?.id || !original.actualizado) return null;
+  const actual = buscar(coleccion, original.id);
+  if (!actual || actual.actualizado === original.actualizado) return null;
+  if (actual.actualizado < original.actualizado) return null;
+  return {
+    registro: actual,
+    quien: actual.actualizadoPor ? nombrePersona(actual.actualizadoPor) : 'otra persona',
+    cuando: fechaHora.format(new Date(actual.actualizado)),
+    borrado: !!actual.borrado,
+  };
+}
+
 // Helpers comunes a todos los formularios de edición. `que`: "este movimiento", "esta cuenta"…
 export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}) {
   const error = ref('');
@@ -50,6 +65,22 @@ export function usarFormulario(coleccion, original, emit, { que, alBorrar } = {}
   const auditoria = textoAuditoria(original);
   // `mensaje` puede ser un texto o una función que recibe el registro guardado.
   function terminar(r, { mensaje, deshacer = false, cerrar = true } = {}) {
+    const otro = cambioDeOtro(coleccion, original);
+    if (otro) {
+      // Se pregunta y se sale: la respuesta llega después, y entonces se vuelve a intentar.
+      confirmar(
+        otro.borrado
+          ? `${otro.quien} eliminó esto el ${otro.cuando}. Si guardas, vuelve a aparecer con tus cambios.`
+          : `${otro.quien} cambió esto el ${otro.cuando}, después de que abriste el formulario. Si guardas, se pierde ese cambio.`,
+        { titulo: '¿Guardar encima?', aceptar: 'Guardar encima', peligro: true },
+      ).then((si) => {
+        if (!si) return emit('listo');
+        // Ya se avisó: desde aquí se guarda contra la versión que hay ahora.
+        original.actualizado = buscar(coleccion, original.id)?.actualizado || original.actualizado;
+        terminar(r, { mensaje, deshacer, cerrar });
+      });
+      return null;
+    }
     let guardado;
     try {
       guardado = guardar(coleccion, r);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   separarPorAnio, unirAnios, contenidoArchivo, archivoDe, claveDeNombre, nombreArchivo, tieneCopiasViejas, aniosDelDoc, normalizarAnio, PRINCIPAL,
 } from '../js/core/anios.js';
-import { docVacio, COLECCIONES, fusionarEn, COLECCIONES_ANIO } from '../js/core/modelo.js';
+import { docVacio, COLECCIONES, fusionarEn, COLECCIONES_ANIO, ESQUEMA } from '../js/core/modelo.js';
 
 const mov = (id, fecha, actualizado = '2026-09-20T00:00:00Z', extra = {}) => ({ id, tipo: 'gasto', fecha, periodo: fecha.slice(0, 7), monto: 100, cuentaId: 'gastos', actualizado, ...extra });
 
@@ -79,6 +79,6 @@ test('un movimiento que pasa de diciembre a enero queda vivo en un solo archivo'
 
 test('un archivo de año se valida y se completa', () => {
   assert.deepEqual(normalizarAnio({ esquema: 2, movimientos: [mov('a', '2026-01-01')] }, '2026').recibos, []);
-  assert.throws(() => normalizarAnio({ esquema: 4 }, '2026'), (e) => e.codigo === 'esquema_nuevo');
+  assert.throws(() => normalizarAnio({ esquema: ESQUEMA + 1 }, '2026'), (e) => e.codigo === 'esquema_nuevo');
   assert.throws(() => normalizarAnio(null, '2026'));
 });

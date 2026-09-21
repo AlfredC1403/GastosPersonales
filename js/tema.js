@@ -6,7 +6,8 @@ const { reactive } = Vue;
 const CLAVES = {
   tema: 'gastos.tema', pendientes: 'gastos.pendientes', persona: 'gastos.persona', menu: 'gastos.menuContraido',
   ordenMes: 'gastos.ordenMes', repartoInicio: 'gastos.repartoInicio', vistaPresupuesto: 'gastos.vistaPresupuesto', agruparMovimientos: 'gastos.agruparMovimientos',
-  corteAnual: 'gastos.corteAnual', gastoAnual: 'gastos.gastoAnual',
+  corteAnual: 'gastos.corteAnual', gastoAnual: 'gastos.gastoAnual', mesesProyeccion: 'gastos.mesesProyeccion',
+  etiquetasUsadas: 'gastos.etiquetasUsadas',
   avisos: 'gastos.avisos',
   notificaciones: 'gastos.notificaciones', ultimoAvisoTelefono: 'gastos.ultimoAvisoTelefono',
 };
@@ -16,9 +17,10 @@ const VISTAS = {
   ordenMes: ['grupo', 'fecha', 'medio'],
   repartoInicio: ['grupo', 'medio'],
   vistaPresupuesto: ['grupo', 'persona', 'medio'],
-  agruparMovimientos: ['dia', 'grupo', 'medio'],
+  agruparMovimientos: ['dia', 'grupo', 'medio', 'etiqueta'],
   corteAnual: ['va', 'completo'], // resumen anual y comparar años: en lo que va del año o el año completo
   gastoAnual: ['compra', 'salida'], // gasto del resumen anual: por fecha de compra o por salida de dinero
+  mesesProyeccion: ['12', '6', '24'], // cuántos meses proyecta el flujo de caja
 };
 const consulta = matchMedia('(prefers-color-scheme: dark)');
 

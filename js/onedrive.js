@@ -333,7 +333,14 @@ export async function descargarArchivo(ub, archivo) {
   let url = archivo.url;
   if (!url) url = (await graphJSON(`/drives/${ub.driveId}/items/${archivo.itemId}`))['@microsoft.graph.downloadUrl'];
   if (!url) throw errorCon('OneDrive no dio el enlace de descarga. Intenta sincronizar de nuevo.');
-  const res = await fetch(url, { cache: 'no-store' });
+  // El enlace de descarga vive en otro host de Microsoft, que la política de seguridad de
+  // index.html tiene que permitir. Si un día cambia de host, el fetch ni siquiera sale.
+  let res;
+  try {
+    res = await fetch(url, { cache: 'no-store' });
+  } catch {
+    throw errorCon(`No pude descargar ${archivo.nombre}: el navegador bloqueó la conexión con ${new URL(url).hostname}. Hay que agregar ese sitio a connect-src en index.html.`);
+  }
   if (!res.ok) throw errorCon(`No pude descargar ${archivo.nombre} de OneDrive (${res.status}).`);
   return res.json();
 }

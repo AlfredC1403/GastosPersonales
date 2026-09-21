@@ -13,7 +13,7 @@ export const VistaCuentas = {
   <section class="pila">
     <div>
       <p class="etiqueta">Total en cuentas</p>
-      <p class="hero-num" :class="{ negativo: total < 0 }">{{ fmt(total) }}</p>
+      <p class="hero-num" role="status" aria-live="polite" :class="{ negativo: total < 0 }">{{ fmt(total) }}</p>
       <p class="hero-texto">{{ lista.length }} {{ lista.length === 1 ? 'cuenta' : 'cuentas' }}. Los aportes a Ahorro y Emergencias son transferencias: el dinero sale de Gastos pero no se pierde, se mueve.</p>
       <p v-if="hayDolares" class="nota chica" style="margin-top: 6px">{{ notaDolares }}</p>
     </div>
@@ -65,10 +65,10 @@ export const VistaCuentas = {
       return { c, moneda, saldo, nota, pct };
     }));
     const hayDolares = computed(() => lista.value.some((x) => x.moneda === 'USD'));
-    const tasa = computed(() => Number(store.doc.config.tasaReferencia) || 0);
+    const tasa = computed(() => ix.value.tasaEn(store.periodo));
     const notaDolares = computed(() => (tasa.value
-      ? `El total convierte los dólares con la tasa de referencia (${tasa.value}).`
-      : 'El total no incluye las cuentas en dólares: define la tasa de referencia en Datos y OneDrive.'));
+      ? `El total convierte los dólares con la tasa de este mes (${tasa.value}).`
+      : 'El total no incluye las cuentas en dólares: anota la tasa del dólar en Datos y OneDrive.'));
     const total = computed(() => redondear(lista.value.reduce((a, x) => a + enLempirasAprox(ix.value, x.c.id, x.saldo), 0)));
     return {
       lista, total, hayDolares, notaDolares, fmt, fmtMoneda, editarCuenta, tipos: TIPOS_CUENTA, personaFiltro, nombrePersona, hayTarjetas: computed(() => tarjetas().length > 0),

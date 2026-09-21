@@ -4,7 +4,7 @@ import {
 import { resumenTarjeta } from '../core/tarjetas.js';
 import { estadoMetas, SITUACIONES_META } from '../core/metas.js';
 import { tramoDeFecha } from '../core/quincena.js';
-import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox, ritmoDelMes } from '../core/reportes.js';
+import { resumenMes, historial, seriesDeGrupos, colorGrupo, saldosCuentas, enLempirasAprox, ritmoDelMes, cierreProyectado } from '../core/reportes.js';
 import { presupuestoMensual } from '../core/presupuesto.js';
 import { deudaAl, estadoDe } from '../core/prestamos.js';
 import { SIN_RESPONSABLE, coincidePersona } from '../core/filtro.js';
@@ -54,7 +54,7 @@ export const VistaInicio = {
       </ul>
     </article>
 
-    <div>
+    <div role="status" aria-live="polite">
       <p class="etiqueta">{{ r.libre < 0 ? 'Faltan este mes' : 'Libre este mes' }}</p>
       <p class="hero-num xl" :class="{ negativo: r.libre < 0 }">{{ fmt(Math.abs(r.libre)) }}</p>
       <p v-if="!r.ingresoEsperado && !r.ingresoDelMes" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>
@@ -86,6 +86,22 @@ export const VistaInicio = {
       </div>
       <div class="progreso" role="img" :aria-label="'Pagado ' + Math.round(pct) + '%'"><div :style="{ width: pct + '%' }"></div></div>
       <p class="nota" style="margin-top: 10px">{{ avanceTexto }}</p>
+    </article>
+
+    <article v-if="cierre" class="tarjeta">
+      <div class="tarjeta-cab centro pegada">
+        <h2>Cómo va a cerrar el mes</h2>
+        <a class="btn-link" href="#/proyeccion">Ver adelante</a>
+      </div>
+      <p class="hero-num" style="font-size: 1.7rem; margin-top: 8px" :class="{ negativo: !cierre.arriba }">{{ fmt(Math.abs(cierre.cierre)) }}</p>
+      <p class="hero-texto">{{ textoCierre }}</p>
+      <p v-if="textoContraPlan" class="nota chica" style="margin-top: 6px">{{ textoContraPlan }}</p>
+      <ul v-if="cierre.excesos.length" class="lista" style="margin-top: 10px">
+        <li v-for="e in cierre.excesos.slice(0, 3)" :key="e.clave" class="fila">
+          <div class="fila-info"><span class="fila-titulo">{{ e.nombre }}</span><span class="fila-sub">planeado {{ fmt(e.esperado) }}</span></div>
+          <span class="monto negativo">{{ fmt(e.proyectado) }}</span>
+        </li>
+      </ul>
     </article>
 
     <article class="tarjeta">
@@ -298,6 +314,25 @@ export const VistaInicio = {
       const dias = `${ritmo.restantes} ${ritmo.restantes === 1 ? 'día' : 'días'}`;
       return `${fmt(ritmo.librePorDia)} por día en los ${dias} que quedan.`;
     });
+    // Cómo cierra el mes si se sigue al mismo ritmo. Es la otra mitad de "libre este mes": ese
+    // número dice lo que queda hoy, y este lo que va a quedar el último día.
+    const cierre = computed(() => {
+      const c = cierreProyectado(indice(), store.periodo, filtro());
+      return c && (r.value.ingresoEsperado || r.value.ingresoDelMes) ? c : null;
+    });
+    const textoCierre = computed(() => {
+      const c = cierre.value;
+      if (!c) return '';
+      const gasto = `Al ritmo de estos ${c.ritmo.dia} ${c.ritmo.dia === 1 ? 'día' : 'días'} se van a gastar ${fmt(c.proyectado)} de ${fmt(c.ingreso)}`;
+      return c.arriba ? `${gasto}, así que el mes cierra con ${fmt(c.cierre)} de sobra.` : `${gasto}, así que al mes le van a faltar ${fmt(-c.cierre)}.`;
+    });
+    const textoContraPlan = computed(() => {
+      const c = cierre.value;
+      if (!c || Math.abs(c.contraPlan) < 1) return '';
+      return c.contraPlan > 0
+        ? `Son ${fmt(c.contraPlan)} mejor de lo que decía el plan.`
+        : `Son ${fmt(-c.contraPlan)} menos de lo que decía el plan${c.fueraDelPlan ? `, con ${fmt(c.fueraDelPlan)} proyectados fuera del plan` : ''}.`;
+    });
     const plan = computed(() => r.value.plan.filter((it) => it.esperado > 0 || it.real > 0));
     const pct = computed(() => (r.value.comprometido ? Math.min(100, (r.value.pagado / r.value.comprometido) * 100) : 0));
     const avanceTexto = computed(() => {
@@ -478,7 +513,7 @@ export const VistaInicio = {
 
     return {
       store, prefs, ix, r, sinResponsable, pct, avanceTexto, flujo, pendientes, pctItem, montoItem, subPendiente, agenda, reparto, series, meses, hayHistorial,
-      textoRitmo, variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
+      textoRitmo, cierre, textoCierre, textoContraPlan, variables, resumenVariables, deuda, listaCuentas, totalCuentas, listaTarjetas, pagarTarjeta, metas, subMeta, categoriasMes, faltan, sinPersonas, asistentePendiente, pasosAsistente: pasosPendientes,
       avisosHoy, totalAvisos, tramo, descontado, textoIngresos, ejecutarAccionAviso, completarDeducciones, fechaCorta,
       fmt, fmtEntero, fmtCorto, fmtMoneda, simbolo, nombrePeriodo, colorGrupo, definirVista,
       marcar: (it) => marcarItem(it, store.periodo),

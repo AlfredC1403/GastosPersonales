@@ -1,15 +1,18 @@
 import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
-  respaldarAhora, listarRespaldos, anioCargado, confirmar,
+  respaldarAhora, listarRespaldos, leerRespaldo, anioCargado, confirmar, guardar, borrar, vivos,
+  buscar, nombreCuenta, nombreCategoria, fmtMoneda, fmt,
 } from '../store.js';
-import { hoy, fechaCorta, diasDesde } from '../core/util.js';
+import { hoy, nombrePeriodo, periodoDe } from '../core/util.js';
+import { idTasa, ultimaTasaAnotada, mesesSinAnotar } from '../core/tasas.js';
+import { diferencias, paraGuardar } from '../core/restaurar.js';
 import { esPristino } from '../core/modelo.js';
 import { claveDeNombre, PRINCIPAL } from '../core/anios.js';
 import * as od from '../onedrive.js';
 import { CONFIG } from '../config.js';
-import { descargar } from './componentes.js';
+import { descargar, Icono } from './componentes.js';
 
-const { ref, computed, onMounted } = Vue;
+const { ref, reactive, computed, onMounted } = Vue;
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' });
 
 function tamano(bytes) {
@@ -20,6 +23,7 @@ function tamano(bytes) {
 }
 
 export const VistaDatos = {
+  components: { Icono },
   template: `
   <section class="pila">
     <article class="tarjeta">
@@ -89,8 +93,34 @@ export const VistaDatos = {
           <li v-for="r in respaldos" :key="r.itemId" class="fila compacta">
             <div class="fila-info"><span style="font-size: 0.88rem">{{ r.nombre }}</span><span class="fila-sub">{{ r.modificado ? fechaHora.format(new Date(r.modificado)) : '' }}</span></div>
             <span class="tenue" style="font-size: 0.82rem">{{ tamano(r.tamano) }}</span>
+            <button type="button" class="btn" :disabled="ocupado" @click="abrirRespaldo(r)">Comparar</button>
           </li>
         </ul>
+        <template v-if="abierto">
+          <h3 style="margin-top: 18px">{{ abierto.nombre }}</h3>
+          <p v-if="!faltan.length && !cambios.length" class="nota" style="margin-top: 4px">Este respaldo no tiene nada que no esté ya en los datos de hoy.</p>
+          <template v-else>
+            <p class="nota" style="margin-top: 4px">Se trae solo lo que elijas: lo demás queda como está.</p>
+            <div class="chips-filtro" style="margin-top: 10px" role="group" aria-label="Qué mostrar del respaldo">
+              <button type="button" class="chip-filtro" :class="{ activo: verCambios === false }" :aria-pressed="verCambios === false" @click="verCambios = false">Falta aquí ({{ faltan.length }})</button>
+              <button type="button" class="chip-filtro" :class="{ activo: verCambios === true }" :aria-pressed="verCambios === true" @click="verCambios = true">Cambió después ({{ cambios.length }})</button>
+            </div>
+            <ul class="lista" style="margin-top: 8px">
+              <li v-for="d in visibles" :key="d.coleccion + d.id" class="fila compacta">
+                <div class="fila-info">
+                  <span style="font-size: 0.88rem">{{ describir(d) }}</span>
+                  <span class="fila-sub">{{ d.tipo }}{{ d.actual && d.actual.borrado ? ' · borrado aquí' : '' }}</span>
+                </div>
+                <button type="button" class="btn" @click="traer(d)">Traer</button>
+              </li>
+            </ul>
+            <p v-if="restantes" class="nota chica" style="margin-top: 8px">Y {{ restantes }} más. Tráelos por grupo si son muchos.</p>
+            <div class="botones" style="margin-top: 10px">
+              <button type="button" class="btn" :disabled="!visibles.length" @click="traerTodo">Traer {{ verCambios ? 'todos los cambios' : 'todo lo que falta' }} ({{ (verCambios ? cambios : faltan).length }})</button>
+              <button type="button" class="btn" @click="abierto = null">Cerrar</button>
+            </div>
+          </template>
+        </template>
         <p v-else-if="respaldos" class="nota chica" style="margin-top: 8px">Todavía no hay respaldos.</p>
         <p v-if="store.sync.ubicacion.propio" class="nota" style="margin-top: 12px">Para que otra persona lo use: comparte la carpeta {{ carpeta }} (la carpeta,
           no el archivo) con su correo y permiso para editar, y mándale el enlace. Esa persona abre esta app, conecta su cuenta y pega el enlace.</p>
@@ -109,9 +139,43 @@ export const VistaDatos = {
         <label class="campo"><span>Símbolo de moneda</span><input :value="store.doc.config.moneda" maxlength="4" @change="guardarConfig({ moneda: $event.target.value.trim() || 'L' })"></label>
         <label class="campo"><span>Mes de inicio del registro</span><input :value="store.doc.config.inicio" type="month" @change="$event.target.value && guardarConfig({ inicio: $event.target.value })"></label>
       </div>
-      <label class="campo" style="margin-top: 10px"><span>Tasa de referencia del dólar (lempiras por US$)</span>
-        <input :value="store.doc.config.tasaReferencia" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65" @change="guardarTasa($event.target.value)"></label>
-      <p class="nota chica" style="margin-top: 4px">Se usa para estimar en lempiras las cuentas y los gastos en dólares que no tienen su propia tasa. {{ textoTasa }}</p>
+    </article>
+
+    <article class="tarjeta">
+      <div class="tarjeta-cab centro">
+        <h2>Tasa del dólar</h2>
+        <span v-if="estadoTasa" class="chip" :class="estadoTasa.clase">{{ estadoTasa.texto }}</span>
+      </div>
+      <p class="nota" style="margin-top: 8px">Cada mes tiene su tasa (lempiras por US$). Así un reporte de hace dos años no se valora con la tasa de hoy.
+        Un mes sin tasa propia usa la última anterior.</p>
+
+      <div class="fila-campos" style="margin-top: 14px">
+        <label class="campo"><span>Mes</span><input v-model="nueva.periodo" type="month"></label>
+        <label class="campo"><span>Lempiras por US$</span>
+          <input v-model.number="nueva.valor" type="number" inputmode="decimal" step="0.0001" min="0" :placeholder="ultima ? String(ultima.valor) : 'Por ejemplo 24.65'"></label>
+      </div>
+      <p v-if="errorTasa" class="error" role="alert">{{ errorTasa }}</p>
+      <div class="botones" style="margin-top: 10px">
+        <button type="button" class="btn primario" :disabled="!nueva.valor" @click="anotarTasa">{{ yaAnotada ? 'Cambiar la tasa del mes' : 'Anotar la tasa' }}</button>
+      </div>
+
+      <table v-if="lista.length" class="tabla" style="margin-top: 16px">
+        <caption class="oculto-visual">Tasa anotada de cada mes</caption>
+        <thead><tr><th scope="col">Mes</th><th scope="col" class="num">Lempiras por US$</th><th scope="col"><span class="oculto-visual">Quitar</span></th></tr></thead>
+        <tbody>
+          <tr v-for="t in lista" :key="t.id">
+            <td>{{ nombrePeriodo(t.periodo) }}</td>
+            <td class="num cifra">{{ t.valor }}</td>
+            <td class="num">
+              <button type="button" class="btn-icono" :aria-label="'Quitar la tasa de ' + nombrePeriodo(t.periodo)" @click="quitarTasa(t)"><icono n="x" :t="16"/></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="nota chica" style="margin-top: 12px">Todavía no hay ninguna tasa anotada.</p>
+      <p v-if="masViejas" class="nota chica" style="margin-top: 8px">
+        <button type="button" class="btn-enlace" @click="todas = !todas">{{ todas ? 'Ver solo los últimos 12 meses' : 'Ver las ' + total + ' tasas' }}</button>
+      </p>
     </article>
 
     <article class="tarjeta">
@@ -127,6 +191,11 @@ export const VistaDatos = {
   setup() {
     const ocupado = ref(false);
     const enlace = ref('');
+    const nueva = reactive({ periodo: periodoDe(store.hoy), valor: null });
+    const abierto = ref(null); // { nombre, doc } del respaldo que se está comparando
+    const verCambios = ref(false);
+    const errorTasa = ref('');
+    const todas = ref(false);
     const respaldos = ref(null);
     const archivos = computed(() => [...store.carpeta]
       .filter((a) => claveDeNombre(a.nombre))
@@ -181,21 +250,76 @@ export const VistaDatos = {
       lector.readAsText(archivo);
     }
 
-    // Desde cuándo es la tasa anotada: una de hace meses ya no sirve para estimar.
-    const textoTasa = computed(() => {
-      const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = store.doc.config;
-      if (!tasa) return '';
-      if (!desde) return 'No se sabe de cuándo es: vuelve a anotarla.';
-      const dias = diasDesde(desde, store.hoy);
-      if (dias <= 0) return 'Anotada hoy.';
-      return `Anotada el ${fechaCorta(desde)}${dias > 35 ? ` (hace ${dias} días: conviene revisarla)` : ''}.`;
+    // Las tasas anotadas, de la más nueva a la más vieja. Por defecto solo el último año:
+    // un hogar con varios años de registro tendría una tabla que no se acaba.
+    const anotadas = computed(() => vivos('tasas')
+      .filter((t) => Number(t.valor) > 0 && /^\d{4}-\d{2}$/.test(t.periodo || ''))
+      .sort((a, b) => (a.periodo < b.periodo ? 1 : a.periodo > b.periodo ? -1 : 0)));
+    const lista = computed(() => (todas.value ? anotadas.value : anotadas.value.slice(0, 12)));
+    const ultima = computed(() => ultimaTasaAnotada(store.doc));
+    const yaAnotada = computed(() => anotadas.value.some((t) => t.periodo === nueva.periodo));
+
+    // Una tasa vieja distorsiona en silencio todo lo que está en dólares y no se ha pagado.
+    const estadoTasa = computed(() => {
+      const meses = mesesSinAnotar(store.doc, store.hoy);
+      if (meses == null) return { texto: 'Sin anotar', clase: 'aviso' };
+      if (meses <= 0) return { texto: 'Al día', clase: 'ok' };
+      return { texto: meses === 1 ? 'Falta la de este mes' : `Faltan ${meses} meses`, clase: 'aviso' };
     });
 
+    function anotarTasa() {
+      errorTasa.value = '';
+      if (!/^\d{4}-\d{2}$/.test(nueva.periodo || '')) return (errorTasa.value = 'Elige el mes de la tasa.');
+      const valor = Number(nueva.valor);
+      if (!(valor > 0)) return (errorTasa.value = 'Escribe cuántos lempiras vale un dólar.');
+      const anterior = anotadas.value.find((t) => t.periodo === nueva.periodo);
+      guardar('tasas', { ...(anterior || {}), id: anterior?.id || idTasa(nueva.periodo), periodo: nueva.periodo, valor, nota: anterior?.nota || '' });
+      // La configuración sigue guardando la última tasa: es el respaldo de lo que todavía no
+      // mira la lista (la estimación de una tarjeta, por ejemplo) y de un archivo sin tasas.
+      if (!ultima.value || nueva.periodo >= ultima.value.periodo) guardarConfig({ tasaReferencia: valor, tasaReferenciaDesde: store.hoy });
+      aviso(`Tasa de ${nombrePeriodo(nueva.periodo)}: ${valor}`, 'ok');
+      nueva.valor = null;
+    }
+
+    // ------------------------------------------------ Restaurar parte de un respaldo
+    const MAXIMO = 40; // más que eso no se revisa a mano: para eso está "traer todo"
+    const todo = computed(() => (abierto.value ? diferencias(store.doc, abierto.value.doc) : []));
+    const faltan = computed(() => todo.value.filter((d) => d.estado === 'falta'));
+    const cambios = computed(() => todo.value.filter((d) => d.estado === 'cambio'));
+    const visibles = computed(() => (verCambios.value ? cambios.value : faltan.value).slice(0, MAXIMO));
+    const restantes = computed(() => Math.max(0, (verCambios.value ? cambios.value : faltan.value).length - MAXIMO));
+
+    // Cómo se reconoce un registro en la lista: sin esto serían identificadores.
+    function describir(d) {
+      const r = d.registro;
+      if (d.coleccion === 'movimientos') return `${fmtMoneda(r.monto, r.moneda)} · ${r.fecha} · ${r.nota || nombreCategoria(r.categoriaId) || nombreCuenta(r.cuentaId)}`;
+      if (d.coleccion === 'recibos') return `${fmt(r.neto)} · ${r.fecha || r.ocurrencia} · ${buscar('ingresos', r.ingresoId)?.nombre || 'Pago'}`;
+      if (d.coleccion === 'ajustesPartida') return `${r.periodo} · ${buscar('partidas', r.partidaId)?.nombre || 'Partida'}`;
+      if (d.coleccion === 'tasas') return `${nombrePeriodo(r.periodo)} · ${r.valor}`;
+      return r.nombre || r.id;
+    }
+
+    function traer(d) {
+      guardar(d.coleccion, paraGuardar(d));
+      aviso(`Recuperado: ${describir(d)}`, 'ok', 5000);
+    }
+    async function traerTodo() {
+      const lote = verCambios.value ? cambios.value : faltan.value;
+      if (!await confirmar(`¿Traer ${lote.length} ${lote.length === 1 ? 'registro' : 'registros'} de este respaldo? Lo demás queda como está.`, { titulo: 'Traer del respaldo' })) return;
+      for (const d of lote) guardar(d.coleccion, paraGuardar(d));
+      aviso(`Se trajeron ${lote.length} ${lote.length === 1 ? 'registro' : 'registros'}.`, 'ok', 6000);
+    }
+
+    async function quitarTasa(t) {
+      if (!await confirmar(`¿Quitar la tasa de ${nombrePeriodo(t.periodo)}? Ese mes pasará a usar la del mes anterior.`, { titulo: 'Quitar la tasa', peligro: true })) return;
+      borrar('tasas', t.id);
+    }
+
     return {
-      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos, textoTasa,
-      guardarTasa: (v) => guardarConfig(Number(v) > 0
-        ? { tasaReferencia: Number(v), tasaReferenciaDesde: store.hoy }
-        : { tasaReferencia: null, tasaReferenciaDesde: '' }),
+      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos,
+      nueva, errorTasa, todas, lista, ultima, yaAnotada, estadoTasa, anotarTasa, quitarTasa, nombrePeriodo,
+      abierto, verCambios, faltan, cambios, visibles, restantes, describir, traer, traerTodo,
+      masViejas: computed(() => anotadas.value.length > 12), total: computed(() => anotadas.value.length),
       respaldar: () => ejecutar(async () => {
         const nombre = await respaldarAhora();
         aviso('Respaldo guardado: respaldos/' + nombre, 'ok', 6000);
@@ -203,6 +327,10 @@ export const VistaDatos = {
       }),
       verRespaldos: () => ejecutar(async () => {
         respaldos.value = await listarRespaldos();
+      }),
+      abrirRespaldo: (r) => ejecutar(async () => {
+        abierto.value = { nombre: r.nombre, doc: await leerRespaldo(r) };
+        verCambios.value = false;
       }),
       carpeta: CONFIG.carpeta, retorno: od.direccionRetorno(),
       guardarId: () => {

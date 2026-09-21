@@ -7,13 +7,13 @@
 //   formularios-catalogos.js   préstamos, cuentas, personas, grupos y categorías
 //   formularios-tarjetas.js    la tarjeta de crédito y el pago de la tarjeta
 import {
-  store, guardar, borrar, aviso, abrirModal, cerrarModal, indice, vivos, buscar, nombreCuenta, nombrePersona, fmt, fmtMoneda,
+  store, guardar, borrar, aviso, abrirModal, indice, buscar, nombreCuenta, nombrePersona, fmt, fmtMoneda,
 } from '../store.js';
 import { partesDelMes, movimientoParaItem, quedaParaPagar } from '../core/presupuesto.js';
-import { reciboSugerido, pagosParaRegistrar, estadoRecibo } from '../core/nomina.js';
+import { reciboSugerido, estadoRecibo } from '../core/nomina.js';
 import { itemDeRecordatorio } from '../core/recordatorios.js';
 import { resumenMes } from '../core/reportes.js';
-import { hoy, nombrePeriodo, fechaCorta, sumarMeses, redondear } from '../core/util.js';
+import { nombrePeriodo, fechaCorta, sumarMeses, redondear } from '../core/util.js';
 import { hayValor, textoDePartida } from './formulario-base.js';
 import { MovimientoForm } from './formularios-movimiento.js';
 import { PartidaForm, AjusteMesForm } from './formularios-partidas.js';

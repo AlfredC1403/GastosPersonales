@@ -1,6 +1,6 @@
 // Formularios de lo que se crea una vez y se usa muchas: préstamos, cuentas, personas, grupos y
 // categorías. Las tarjetas de crédito, aunque son cuentas, van en formularios-tarjetas.js.
-import { store, guardar, aviso, confirmar, personas, cuentas, cuentasDinero, tarjetas, grupos, vivos, fmt, simboloDe } from '../store.js';
+import { store, guardar, aviso, confirmar, personas, cuentasDinero, grupos, vivos, fmt, simboloDe } from '../store.js';
 import { TIPOS_CUENTA, MONEDAS } from '../core/modelo.js';
 import { seguroEstimado, cuotasRestantes } from '../core/prestamos.js';
 import { hoy, periodoActual, redondear } from '../core/util.js';

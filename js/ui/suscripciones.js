@@ -79,11 +79,11 @@ export const VistaSuscripciones = {
     </article>
 
     <button type="button" class="btn-punteado" @click="nueva">+ Nueva suscripción</button>
-    <p class="nota chica">Las que se cobran en dólares cuentan en lempiras con la tasa de referencia, y cada pago registrado queda con la tasa real de ese día.</p>
+    <p class="nota chica">Las que se cobran en dólares cuentan en lempiras con la tasa del mes, y cada pago registrado queda con la tasa real de ese día.</p>
   </section>`,
   setup() {
     const ix = computed(indice);
-    const tasa = computed(() => Number(store.doc.config.tasaReferencia) || 0);
+    const tasa = computed(() => ix.value.tasaEn(store.periodo));
     const lista = computed(() => estadoSuscripciones(ix.value, { hoy: store.hoy, filtro: filtro(), periodo: store.periodo }));
     const r = computed(() => resumenSuscripciones(lista.value));
     const faltaTasa = computed(() => !tasa.value && lista.value.some((s) => s.activa && s.moneda === 'USD'));

@@ -13,8 +13,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # la revisión de la versión compara contra la rama base
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No hay dependencias que instalar: las pruebas usan solo `node --test`.
-      - run: npm test
+          cache: npm
+      # La app publicada no tiene dependencias: ESLint, Playwright y la copia de Vue que usan
+      # las pruebas son solo de desarrollo.
+      - run: npm ci
+      - name: Estilo
+        run: npm run lint
+      - name: Pruebas
+        run: npm test
+      - name: Tamaño de la carga inicial
+        run: npm run tamano
+      - name: Navegador para las pruebas de extremo a extremo
+        run: npx playwright install --with-deps chromium
+      - name: Pruebas en un celular
+        run: npm run e2e
+      - name: Guardar el rastro de lo que falló
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright
+          path: test-results/
+          retention-days: 7
+      - name: La versión subió
+        if: github.event_name == 'pull_request'
+        run: node herramientas/verificar-version.js origin/${{ github.base_ref }}
