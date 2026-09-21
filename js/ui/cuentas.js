@@ -13,7 +13,7 @@ export const VistaCuentas = {
   <section class="pila">
     <div>
       <p class="etiqueta">Total en cuentas</p>
-      <p class="hero-num" :class="{ negativo: total < 0 }">{{ fmt(total) }}</p>
+      <p class="hero-num" role="status" aria-live="polite" :class="{ negativo: total < 0 }">{{ fmt(total) }}</p>
       <p class="hero-texto">{{ lista.length }} {{ lista.length === 1 ? 'cuenta' : 'cuentas' }}. Los aportes a Ahorro y Emergencias son transferencias: el dinero sale de Gastos pero no se pierde, se mueve.</p>
       <p v-if="hayDolares" class="nota chica" style="margin-top: 6px">{{ notaDolares }}</p>
     </div>

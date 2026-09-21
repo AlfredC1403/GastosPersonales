@@ -60,7 +60,7 @@ export const VistaMovimientos = {
     </div>
     <p v-if="f.todo && aniosFuera.length" class="nota chica">Sin {{ aniosFuera.join(', ') }}: {{ aniosFuera.length === 1 ? 'está' : 'están' }} en OneDrive. Se abren en <a href="#/anios">Años anteriores</a>.</p>
 
-    <div class="kpis dos">
+    <div class="kpis dos" role="status" aria-live="polite">
       <div class="kpi"><div class="kpi-et">Gastos</div><div class="kpi-val">{{ fmtEntero(totales.gastos) }}</div><div class="kpi-nota">{{ totales.nGastos }} {{ totales.nGastos === 1 ? 'movimiento' : 'movimientos' }}</div></div>
       <div class="kpi"><div class="kpi-et">Ingresos</div><div class="kpi-val positivo">{{ fmtEntero(totales.ingresos) }}</div><div class="kpi-nota">{{ totales.nIngresos }} {{ totales.nIngresos === 1 ? 'movimiento' : 'movimientos' }}</div></div>
     </div>

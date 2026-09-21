@@ -126,7 +126,7 @@ export const VistaMes = {
           <h2>{{ tramo.sinPago ? 'Antes del primer pago' : 'Este pago' }}</h2>
           <span class="tenue" style="font-size: 0.85rem">del {{ fechaCorta(tramo.inicio) }} al {{ fechaCorta(tramo.fin) }}</span>
         </div>
-        <p class="hero-num md" style="margin-top: 10px" :class="{ negativo: tramo.disponible < 0 }">{{ fmt(tramo.disponible) }}</p>
+        <p class="hero-num md" style="margin-top: 10px" role="status" aria-live="polite" :class="{ negativo: tramo.disponible < 0 }">{{ fmt(tramo.disponible) }}</p>
         <p class="nota">{{ tramo.disponible < 0 ? 'Faltan para cubrir lo que toca pagar con este pago.' : 'Disponible después de lo que toca pagar con este pago.' }}</p>
         <dl class="datos sin-linea" style="margin-top: 10px">
           <dt>Entra</dt><dd>{{ fmt(tramo.entra) }}<span v-if="tramo.recibido < tramo.entra" class="tenue"> · recibido {{ fmt(tramo.recibido) }}</span></dd>

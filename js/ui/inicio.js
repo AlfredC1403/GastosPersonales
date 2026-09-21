@@ -54,7 +54,7 @@ export const VistaInicio = {
       </ul>
     </article>
 
-    <div>
+    <div role="status" aria-live="polite">
       <p class="etiqueta">{{ r.libre < 0 ? 'Faltan este mes' : 'Libre este mes' }}</p>
       <p class="hero-num xl" :class="{ negativo: r.libre < 0 }">{{ fmt(Math.abs(r.libre)) }}</p>
       <p v-if="!r.ingresoEsperado && !r.ingresoDelMes" class="hero-texto">Todavía no hay ingresos definidos. <a href="#/presupuesto">Agrégalos</a> para ver cuánto queda libre.</p>

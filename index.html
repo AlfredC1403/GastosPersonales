@@ -3,7 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'sha256-jAzopqXweGi8yvjsMsPZB8rMpGhZhQEP0mael07NBuY='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https:; base-uri 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'sha256-jAzopqXweGi8yvjsMsPZB8rMpGhZhQEP0mael07NBuY='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://login.microsoftonline.com https://graph.microsoft.com https://*.files.1drv.com https://*.sharepoint.com https://*.svc.ms https://*.microsoftpersonalcontent.com; base-uri 'self'; object-src 'none'">
+  <!-- connect-src: solo a donde la app habla de verdad. Microsoft sirve el contenido de un
+       archivo desde un enlace de descarga firmado, en otro host (files.1drv.com para una cuenta
+       personal, sharepoint.com para una de trabajo), así que esos también van en la lista. Si
+       algún día OneDrive cambia de host, la descarga falla con un mensaje que lo dice. -->
   <!-- Aplica el tema elegido antes de pintar. Si se cambia este script, hay que actualizar su hash en la política de arriba. -->
   <script>try{var t=localStorage.getItem('gastos.tema');if(t==='claro'||t==='oscuro')document.documentElement.dataset.tema=t}catch(e){}</script>
   <title>Gastos del hogar</title>

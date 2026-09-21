@@ -72,9 +72,44 @@ export const Icono = {
   },
 };
 
+// El foco de un diálogo. `showModal()` ya lo atrapa en los navegadores actuales, pero no todos
+// lo devuelven a donde estaba al cerrarse, y quien abre un formulario desde una fila de una lista
+// se queda sin saber dónde iba. Además, si el diálogo queda vacío un instante (Vue lo vuelve a
+// dibujar), el Tab se escapa al fondo, así que la vuelta se hace a mano.
+export function usarFoco() {
+  let previo = null;
+  const enfocables = (d) => [...d.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.offsetParent !== null || el === document.activeElement);
+  return {
+    recordar() {
+      previo = document.activeElement;
+    },
+    devolver() {
+      // Solo si el elemento sigue en la página: puede haberse borrado con lo que se guardó.
+      if (previo?.isConnected) previo.focus?.();
+      previo = null;
+    },
+    // Tab en el último lleva al primero, y Shift+Tab en el primero al último.
+    atrapar(e, d) {
+      if (e.key !== 'Tab' || !d) return;
+      const lista = enfocables(d);
+      if (!lista.length) return;
+      const primero = lista[0];
+      const ultimo = lista[lista.length - 1];
+      if (!e.shiftKey && document.activeElement === ultimo) {
+        e.preventDefault();
+        primero.focus();
+      } else if (e.shiftKey && document.activeElement === primero) {
+        e.preventDefault();
+        ultimo.focus();
+      }
+    },
+  };
+}
+
 export const ModalHost = {
   components: { Icono },
-  template: `<dialog ref="dlg" class="modal" aria-labelledby="titulo-modal" @cancel.prevent="cerrarModal" @close="alCerrar" @click="fuera">
+  template: `<dialog ref="dlg" class="modal" aria-labelledby="titulo-modal" @cancel.prevent="cerrarModal" @close="alCerrar" @click="fuera" @keydown="foco.atrapar($event, dlg)">
     <div v-if="store.modal" class="modal-caja">
       <header class="modal-cab">
         <h2 id="titulo-modal">{{ store.modal.titulo }}</h2>
@@ -85,7 +120,10 @@ export const ModalHost = {
   </dialog>`,
   setup() {
     const dlg = ref(null);
-    watch(() => store.modal, async (m) => {
+    const foco = usarFoco();
+    watch(() => store.modal, async (m, antes) => {
+      // Se recuerda antes del nextTick: después, el foco ya se movió.
+      if (m && !antes) foco.recordar();
       await nextTick();
       const d = dlg.value;
       if (!d) return;
@@ -96,7 +134,10 @@ export const ModalHost = {
         campo?.focus();
         campo?.select?.();
       }
-      if (!m && d.open) d.close();
+      if (!m && d.open) {
+        d.close();
+        foco.devolver();
+      }
     });
     const fuera = (e) => {
       if (e.target === dlg.value) cerrarModal();
@@ -104,8 +145,9 @@ export const ModalHost = {
     // Algunos navegadores cierran el diálogo con Escape sin avisar con "cancel".
     const alCerrar = () => {
       if (store.modal) cerrarModal();
+      foco.devolver();
     };
-    return { store, dlg, cerrarModal, fuera, alCerrar };
+    return { store, dlg, foco, cerrarModal, fuera, alCerrar };
   },
 };
 
@@ -113,7 +155,7 @@ export const ModalHost = {
 // poder abrirse encima de un formulario, y fuera del marco para servir también en la pantalla del PIN.
 export const ConfirmHost = {
   template: `<dialog ref="dlg" class="modal confirmar" aria-labelledby="titulo-confirmar"
-                     @cancel.prevent="responder(false)" @close="alCerrar" @click="fuera">
+                     @cancel.prevent="responder(false)" @close="alCerrar" @click="fuera" @keydown="foco.atrapar($event, dlg)">
     <div v-if="c" class="modal-caja">
       <header class="modal-cab"><h2 id="titulo-confirmar">{{ c.titulo }}</h2></header>
       <p style="margin-bottom: 16px">{{ c.texto }}</p>
@@ -129,7 +171,9 @@ export const ConfirmHost = {
     const btnSi = ref(null);
     const btnNo = ref(null);
     const c = computed(() => store.confirmacion);
-    watch(c, async (actual) => {
+    const foco = usarFoco();
+    watch(c, async (actual, antes) => {
+      if (actual && !antes) foco.recordar();
       await nextTick();
       const d = dlg.value;
       if (!d) return;
@@ -138,15 +182,21 @@ export const ConfirmHost = {
         // En lo que se puede deshacer, el botón de seguir; en lo que no, Cancelar.
         (actual.peligro ? btnNo : btnSi).value?.focus();
       }
-      if (!actual && d.open) d.close();
+      if (!actual && d.open) {
+        d.close();
+        foco.devolver();
+      }
     });
     const responder = (valor) => responderConfirmacion(valor);
     const fuera = (e) => {
       if (e.target === dlg.value) responder(false);
     };
     // Escape en algunos navegadores cierra el diálogo sin pasar por "cancel".
-    const alCerrar = () => responder(false);
-    return { c, dlg, btnSi, btnNo, responder, fuera, alCerrar };
+    const alCerrar = () => {
+      responder(false);
+      foco.devolver();
+    };
+    return { c, dlg, btnSi, btnNo, foco, responder, fuera, alCerrar };
   },
 };
 
