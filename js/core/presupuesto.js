@@ -103,7 +103,7 @@ function calcular(ix, p, periodo, parte, base, arrastre) {
 // Lo que sobró de meses anteriores en una partida que acumula. Cada mes que ya pasó cuenta
 // como cerrado: lo no gastado pasa al siguiente; lo gastado de más no se arrastra.
 export function arrastreDe(ix, p, periodo) {
-  if (!p.acumula || p.tipo !== 'gasto') return 0;
+  if (!p.acumula || p.tipo !== 'gasto' || esSuscripcion(p)) return 0;
   ix.arrastres ??= new Map();
   const clave = `${p.id}|${periodo}`;
   if (!ix.arrastres.has(clave)) ix.arrastres.set(clave, calcularArrastre(ix, p, periodo));
@@ -155,7 +155,9 @@ export function estadoPartidas(ix, periodo, filtro) {
         tipo: p.tipo,
         suscripcion: esSuscripcion(p),
         enPrueba: enPruebaGratis(p, periodo),
-        forma: p.tipo === 'anual' || p.tipo === 'aporte' ? (p.forma === 'abonos' ? 'abonos' : 'fijo') : p.forma || 'fijo',
+        // Una suscripción cobra siempre lo mismo: es de monto fijo y no acumula, aunque una
+        // pantalla anterior la haya dejado guardada de otra forma.
+        forma: esSuscripcion(p) ? 'fijo' : p.tipo === 'anual' || p.tipo === 'aporte' ? (p.forma === 'abonos' ? 'abonos' : 'fijo') : p.forma || 'fijo',
         responsableId: p.responsableId || null,
         categoriaId: p.categoriaId || null,
         grupoId: ix.grupoDe(p.categoriaId),
@@ -166,7 +168,7 @@ export function estadoPartidas(ix, periodo, filtro) {
         monedaPago: moneda === 'USD' && (ix.esTarjeta(medioId) || ix.monedaDe(medioId) === 'USD') ? 'USD' : 'L',
         estimado: moneda === 'USD',
         dia: p.dia || null,
-        acumula: !!p.acumula && p.tipo === 'gasto',
+        acumula: !!p.acumula && p.tipo === 'gasto' && !esSuscripcion(p),
         estado: r.estado,
         hecho: r.estado === 'completo' || r.estado === 'excedido' || r.estado === 'omitida',
         omitida: r.omitida,
