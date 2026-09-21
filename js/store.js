@@ -15,7 +15,7 @@ import { calcularAvisos, avisosVisibles } from './core/avisos.js';
 import { coincidePersona } from './core/filtro.js';
 import * as od from './onedrive.js';
 import * as almacen from './almacen.js';
-import { pinActivo, quitarPin } from './bloqueo.js';
+import { pinActivo, quitarPin, cifradoActivo, claveDeCifrado, definirCifrado } from './bloqueo.js';
 import { prefs } from './tema.js';
 
 const { reactive, markRaw, computed, toRaw } = Vue;
@@ -43,6 +43,7 @@ export const store = reactive({
   listo: false, // true cuando ya se cargaron los datos guardados en el navegador
   conPin: pinActivo(),
   bloqueada: pinActivo(),
+  cifrado: cifradoActivo(),
   actualizacion: null, // 'app' | 'esquema': hay una versión nueva de la app
   // El documento guardado es de una versión más nueva de la app: no se puede escribir nada (ni en
   // este navegador ni en OneDrive) hasta actualizar, porque se pisarían datos que no sabemos leer.
@@ -331,6 +332,7 @@ export function importar(texto) {
 export const exportar = () => JSON.stringify(docCrudo(), null, 2);
 
 export async function borrarDatosLocales() {
+  almacen.definirClave(null);
   await almacen.borrarTodo();
   try {
     localStorage.removeItem(CLAVES.yo);
@@ -383,6 +385,35 @@ export const bloquear = () => {
 export const actualizarEstadoPin = () => {
   store.conPin = pinActivo();
 };
+
+// La pantalla de bloqueo, al acertar el PIN, entrega la clave con la que se abre lo guardado
+// aquí. Sin cifrado no hay nada que hacer: el documento ya se cargó al iniciar.
+export async function abrirConPin(pin) {
+  if (!cifradoActivo()) return;
+  almacen.definirClave(await claveDeCifrado(pin));
+  if (store.listo) return;
+  await cargarLocal();
+  // La sincronización no pudo arrancar al iniciar porque no había documento con qué comparar.
+  if (store.sync.ubicacion) sincronizar();
+}
+
+// Activa el cifrado del documento local y lo vuelve a guardar cifrado. `pin` es el que ya se
+// verificó. Al desactivarlo, se guarda en claro otra vez.
+export async function cambiarCifrado(activar, pin) {
+  await definirCifrado(activar);
+  almacen.definirClave(activar ? await claveDeCifrado(pin) : null);
+  await almacen.guardarDoc(docCrudo());
+  persistirSync();
+  // La agenda de avisos no se puede cifrar (ver almacen.js): al activar el cifrado se borra.
+  if (activar) await almacen.borrarAgenda();
+  store.cifrado = cifradoActivo();
+}
+
+// Después de cambiar el PIN con el cifrado puesto, la clave es otra y hay que volver a guardar.
+export async function reCifrarCon(clave) {
+  almacen.definirClave(clave);
+  await almacen.guardarDoc(docCrudo());
+}
 
 // "Olvidé mi PIN": con OneDrive, se vuelve a iniciar sesión con Microsoft (pidiendo la
 // contraseña). Sin OneDrive, la única salida es borrar los datos de este navegador.
@@ -650,7 +681,9 @@ function marcarActualizacion() {
 }
 
 export async function iniciar() {
-  await cargarLocal();
+  // Con el cifrado activado, lo guardado aquí no se puede leer hasta que se escriba el PIN:
+  // la pantalla de bloqueo llama a `abrirConPin` y ahí se carga (ver js/ui/bloqueo.js).
+  if (!cifradoActivo()) await cargarLocal();
   almacen.pedirPersistencia();
 
   if (window.__gastosActualizacion) marcarActualizacion();
@@ -677,8 +710,12 @@ export async function iniciar() {
 
   if (pinOlvidado && volvio && store.usuario) {
     if (cuentaDelHogar(store.usuario.email)) {
+      // Con el cifrado puesto, lo guardado aquí ya no se puede abrir: se borra y OneDrive lo
+      // vuelve a bajar. El estado de sincronización se guarda en claro justamente para esto.
+      if (cifradoActivo()) await almacen.borrarCifrado();
       quitarPin();
       actualizarEstadoPin();
+      store.cifrado = false;
       store.bloqueada = false;
       location.hash = '#/seguridad';
       aviso('Iniciaste sesión con Microsoft y se quitó el PIN. Puedes crear uno nuevo.', 'ok', 9000);

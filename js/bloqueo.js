@@ -46,6 +46,29 @@ export async function derivar(pin, sal, ciclos) {
 
 const config = () => entorno.almacen.leer(CLAVES.pin);
 export const pinActivo = () => !!config()?.hash;
+// ¿Lo guardado en este dispositivo está cifrado con el PIN? (ver js/cifrado.js)
+export const cifradoActivo = () => !!config()?.salCifrado;
+// La clave con la que se abre lo guardado aquí. Solo sirve si el PIN es el correcto: si no,
+// descifrar falla. Se deriva aparte del hash, con su propia sal.
+export async function claveDeCifrado(pin) {
+  const c = config();
+  if (!c?.salCifrado) return null;
+  const { claveDesde } = await import('./cifrado.js');
+  return claveDesde(pin, c.salCifrado, c.ciclos);
+}
+
+// Activa o quita el cifrado del documento local. Quien llama se encarga de volver a guardar el
+// documento con la clave nueva (o sin ella): aquí solo se apunta la sal.
+export async function definirCifrado(activar) {
+  const c = config();
+  if (!c?.hash) return null;
+  const salCifrado = activar ? (await import('./cifrado.js')).salNueva() : null;
+  const nuevo = { ...c };
+  if (salCifrado) nuevo.salCifrado = salCifrado;
+  else delete nuevo.salCifrado;
+  entorno.almacen.escribir(CLAVES.pin, nuevo);
+  return salCifrado;
+}
 export const largoPin = () => config()?.largo ?? null;
 export const minutosBloqueo = () => config()?.minutos ?? 1;
 
@@ -95,9 +118,15 @@ async function exigirActual(actual) {
   }
 }
 
+// Cambiar el PIN con el cifrado activo cambia también la clave, así que el documento hay que
+// volver a guardarlo con la clave nueva: `claveNueva` es la que sirve para eso.
 export async function cambiarPin(actual, nuevo) {
   await exigirActual(actual);
+  const cifraba = cifradoActivo();
   await activarPin(nuevo, minutosBloqueo());
+  if (!cifraba) return null;
+  await definirCifrado(true);
+  return claveDeCifrado(nuevo);
 }
 
 export async function desactivarPin(actual) {

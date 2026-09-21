@@ -1,4 +1,4 @@
-import { store, recuperarPin, confirmar } from '../store.js';
+import { store, recuperarPin, confirmar, abrirConPin } from '../store.js';
 import { verificarPin, largoPin, estadoIntentos, MAX_FALLOS } from '../bloqueo.js';
 import { Icono } from './componentes.js';
 
@@ -53,11 +53,21 @@ export const PantallaBloqueo = {
     async function comprobar() {
       comprobando.value = true;
       const r = await verificarPin(pin.value);
-      comprobando.value = false;
       if (r.ok) {
+        // Con el cifrado activado, el PIN también abre lo guardado en este dispositivo.
+        try {
+          await abrirConPin(pin.value);
+        } catch (e) {
+          comprobando.value = false;
+          error.value = e.message;
+          pin.value = '';
+          return;
+        }
+        comprobando.value = false;
         emit('desbloqueado');
         return;
       }
+      comprobando.value = false;
       pin.value = '';
       sacudir.value = true;
       setTimeout(() => { sacudir.value = false; }, 400);
