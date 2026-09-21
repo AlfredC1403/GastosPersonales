@@ -220,5 +220,5 @@ test('normalizar valida el formato, completa lo que falte y rechaza versiones mÃ
   assert.equal(d.cuentas.length, 4);
   assert.equal(d.movimientos.length, 1);
   assert.equal(d.config.simboloExt, 'US$');
-  assert.throws(() => normalizar({ esquema: 4 }), (e) => e.codigo === 'esquema_nuevo');
+  assert.throws(() => normalizar({ esquema: ESQUEMA + 1 }), (e) => e.codigo === 'esquema_nuevo');
 });

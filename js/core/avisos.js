@@ -7,6 +7,9 @@ import { pagosSinRegistrar, estadoRecibo, netoEsperadoDe } from './nomina.js';
 import { resumenTarjeta, proximoCobro, fechaSaldoDe } from './tarjetas.js';
 import { estadoMetas } from './metas.js';
 import { estadoSuscripciones, pruebasPorTerminar } from './suscripciones.js';
+import { estadoTopes } from './topes.js';
+import { renovacionesPendientes } from './renovaciones.js';
+import { mesesSinAnotar, ultimaTasaAnotada } from './tasas.js';
 
 export const CUANDO = { hoy: 'Hoy', semana: 'Esta semana', revisar: 'Para revisar' };
 
@@ -232,30 +235,57 @@ export function calcularAvisos(ix, { hoy, sync = null, recordatorios = null } = 
     }
   }
 
-  // La tasa de referencia, cuando el hogar tiene algo en dólares: mientras un cargo no se paga,
-  // su estimado en lempiras cuelga de esta tasa, y una vieja distorsiona en silencio la deuda de
-  // la tarjeta y el patrimonio. Solo se avisa si hay dólares de por medio.
+  // Topes pasados o a punto de pasarse. A diferencia del ritmo, aquí el techo lo puso el hogar,
+  // así que el aviso dice cuánto queda y no cuánto va.
+  for (const t of estadoTopes(ix, actual, null)) {
+    if (t.estado === 'bien') continue;
+    agregar({
+      id: `tope:${t.id}:${actual}`, cuando: 'revisar', tipo: 'tope',
+      titulo: t.estado === 'pasado' ? `${t.nombre} se pasó del tope` : `${t.nombre} va por el ${t.pct} % de su tope`,
+      texto: t.estado === 'pasado'
+        ? `Lleva ${L(t.gastado)} contra un tope de ${L(t.monto)}: ${L(-t.queda)} de más.`
+        : `Lleva ${L(t.gastado)} de ${L(t.monto)}. Quedan ${L(t.queda)} para el resto del mes.`,
+      acciones: [{ tipo: 'ruta', ruta: '#/topes', texto: 'Ver topes' }],
+    });
+  }
+
+  // Renovaciones: lo que vence y hay que renovar. Una vencida es de hoy; las demás caen en la
+  // semana o en "para revisar" según lo cerca que estén.
+  for (const r of renovacionesPendientes(ix, { hoy })) {
+    const cuando = r.estado === 'vencida' ? 'hoy' : r.dias <= 7 ? 'semana' : 'revisar';
+    const cuanto = r.monto ? ` Cuesta ${r.moneda === 'USD' ? dinero(r.monto, { simbolo: ix.config.simboloExt || 'US$' }) : L(r.monto)}.` : '';
+    agregar({
+      id: `renovacion:${r.id}:${r.vence}`, cuando, tipo: 'renovacion', personaId: r.responsableId,
+      titulo: r.estado === 'vencida' ? `${r.nombre} venció el ${fechaCorta(r.vence)}` : `${r.nombre} vence el ${fechaCorta(r.vence)}`,
+      texto: r.estado === 'vencida'
+        ? `Hace ${plural(-r.dias, 'día', 'días')}.${cuanto}`
+        : `Faltan ${plural(r.dias, 'día', 'días')}.${cuanto}`,
+      acciones: [{ tipo: 'renovar', renovacionId: r.id, texto: 'Ya la renové' }, { tipo: 'ruta', ruta: '#/renovaciones', texto: 'Ver' }],
+    });
+  }
+
+  // La tasa del dólar, cuando el hogar tiene algo en dólares: mientras un cargo no se paga, su
+  // estimado en lempiras cuelga de la tasa de hoy, y una vieja distorsiona en silencio la deuda
+  // de la tarjeta y el patrimonio. Solo se avisa si hay dólares de por medio.
   const hayDolares = (ix.doc.cuentas || []).some((c) => vivo(c) && c.moneda === 'USD')
     || (ix.doc.partidas || []).some((p) => vivo(p) && p.moneda === 'USD' && p.activo !== false)
     || [...ix.tarjetas.values()].some((t) => t.dolares?.cargos?.length > 0);
   if (hayDolares) {
-    const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = ix.config;
-    const dias = desde ? diasDesde(desde, hoy) : null;
-    if (!tasa) {
+    const ultima = ultimaTasaAnotada(ix.doc);
+    const meses = mesesSinAnotar(ix.doc, hoy);
+    if (!ultima) {
       agregar({
         id: `tasa-falta:${actual}`, cuando: 'revisar', tipo: 'configuracion',
-        titulo: 'Falta la tasa de referencia del dólar',
+        titulo: 'Falta la tasa del dólar',
         texto: 'Sin ella, lo que está en dólares (cargos sin pagar, partidas y suscripciones) no se puede estimar en lempiras.',
         acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Anotarla' }],
       });
-    } else if (dias === null || dias > 35) {
+    } else if (meses >= 1) {
       agregar({
         id: `tasa-vieja:${actual}`, cuando: 'revisar', tipo: 'configuracion',
-        titulo: 'La tasa de referencia del dólar está vieja',
-        texto: dias === null
-          ? `La anotada es ${tasa} y no se sabe de cuándo es.`
-          : `La anotada es ${tasa}, de hace ${dias} días. Con ella se estiman los cargos en dólares sin pagar.`,
-        acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Actualizar' }],
+        titulo: `Falta la tasa del dólar de ${nombrePeriodo(actual)}`,
+        texto: `La última anotada es ${ultima.valor}, de ${nombrePeriodo(ultima.periodo)}. Con ella se estiman los cargos en dólares sin pagar.`,
+        acciones: [{ tipo: 'ruta', ruta: '#/datos', texto: 'Anotar la de este mes' }],
       });
     }
   }

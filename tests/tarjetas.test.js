@@ -225,36 +225,44 @@ test('avisos de la tarjeta: vence pronto, vencida y cargo anual del mes siguient
   assert.ok(avisos.some((a) => a.id === 'cargo:visa:membresia:2026-10-20'));
 });
 
-// ---------------------------------------------------------------- Tasa de referencia
+// ---------------------------------------------------------------- Tasa del dólar
 
-test('avisa de la tasa vieja solo cuando el hogar tiene algo en dólares', () => {
+test('avisa de la tasa del mes solo cuando el hogar tiene algo en dólares', () => {
   const hoy = '2026-09-13';
-  const base = (config) => {
+  const base = (config, tasas = []) => {
     const doc = docVacio();
-    doc.config = { ...doc.config, ...config };
+    doc.config = { ...doc.config, inicio: '2026-01', ...config };
+    doc.tasas = tasas;
     return doc;
   };
   const avisosDe = (doc) => calcularAvisos(crearIndice(doc, { hoy }), { hoy }).filter((a) => a.id.startsWith('tasa-'));
+  const tasa = (periodo, valor) => ({ id: `tasa-${periodo}`, periodo, valor, actualizado: 't' });
 
   // Sin nada en dólares no se dice nada, por vieja que esté la tasa.
-  assert.deepEqual(avisosDe(base({ tasaReferencia: 24, tasaReferenciaDesde: '2020-01-01' })), []);
+  assert.deepEqual(avisosDe(base({}, [tasa('2020-01', 24)])), []);
 
   // Con una cuenta en dólares sí.
-  const conUSD = (config) => {
-    const doc = base(config);
+  const conUSD = (config, tasas) => {
+    const doc = base(config, tasas);
     doc.cuentas.push({ id: 'ahorroUSD', nombre: 'Ahorro US$', tipo: 'ahorro', moneda: 'USD', saldoInicial: 100, actualizado: 't' });
     return doc;
   };
-  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2020-01-01' })).map((a) => a.id), [`tasa-vieja:2026-09`]);
-  // Una tasa sin fecha (la que venía de una versión anterior) también se pide revisar.
-  assert.match(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '' }))[0].texto, /no se sabe de cuándo es/);
-  // Y si no hay tasa, el aviso es otro.
-  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: null })).map((a) => a.id), [`tasa-falta:2026-09`]);
-  // Recién anotada: nada que avisar.
+  assert.deepEqual(avisosDe(conUSD({}, [tasa('2020-01', 24)])).map((a) => a.id), ['tasa-vieja:2026-09']);
+  // Si no hay ninguna tasa, el aviso es otro.
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: null })).map((a) => a.id), ['tasa-falta:2026-09']);
+  // La de este mes: nada que avisar.
+  assert.deepEqual(avisosDe(conUSD({}, [tasa('2026-08', 24), tasa('2026-09', 25)])), []);
+  // La del mes pasado ya pide la de este.
+  const delMesPasado = avisosDe(conUSD({}, [tasa('2026-08', 24)]));
+  assert.deepEqual(delMesPasado.map((a) => a.id), ['tasa-vieja:2026-09']);
+  assert.match(delMesPasado[0].texto, /La última anotada es 24, de agosto 2026/);
+
+  // Un archivo que todavía trae la tasa suelta de la versión anterior se lee igual: cuenta como
+  // la tasa del mes en que se anotó.
   assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-09-01' })), []);
-  // En el límite: 35 días pasa, 36 avisa.
-  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-09' })), []);
-  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-08-08' })).map((a) => a.id), [`tasa-vieja:2026-09`]);
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '2026-07-01' })).map((a) => a.id), ['tasa-vieja:2026-09']);
+  // Sin fecha, la tasa suelta se ancla al mes de inicio del hogar.
+  assert.deepEqual(avisosDe(conUSD({ tasaReferencia: 24, tasaReferenciaDesde: '' })).map((a) => a.id), ['tasa-vieja:2026-09']);
 });
 
 // ---------------------------------------------------------------- Financiamientos

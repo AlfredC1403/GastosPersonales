@@ -6,6 +6,7 @@ import { anioDeRegistro, anioPorDefectoDe } from './anios.js';
 import { periodoDe, aCentavos, deCentavos } from './util.js';
 import { personaDeMovimiento } from './filtro.js';
 import { prepararTarjetas, posteriorAlSaldo, comisionInmediata } from './tarjetas.js';
+import { prepararTasas } from './tasas.js';
 
 export const SIN_GRUPO = 'sin-grupo';
 
@@ -26,7 +27,6 @@ export const claveRecibo = (r) => `${r.ingresoId}|${r.tipo || 'ordinario'}|${r.o
 
 export function expandir(doc, ix) {
   const out = [];
-  const tasaReferencia = Number(doc.config?.tasaReferencia) || 0;
   // Un registro de un año anterior que trae la apertura ya está contado en ella hasta el cierre:
   // de él solo cuenta lo que es de un mes posterior (y las cuotas que se cobran después).
   const ap = ix.apertura;
@@ -105,7 +105,7 @@ export function expandir(doc, ix) {
       let llega = monto;
       if (tieneValor(m.montoDestino)) llega = Number(m.montoDestino) || 0;
       else if (moneda !== monedaDestino) {
-        const tasa = Number(m.tasa) || tasaReferencia;
+        const tasa = Number(m.tasa) || ix.tasaEn(periodo);
         llega = !tasa ? 0 : moneda === 'USD' ? monto * tasa : monto / tasa;
       }
       if (destino) deuda(destino, -aCentavos(llega), 'L', 'pago');
@@ -241,7 +241,11 @@ export function crearIndice(docCargado, { hoy = '', apertura = null } = {}) {
     comercios: mapa(doc.comercios),
     movimientos: mapa(doc.movimientos),
   };
-  const tasaReferencia = Number(ix.config.tasaReferencia) || 0;
+  // Tasa de cambio por mes (ver tasas.js). `ix.tasaEn()` sin mes da la de hoy, que es la que
+  // corresponde a lo que todavía no se paga.
+  ix.tasaEn = prepararTasas(doc, hoy);
+  ix.topes = mapa(doc.topes);
+  ix.renovaciones = mapa(doc.renovaciones);
 
   ix.ordenGrupos = (doc.grupos || []).filter(vivo)
     .sort((a, b) => (Number(a.orden) || 99) - (Number(b.orden) || 99) || (a.nombre || '').localeCompare(b.nombre || ''))
@@ -252,21 +256,23 @@ export function crearIndice(docCargado, { hoy = '', apertura = null } = {}) {
   };
   ix.monedaDe = (cuentaId) => ix.cuentas.get(cuentaId)?.moneda || 'L';
   // Monto en lempiras (centavos). Lo que está en dólares usa la tasa del registro o, si no
-  // tiene, la tasa de referencia, y queda marcado como estimado.
-  ix.enLempiras = (monto, moneda, tasa) => {
+  // tiene, la tasa de su mes, y queda marcado como estimado.
+  ix.enLempiras = (monto, moneda, tasa, periodo = '') => {
     if (moneda !== 'USD') return { c: aCentavos(monto), estimado: false };
-    const t = Number(tasa) || tasaReferencia;
+    const t = Number(tasa) || ix.tasaEn(periodo);
     return { c: aCentavos((Number(monto) || 0) * t), estimado: !Number(tasa) };
   };
 
-  ix.tarjetas = prepararTarjetas(doc, { hoy, tasaReferencia, apertura: ap, previos });
+  // Lo que se debe en una tarjeta y todavía no se paga se estima con la tasa de hoy, no con la
+  // del mes de la compra: es lo que va a costar cuando se pague.
+  ix.tarjetas = prepararTarjetas(doc, { hoy, tasaReferencia: ix.tasaEn(), apertura: ap, previos });
   ix.esTarjeta = (cuentaId) => ix.tarjetas.has(cuentaId);
   ix.monedaDeMovimiento = (m) => (ix.tarjetas.has(m.cuentaId) ? (m.moneda === 'USD' ? 'USD' : 'L') : ix.monedaDe(m.cuentaId));
   // Lempiras de un movimiento. Una compra en dólares con tarjeta usa la tasa de los pagos que la
   // cubren (del cargo más antiguo al más nuevo); mientras no se paga, la última tasa usada.
   ix.montoEnLempiras = (m) => {
     const t = ix.tarjetas.get(m.cuentaId);
-    if (!t || m.moneda !== 'USD') return ix.enLempiras(m.monto, ix.monedaDeMovimiento(m), m.tasa);
+    if (!t || m.moneda !== 'USD') return ix.enLempiras(m.monto, ix.monedaDeMovimiento(m), m.tasa, m.periodo || periodoDe(m.fecha));
     const asignada = t.tasas.get(m.id);
     return asignada ? { c: asignada.c, estimado: asignada.estimado } : { c: Math.round(aCentavos(m.monto) * t.ultimaTasa), estimado: true };
   };
@@ -293,7 +299,7 @@ export function crearIndice(docCargado, { hoy = '', apertura = null } = {}) {
   // cada mes en que se cobra una cuota.
   const enDolares = (m, c) => {
     if (ix.monedaDeMovimiento(m) === 'USD') return aCentavos(m.monto);
-    const t = Number(m.tasa) || tasaReferencia;
+    const t = Number(m.tasa) || ix.tasaEn(m.periodo || periodoDe(m.fecha));
     return t ? Math.round(c / t) : 0;
   };
   ix.pagosPartida = new Map();

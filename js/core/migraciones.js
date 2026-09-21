@@ -1,14 +1,22 @@
-// Validación de documentos y migración hasta el esquema 3.
+// Validación de documentos y migración hasta el esquema 4.
 //   1 → 2: las plantillas se reparten en partidas e ingresos, los movimientos de salario pasan a
 //          recibos, las categorías se agrupan y la meta de una cuenta se vuelve una meta aparte.
 //   2 → 3: cada partida dice en qué moneda se lleva y si es una suscripción, en vez de dejarlo
 //          al que la lea. Nada cambia de valor: lo que no decía nada estaba en lempiras.
+//   3 → 4: los movimientos llevan etiquetas, y aparecen tres listas nuevas: topes (el techo de
+//          una categoría o un grupo), renovaciones (lo que vence y hay que renovar) y tasas (la
+//          tasa de cambio de cada mes, para que un reporte viejo no se valore con la de hoy).
+//          Nada cambia de valor: la tasa que había en la configuración se guarda como la primera
+//          de la lista, y las demás listas empiezan vacías.
 // `migrar` es pura y determinista: no cambia "actualizado", no crea ids al azar y no mira
 // la fecha de hoy. Así dos celulares que migran el mismo archivo llegan al mismo resultado,
 // y aplicarla dos veces no cambia nada.
 import { ESQUEMA, COLECCIONES, docVacio, gruposBase, categoriasBase, gana } from './modelo.js';
 import { CATEGORIAS_BASE, GRUPO_POR_DEFECTO } from './catalogos.js';
 import { periodoDe, fechaEnMes } from './util.js';
+// La tasa suelta del esquema 3 pasa a ser la tasa de un mes; el id sale del periodo, así que
+// dos teléfonos migrando el mismo archivo escriben exactamente el mismo registro.
+import { tasasDesdeConfig } from './tasas.js';
 
 const GRUPO_BASE = Object.fromEntries(CATEGORIAS_BASE.map(([id, , grupoId]) => [id, grupoId]));
 const TIPO_BASE = Object.fromEntries(CATEGORIAS_BASE.map(([id, , , tipo = 'gasto']) => [id, tipo]));
@@ -98,6 +106,9 @@ export function partidaDelEsquema3(p) {
   };
 }
 
+// Esquema 4: un movimiento lleva etiquetas. Uno del esquema 3 no tiene ninguna.
+export const movimientoDelEsquema4 = (m) => (Array.isArray(m.etiquetas) ? m : { ...m, etiquetas: [] });
+
 // Un ingreso registrado en el esquema 1 (movimiento de un salario) pasa a ser un recibo.
 function reciboDesdeMovimiento(m, ingreso) {
   const periodo = m.periodo || periodoDe(m.fecha);
@@ -136,7 +147,7 @@ export function migrar(entrada) {
   const recibos = [...(doc.recibos || [])];
   for (const m of doc.movimientos || []) {
     if (!('plantillaId' in m)) {
-      movimientos.push(m.moneda ? m : { ...m, moneda: 'L' });
+      movimientos.push(movimientoDelEsquema4(m.moneda ? m : { ...m, moneda: 'L' }));
       continue;
     }
     const { plantillaId, parte, ...resto } = m;
@@ -145,7 +156,7 @@ export function migrar(entrada) {
     } else {
       // Solo los pagos anuales distinguen partes ('apartar' y 'pagar'); 'principal' ya no se usa.
       const conParte = parte === 'apartar' || parte === 'pagar' ? { parte } : {};
-      movimientos.push({ ...resto, ...conParte, partidaId: plantillaId || null, moneda: m.moneda || 'L' });
+      movimientos.push(movimientoDelEsquema4({ ...resto, ...conParte, partidaId: plantillaId || null, moneda: m.moneda || 'L' }));
     }
   }
 
@@ -171,7 +182,15 @@ export function migrar(entrada) {
     return { ...resto, moneda: c.moneda || 'L', titularId: c.titularId ?? null };
   });
 
-  const out = { ...doc, esquema: Math.max(ESQUEMA, Number(doc.esquema) || 1), grupos, categorias, cuentas, partidas, ingresos, metas, movimientos, recibos };
+  // Las tasas por mes: las que ya estén en el archivo mandan sobre la que venía suelta en la
+  // configuración, porque son de una app que ya sabe llevarlas.
+  const tasas = [...(doc.tasas || [])];
+  for (const t of tasasDesdeConfig(doc.config)) if (!tasas.some((x) => x.id === t.id)) tasas.push(t);
+
+  const out = {
+    ...doc, esquema: Math.max(ESQUEMA, Number(doc.esquema) || 1),
+    grupos, categorias, cuentas, partidas, ingresos, metas, movimientos, recibos, tasas,
+  };
   // Marca que los datos vienen de la versión 1: la app ofrece revisar la configuración, y sus
   // pasos son los de ese cambio. Pasar del 2 al 3 no deja nada que revisar.
   if ((Number(doc.esquema) || 1) < 2 && doc.config) out.config = { ...doc.config, migradoDesde: 1 };
