@@ -8,7 +8,8 @@ import { colorGrupo } from '../core/reportes.js';
 import { TIPOS_MOVIMIENTO, TIPOS_RECIBO, MONEDAS } from '../core/modelo.js';
 import { TIPOS_FINANCIAMIENTO, comisionInmediata } from '../core/tarjetas.js';
 import { estadoRecibo } from '../core/nomina.js';
-import { nombrePeriodo, hoy, periodoDe, fechaCorta, nombreMes, DIAS_CORTOS } from '../core/util.js';
+import { nombrePeriodo, hoy, periodoDe, fechaCorta, nombreMes, DIAS_CORTOS, slug } from '../core/util.js';
+import { etiquetasDelHogar } from '../core/etiquetas.js';
 import { prefs, definirVista } from '../tema.js';
 import { Icono, descargar } from './componentes.js';
 import { editarMovimiento, editarRecibo } from './formularios.js';
@@ -22,7 +23,7 @@ const INICIAL = { gasto: 'G', ingreso: 'I', recibo: 'I', transferencia: 'T', abo
 const ES_GASTO = ['gasto', 'cuota', 'cargo'];
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'short', timeStyle: 'short' });
 const VERBO = { gasto: 'pagó', cuota: 'pagó', abono: 'pagó', pago_tarjeta: 'pagó', ingreso: 'recibió', recibo: 'recibió', transferencia: 'hizo' };
-const AGRUPAR = { dia: 'Por día', grupo: 'Por grupo', medio: 'Por medio' };
+const AGRUPAR = { dia: 'Por día', grupo: 'Por grupo', medio: 'Por medio', etiqueta: 'Por etiqueta' };
 
 function csv(filas) {
   return filas.map((f) => f.map((v) => {
@@ -47,6 +48,7 @@ export const VistaMovimientos = {
       <select v-model="f.partida" aria-label="Partida"><option value="">Cualquier partida</option><option value="__fuera">Fuera del plan</option><option v-for="p in listaPartidas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select>
       <select v-model="f.moneda" aria-label="Moneda"><option value="">Todas las monedas</option><option v-for="(n, k) in monedas" :key="k" :value="k">{{ n }}</option></select>
       <select v-model="f.anoto" aria-label="Anotado por"><option value="">Anotado por cualquiera</option><option v-for="p in listaPersonas" :key="p.id" :value="p.id">Anotado por {{ p.nombre }}</option></select>
+      <select v-if="listaEtiquetas.length" v-model="f.etiqueta" aria-label="Etiqueta"><option value="">Cualquier etiqueta</option><option v-for="e in listaEtiquetas" :key="e.etiqueta" :value="e.etiqueta">{{ e.etiqueta }} ({{ e.veces }})</option></select>
       <button type="button" class="btn" :disabled="!lista.length" @click="exportar"><icono n="descargar" :t="16"/> Exportar CSV</button>
     </div>
     <div class="chips-filtro">
@@ -78,7 +80,7 @@ export const VistaMovimientos = {
       <ul class="lista-mov">
         <li v-for="x in g.filas" :key="x.id" @click="abrir(x)">
           <span class="icono-tipo" :class="x.tipo" :title="tipos[x.tipo]">{{ inicial[x.tipo] }}</span>
-          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub"><span v-if="x.quien" class="chip-quien" :class="{ otro: x.quien.otro }" :title="x.quien.detalle">{{ x.quien.nombre }}</span>{{ x.subtitulo }}</span></div>
+          <div class="fila-info"><span class="fila-titulo" style="font-size: 0.93rem">{{ x.titulo }}</span><span class="fila-sub"><span v-if="x.quien" class="chip-quien" :class="{ otro: x.quien.otro }" :title="x.quien.detalle">{{ x.quien.nombre }}</span>{{ x.subtitulo }}<span v-if="x.etiquetas.length" class="etiquetas-fila">&nbsp;<span v-for="e in x.etiquetas" :key="e" class="etiqueta-chip">{{ e }}</span></span></span></div>
           <div class="derecha">
             <div class="monto" :class="{ positivo: x.signo > 0 }">{{ x.textoMonto }}</div>
             <div v-if="x.textoLempiras" class="dif tenue">{{ x.textoLempiras }}</div>
@@ -88,9 +90,17 @@ export const VistaMovimientos = {
     </div>
   </section>`,
   setup() {
-    const f = reactive({ q: '', tipo: '', anoto: '', cuenta: '', categoria: '', grupo: '', partida: '', moneda: '', todo: false, pendientes: false });
-    const verFiltros = ref(false);
-    const masFiltros = computed(() => [f.cuenta, f.categoria, f.grupo, f.partida, f.moneda, f.anoto, f.tipo && !['gasto', 'ingresos'].includes(f.tipo)].filter(Boolean).length);
+    const f = reactive({ q: '', tipo: '', anoto: '', cuenta: '', categoria: '', grupo: '', partida: '', moneda: '', etiqueta: '', todo: false, pendientes: false });
+    // Se puede llegar con un filtro puesto desde el buscador o desde Topes:
+    // #/movimientos?etiqueta=roatan, ?categoria=…, ?grupo=…, ?mes=2026-09.
+    const consulta = new URLSearchParams(location.hash.split('?')[1] || '');
+    for (const campo of ['etiqueta', 'categoria', 'grupo', 'partida', 'cuenta', 'q']) {
+      const v = consulta.get(campo);
+      if (v) f[campo] = v;
+    }
+    if (/^\d{4}-\d{2}$/.test(consulta.get('mes') || '')) store.periodo = consulta.get('mes');
+    const verFiltros = ref(consulta.size > 0);
+    const masFiltros = computed(() => [f.cuenta, f.categoria, f.grupo, f.partida, f.moneda, f.anoto, f.etiqueta, f.tipo && !['gasto', 'ingresos'].includes(f.tipo)].filter(Boolean).length);
     const alternar = (campo, valor) => { f[campo] = f[campo] === valor ? '' : valor; };
 
     // Movimientos, pagos recibidos, cuotas de las compras a cuotas y cargos de las tarjetas, con lo
@@ -111,6 +121,7 @@ export const VistaMovimientos = {
           moneda: ix.monedaDeMovimiento(m), cuentaId: m.cuentaId, cuentaDestinoId: m.cuentaDestinoId || null, categoriaId,
           grupoId: m.tipo === 'gasto' || m.tipo === 'ingreso' ? ix.grupoDe(categoriaId) : null, partidaId: m.partidaId || null,
           personaId: personaDeMovimiento(m, ix.cuentas), personaAnotada: m.personaId || null, creadoPor: m.creadoPor, nota: m.nota || '', nombreVinculo, comercio,
+          etiquetas: m.etiquetas || [],
           titulo: m.nota || comercio || nombreVinculo || (m.tipo === 'transferencia' ? `A ${nombreCuenta(m.cuentaDestinoId)}` : '')
             || (m.tipo === 'pago_tarjeta' ? `Pago de ${nombreCuenta(m.cuentaDestinoId)}` : '') || (categoriaId ? nombreCategoria(categoriaId) : TIPOS_MOVIMIENTO[m.tipo]),
           abrir: () => editarMovimiento(m),
@@ -214,7 +225,7 @@ export const VistaMovimientos = {
       return partes.join(' · ');
     }
     const signo = (x) => (x.tipo === 'ingreso' || x.tipo === 'recibo' ? 1 : ES_GASTO.includes(x.tipo) || x.tipo === 'abono' ? -1 : x.tipo === 'ajuste' ? Math.sign(x.monto) : 0);
-    const buscable = (x) => [x.titulo, x.nota, x.nombreVinculo, x.comercio, nombreCategoria(x.categoriaId), nombreCuenta(x.cuentaId), String(x.monto)].join(' ').toLowerCase();
+    const buscable = (x) => [x.titulo, x.nota, x.nombreVinculo, x.comercio, ...(x.etiquetas || []), nombreCategoria(x.categoriaId), nombreCuenta(x.cuentaId), String(x.monto)].join(' ').toLowerCase();
 
     const lista = computed(() => {
       const ix = indice();
@@ -231,6 +242,7 @@ export const VistaMovimientos = {
           && (!f.partida || (f.partida === '__fuera' ? x.tipo === 'gasto' && !x.partidaId && !x.registro.prestamoId : x.partidaId === f.partida))
           && (!f.moneda || x.moneda === f.moneda)
           && (!f.pendientes || x.faltan > 0)
+          && (!f.etiqueta || (x.etiquetas || []).some((e) => slug(e) === slug(f.etiqueta)))
           && (!q || buscable(x).includes(q)))
         .sort((a, b) => b.fecha.localeCompare(a.fecha) || (b.registro.creado || '').localeCompare(a.registro.creado || ''))
         .map((x) => {
@@ -248,11 +260,18 @@ export const VistaMovimientos = {
       const ix = indice();
       const out = [];
       const porClave = new Map();
-      for (const x of lista.value) {
+      // Por etiqueta, un movimiento con dos etiquetas sale en las dos: es lo que se espera de
+      // una dimensión transversal, aunque haga que los totales de los bloques no sumen el total.
+      const filas = modo !== 'etiqueta' ? lista.value.map((x) => [x, null]) : lista.value
+        .flatMap((x) => ((x.etiquetas || []).length ? x.etiquetas.map((e) => [x, e]) : [[x, '']]));
+      for (const [x, etiqueta] of filas) {
         let clave;
         let titulo;
         let color = null;
-        if (modo === 'grupo') {
+        if (modo === 'etiqueta') {
+          clave = etiqueta ? slug(etiqueta) : '__sin';
+          titulo = etiqueta || 'Sin etiqueta';
+        } else if (modo === 'grupo') {
           clave = x.grupoId || 'otros';
           titulo = !x.grupoId ? 'Transferencias, pagos, abonos y ajustes' : x.grupoId === SIN_GRUPO ? 'Sin grupo' : nombreGrupo(x.grupoId);
           color = x.grupoId && x.grupoId !== SIN_GRUPO ? colorGrupo(ix, x.grupoId) : 'var(--tinta3)';
@@ -276,7 +295,9 @@ export const VistaMovimientos = {
       if (modo === 'grupo') {
         const orden = [...ix.ordenGrupos, SIN_GRUPO, 'otros'];
         out.sort((a, b) => orden.indexOf(a.clave) - orden.indexOf(b.clave));
-      } else if (modo === 'medio') out.sort((a, b) => b.total - a.total);
+      } else if (modo === 'medio' || modo === 'etiqueta') {
+        out.sort((a, b) => (a.clave === '__sin' ? 1 : b.clave === '__sin' ? -1 : 0) || b.total - a.total);
+      }
       return out;
     });
 
@@ -291,10 +312,10 @@ export const VistaMovimientos = {
       const quien = (id) => (id ? nombrePersona(id) : '');
       const cuando = (iso) => (iso ? fechaHora.format(new Date(iso)) : '');
       const filas = [
-        ['Fecha', 'Mes', 'Tipo', 'Monto', 'Moneda', 'En lempiras', 'Tasa', 'Cuenta', 'Cuenta destino', 'Grupo', 'Categoría', 'Partida o préstamo', 'Comercio', 'Persona', 'Nota', 'Anotó', 'Anotado', 'Editó', 'Editado'],
+        ['Fecha', 'Mes', 'Tipo', 'Monto', 'Moneda', 'En lempiras', 'Tasa', 'Cuenta', 'Cuenta destino', 'Grupo', 'Categoría', 'Partida o préstamo', 'Comercio', 'Etiquetas', 'Persona', 'Nota', 'Anotó', 'Anotado', 'Editó', 'Editado'],
         ...lista.value.map((x) => [
           x.fecha, x.periodo, TIPOS[x.tipo], x.monto, x.moneda, x.tipo === 'pago_tarjeta' ? '' : x.enL, x.registro.tasa || '', nombreCuenta(x.cuentaId), x.cuentaDestinoId ? nombreCuenta(x.cuentaDestinoId) : '',
-          x.grupoId && x.grupoId !== SIN_GRUPO ? nombreGrupo(x.grupoId) : '', x.categoriaId ? nombreCategoria(x.categoriaId) : '', x.nombreVinculo, x.comercio,
+          x.grupoId && x.grupoId !== SIN_GRUPO ? nombreGrupo(x.grupoId) : '', x.categoriaId ? nombreCategoria(x.categoriaId) : '', x.nombreVinculo, x.comercio, (x.etiquetas || []).join(', '),
           quien(x.personaAnotada), x.nota, quien(x.registro.creadoPor), cuando(x.registro.creado), quien(x.registro.actualizadoPor), cuando(x.registro.actualizado),
         ]),
       ];
@@ -313,7 +334,7 @@ export const VistaMovimientos = {
       fmt, fmtEntero, nombrePeriodo, tipos: TIPOS, inicial: INICIAL, agrupar: AGRUPAR, monedas: MONEDAS,
       abrir: (x) => x.abrir(),
       listaPersonas: computed(personas), listaCuentas: computed(cuentas), listaCategorias: computed(categorias),
-      listaGrupos: computed(grupos), listaPartidas: computed(partidas),
+      listaGrupos: computed(grupos), listaPartidas: computed(partidas), listaEtiquetas: computed(() => etiquetasDelHogar(store.doc)),
     };
   },
 };

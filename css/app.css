@@ -475,3 +475,40 @@ dialog.modal.confirmar { max-width: 420px; }
 .detalle-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 64px; gap: 10px; align-items: baseline; }
 .detalle-fila > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detalle-fila > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Etiquetas, topes, renovaciones, proyección y buscador global */
+.fichas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; min-height: 42px; border: 1px solid var(--linea2); border-radius: var(--radio); background: var(--sup); cursor: text; }
+.fichas:focus-within { border-color: var(--acento); }
+.ficha { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px 3px 10px; border-radius: 999px; background: var(--acento-sup); color: var(--acento); font-size: 0.82rem; }
+.ficha-x { display: inline-flex; border: 0; background: transparent; color: inherit; padding: 2px; cursor: pointer; border-radius: 999px; }
+.ficha-x:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
+.ficha-campo { flex: 1; min-width: 90px; border: 0; background: transparent; color: inherit; font: inherit; padding: 2px 0; outline: none; }
+.etiquetas-fila { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.etiqueta-chip { padding: 1px 7px; border-radius: 999px; background: var(--sup2); color: var(--tinta3); font-size: 0.74rem; }
+.btn-enlace { border: 0; background: transparent; color: var(--acento); font: inherit; font-size: 0.85rem; cursor: pointer; padding: 2px 0; }
+.con-sufijo { display: flex; align-items: center; gap: 6px; }
+.con-sufijo input { flex: 1; min-width: 0; }
+.con-sufijo > span { font-size: 0.82rem; color: var(--tinta3); }
+.fila-cambio { padding: 12px 0; border-top: 1px solid var(--linea); display: flex; flex-direction: column; gap: 10px; }
+.progreso.mal > div { background: var(--mal); }
+.progreso.aviso > div { background: var(--ambar); }
+.tarjeta.tenue { opacity: 0.65; }
+.fila.tenue { opacity: 0.6; }
+
+/* Buscador global */
+.busqueda-caja { display: flex; flex-direction: column; gap: 10px; }
+.busqueda-grupo { display: flex; flex-direction: column; gap: 2px; }
+.busqueda-grupo > p { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tinta3); margin: 8px 0 2px; }
+.busqueda-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: var(--radio); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: none; }
+.busqueda-item:hover, .busqueda-item.activo { background: var(--sup2); }
+.busqueda-item .fila-info { flex: 1; min-width: 0; }
+.busqueda-vacio { padding: 18px 4px; color: var(--tinta3); font-size: 0.9rem; }
+
+/* Solo para imprimir: el reporte sale sin menú, sin botones y en una hoja */
+@media print {
+  .cabecera, .menu, .menu-fijo, .barra-abajo, .avisos, .btn, .btn-icono, .btn-punteado, .segmentos, .chips-filtro, .no-imprimir { display: none !important; }
+  .marco, .contenido { display: block; padding: 0; margin: 0; max-width: none; }
+  .tarjeta { break-inside: avoid; border: 1px solid #ddd; box-shadow: none; }
+  a[href]::after { content: ''; }
+  body { background: #fff; color: #000; }
+}

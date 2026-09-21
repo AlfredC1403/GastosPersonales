@@ -238,3 +238,89 @@ export function descargar(nombre, contenido, tipo) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// Campo de etiquetas: se escriben, se confirman con Enter o coma y quedan como fichas que se
+// pueden quitar. Debajo, las que el hogar ya usó, porque escribir "roatán" dos veces distinto
+// parte el total en dos y el campo deja de servir para lo que es.
+export const CampoEtiquetas = {
+  components: { Icono },
+  props: { modelValue: { type: Array, default: () => [] }, sugerencias: { type: Array, default: () => [] } },
+  emits: ['update:modelValue'],
+  template: `
+  <div class="campo">
+    <span :id="idEtiqueta">Etiquetas</span>
+    <div class="fichas" @click="enfocar">
+      <span v-for="e in modelValue" :key="e" class="ficha">
+        {{ e }}
+        <button type="button" class="ficha-x" :aria-label="'Quitar ' + e" @click.stop="quitar(e)"><icono n="x" :t="12" :g="2.4"/></button>
+      </span>
+      <input ref="campo" v-model="texto" type="text" class="ficha-campo" :maxlength="largo" autocomplete="off"
+             :aria-labelledby="idEtiqueta" :placeholder="modelValue.length ? '' : 'viaje a Roatán, remodelación…'"
+             @keydown.enter.prevent="agregar()" @keydown="alTeclear" @blur="agregar()">
+    </div>
+    <div v-if="visibles.length" class="chips-filtro" role="group" aria-label="Etiquetas ya usadas">
+      <button v-for="x in visibles" :key="x.etiqueta" type="button" class="chip-filtro" @click="agregar(x.etiqueta)">{{ x.etiqueta }}</button>
+    </div>
+    <p v-if="lleno" class="nota chica">Ocho etiquetas es el máximo: más que eso deja de clasificar.</p>
+  </div>`,
+  setup(props, { emit }) {
+    const texto = ref('');
+    const campo = ref(null);
+    const idEtiqueta = `etiquetas-${Math.random().toString(36).slice(2, 8)}`;
+    const lleno = computed(() => props.modelValue.length >= 8);
+    const visibles = computed(() => props.sugerencias.slice(0, 8));
+    const enfocar = () => campo.value?.focus();
+    function agregar(valor = texto.value) {
+      const limpio = String(valor ?? '').replace(/^#/, '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
+      texto.value = '';
+      if (!limpio || lleno.value) return;
+      const sinTildes = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+      if (props.modelValue.some((e) => sinTildes(e) === sinTildes(limpio))) return;
+      emit('update:modelValue', [...props.modelValue, limpio]);
+    }
+    const quitar = (e) => emit('update:modelValue', props.modelValue.filter((x) => x !== e));
+    function alTeclear(e) {
+      if (e.key === ',') {
+        e.preventDefault();
+        agregar();
+      } else if (e.key === 'Backspace' && !texto.value && props.modelValue.length) {
+        quitar(props.modelValue[props.modelValue.length - 1]);
+      }
+    }
+    return { texto, campo, idEtiqueta, lleno, visibles, enfocar, agregar, quitar, alTeclear, largo: 30 };
+  },
+};
+
+// Dictado por voz para un campo de texto. El reconocimiento de voz del navegador no está en
+// todos (en iOS solo en Safari), así que `hay` dice si se puede y el botón se esconde si no.
+// El texto llega en trozos: se va pegando al final de lo que ya hubiera escrito.
+export function dictado({ alTexto, alTerminar } = {}) {
+  const Motor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Motor) return { hay: false, empezar: () => {}, parar: () => {} };
+  let motor = null;
+  const parar = () => {
+    motor?.stop();
+    motor = null;
+  };
+  function empezar() {
+    if (motor) return parar();
+    motor = new Motor();
+    motor.lang = 'es-HN';
+    motor.interimResults = false;
+    motor.continuous = false;
+    motor.onresult = (e) => {
+      const texto = [...e.results].map((r) => r[0].transcript).join(' ').trim();
+      if (texto) alTexto?.(texto);
+    };
+    motor.onend = () => {
+      motor = null;
+      alTerminar?.();
+    };
+    motor.onerror = () => {
+      motor = null;
+      alTerminar?.();
+    };
+    motor.start();
+  }
+  return { hay: true, empezar, parar };
+}
