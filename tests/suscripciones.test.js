@@ -127,6 +127,19 @@ test('una suscripción anual solo aparece en su mes y cuenta 1/12 al mes', () =>
   assert.equal(proximoCobro(anual, HOY), '2027-03-14');
 });
 
+// Una suscripción cobra siempre lo mismo hasta que se cancele: el formulario no deja elegirle
+// forma de pago ni acumular lo que sobre. Si quedó guardada así desde otra pantalla, se ignora.
+test('una suscripción es de monto fijo y no acumula, aunque venga guardada de otra forma', () => {
+  const rara = suscripcion('spotify', { monto: 10, forma: 'variable', acumula: true, acumulaDesde: '2026-09' });
+  const ix = indice({ partidas: [rara] });
+  const it = item(ix, '2026-10', 'spotify');
+  assert.equal(it.forma, 'fijo');
+  assert.equal(it.acumula, false);
+  // Septiembre pasó sin pagarse y no arrastra nada a octubre: se espera un solo cobro.
+  assert.equal(it.arrastre, 0);
+  assert.equal(it.enMoneda.esperado, 10);
+});
+
 // ---------------------------------------------------------------- Prueba gratis
 
 test('en la prueba gratis no se aparta nada y el primer cobro es el siguiente', () => {

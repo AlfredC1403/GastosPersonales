@@ -163,7 +163,7 @@ export const VistaPresupuesto = {
       if (t.tipo === 'aporte') chips.push({ t: 'aporte', c: 'acento' });
       if (t.tipo !== 'anual' && !suscripcion && meses < 12) chips.push({ t: `${meses} meses`, c: '' });
       if (t.dia) chips.push({ t: suscripcion ? `renueva el ${t.dia}` : `día ${t.dia}`, c: '' });
-      if (t.acumula) chips.push({ t: 'acumula', c: 'ok' });
+      if (t.acumula && !suscripcion) chips.push({ t: 'acumula', c: 'ok' });
       if (prefs.vistaPresupuesto !== 'medio' && t.medioPagoId && t.medioPagoId !== 'gastos') chips.push({ t: nombreCuenta(t.medioPagoId), c: '' });
       if (t.tipo === 'anual' && !t.mesPago) chips.push({ t: 'sin mes de pago', c: 'aviso' });
       if (prefs.vistaPresupuesto !== 'grupo' && t.categoriaId) chips.push({ t: nombreCategoria(t.categoriaId), c: '' });

@@ -4,6 +4,7 @@ import { store, guardar, guardarConfig, exportar, respaldarAhora, aviso, grupos,
 import { FORMAS, FRECUENCIAS } from '../core/modelo.js';
 import { hoy } from '../core/util.js';
 import { PASOS_ASISTENTE } from '../core/catalogos.js';
+import { esSuscripcion } from '../core/presupuesto.js';
 import { Icono, descargar } from './componentes.js';
 import { editarIngreso } from './formularios.js';
 import { editarTarjeta } from './formularios-tarjetas.js';
@@ -172,7 +173,9 @@ export const VistaConfigurar = {
       sugerida: (p) => p.forma !== 'abonos' && EN_ABONOS.test(p.nombre),
       bajarRespaldo: () => descargar(`gastos-respaldo-${hoy()}.json`, exportar(), 'application/json'),
       listaGrupos: computed(() => grupos().map((grupo) => ({ grupo, categorias: categorias().filter((c) => c.grupoId === grupo.id) }))),
-      listaPartidas: computed(() => vivos('partidas').filter((p) => p.tipo === 'gasto' && p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre))),
+      // Una suscripción siempre es de monto fijo y no acumula: no hay nada que elegir aquí,
+      // y se administran en su propia pantalla.
+      listaPartidas: computed(() => vivos('partidas').filter((p) => p.tipo === 'gasto' && p.activo !== false && !esSuscripcion(p)).sort((a, b) => a.nombre.localeCompare(b.nombre))),
       listaIngresos: computed(() => vivos('ingresos')),
     };
   },
