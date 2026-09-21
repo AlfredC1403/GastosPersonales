@@ -120,6 +120,38 @@ export function resumenMes(ix, periodo, filtro) {
   });
 }
 
+// Lo que de verdad se gasta en una categoría o en una partida, para proponer el monto de una
+// partida variable. `categoriasSobreSuPromedio` avisa cuando algo se dispara; esto es lo
+// contrario: el promedio que convierte el presupuesto de "lo que creo que gasto" a "lo que
+// gasto". Solo cuenta meses completos (el mes en curso está a medias y bajaría el promedio).
+export function sugerirMonto(ix, { categoriaId = null, grupoId = null, partidaId = null, meses = 6, hasta = periodoDe(ix.hoy), filtro = null } = {}) {
+  const n = Math.max(1, Math.round(meses));
+  const valores = [];
+  for (let i = 1; i <= n; i++) {
+    const periodo = sumarMeses(hasta, -i);
+    if (periodo < (ix.config.inicio || '')) break;
+    const g = gastoDelMes(ix, periodo, filtro);
+    const fuente = partidaId ? g.porPartida : grupoId ? g.porGrupo : g.porCategoria;
+    valores.push(Number(fuente[partidaId || grupoId || categoriaId]) || 0);
+  }
+  if (!valores.length) return null;
+  const conGasto = valores.filter((v) => v > 0);
+  const ordenados = [...valores].sort((a, b) => a - b);
+  const mediana = ordenados.length % 2
+    ? ordenados[(ordenados.length - 1) / 2]
+    : (ordenados[ordenados.length / 2 - 1] + ordenados[ordenados.length / 2]) / 2;
+  return {
+    meses: valores.length,
+    mesesConGasto: conGasto.length,
+    promedio: redondear(valores.reduce((a, v) => a + v, 0) / valores.length),
+    // La mediana aguanta mejor un mes raro (la emergencia del carro) que el promedio.
+    mediana: redondear(mediana),
+    maximo: redondear(Math.max(...valores)),
+    minimo: redondear(Math.min(...valores)),
+    valores,
+  };
+}
+
 // Gasto de los últimos `n` meses hasta `hasta`, por grupo.
 // Por dónde va el mes y cuánto queda libre por día. Solo tiene sentido en el mes en curso: en uno
 // pasado el mes ya terminó, y en uno futuro no ha empezado. `libre` viene de resumenMes.
@@ -134,6 +166,84 @@ export function ritmoDelMes(ix, periodo, libre) {
     fraccion: dia / dias, // qué parte del mes ya pasó
     librePorDia: restantes > 0 ? redondear(libre / restantes) : 0,
   };
+}
+
+// Cómo va a cerrar el mes si se sigue al mismo ritmo. `ritmoDelMes` ya decía por dónde va cada
+// partida variable; esto es la suma: el número que contesta "¿voy a cerrar arriba o abajo?".
+//
+// Lo de monto fijo se proyecta completo (va a pagarse entero, falte lo que falte del mes). Lo
+// variable y lo que se gasta fuera del plan se proyecta al ritmo que lleva, y nunca por debajo
+// de lo que ya se gastó. Solo tiene sentido en el mes en curso: uno pasado ya cerró y uno
+// futuro no ha empezado (ahí está la proyección de flujo, en core/proyeccion.js).
+export function cierreProyectado(ix, periodo, filtro) {
+  const r = resumenMes(ix, periodo, filtro);
+  const ritmo = ritmoDelMes(ix, periodo, r.libre);
+  if (!ritmo) return null;
+  const alRitmo = (real) => Math.max(aCentavos(real), Math.round(aCentavos(real) / ritmo.fraccion));
+
+  let proyectado = 0;
+  let variable = 0;
+  const excesos = [];
+  for (const it of r.plan) {
+    const esperado = aCentavos(usoDelPlan(it));
+    const real = aCentavos(it.real);
+    const esVariable = it.forma === 'variable' || it.forma === 'abonos';
+    if (!esVariable || it.hecho || !(esperado > 0)) {
+      proyectado += Math.max(esperado, real);
+      continue;
+    }
+    const alCierre = Math.max(alRitmo(it.real), esperado ? 0 : real);
+    proyectado += alCierre;
+    variable += alCierre;
+    if (alCierre > esperado) excesos.push({ nombre: it.nombre, clave: it.clave, esperado: deCentavos(esperado), proyectado: deCentavos(alCierre) });
+  }
+  const fueraDelPlan = alRitmo(r.fueraDelPlan);
+  proyectado += fueraDelPlan;
+
+  const ingreso = aCentavos(r.ingresoDelMes);
+  const cierre = ingreso - proyectado;
+  return {
+    ritmo,
+    ingreso: r.ingresoDelMes,
+    comprometido: r.comprometido,
+    proyectado: deCentavos(proyectado),
+    fueraDelPlan: deCentavos(fueraDelPlan),
+    variable: deCentavos(variable),
+    cierre: deCentavos(cierre),
+    // Contra lo que el plan decía que iba a sobrar: positivo es mejor de lo previsto.
+    contraPlan: deCentavos(cierre - aCentavos(r.libre)),
+    arriba: cierre >= 0,
+    excesos: excesos.sort((a, b) => (b.proyectado - b.esperado) - (a.proyectado - a.esperado)),
+  };
+}
+
+// Lo que costó deber: intereses y comisiones de tarjeta más intereses y seguros de préstamos,
+// entre dos meses. Es el número que no aparece en ningún lado y cambia comportamiento: no
+// cuánto se debe, sino cuánto se pagó solo por deber.
+export function costoDeLaDeuda(ix, desde, hasta, filtro) {
+  return memo(ix, `costo-deuda|${desde}|${hasta}|${claveFiltro(filtro)}`, () => {
+    let tarjetas = 0;
+    let ingreso = 0;
+    for (let p = desde; p <= hasta; p = sumarMeses(p, 1)) {
+      for (const a of ix.porPeriodo.get(p) || []) {
+        if (!coincidePersona(a.personaId, filtro)) continue;
+        if (a.clase === 'gasto' && a.categoriaId === 'cargos-tarjeta') tarjetas += a.c;
+        else if (a.clase === 'ingreso') ingreso += a.c;
+      }
+      if (p >= hasta) break;
+    }
+    const prestamos = costoDePrestamos(ix, desde, hasta, filtro);
+    const total = deCentavos(tarjetas) + prestamos.intereses + prestamos.seguros;
+    return {
+      tarjetas: deCentavos(tarjetas),
+      intereses: prestamos.intereses,
+      seguros: prestamos.seguros,
+      total: redondear(total),
+      ingreso: deCentavos(ingreso),
+      // Qué parte de lo que entró se fue solo en deber.
+      pctIngreso: ingreso > 0 ? redondear((aCentavos(total) / ingreso) * 100) : 0,
+    };
+  });
 }
 
 // Categorías que este mes van muy por encima de lo normal, comparando con el promedio de los
@@ -196,10 +306,11 @@ export function saldosCuentas(ix, hasta) {
   });
 }
 
-// Saldo en lempiras (las cuentas en dólares, con la tasa de referencia si hay).
-export function enLempirasAprox(ix, cuentaId, saldo) {
+// Saldo en lempiras (las cuentas en dólares, con la tasa del mes que se pida; sin mes, la de hoy,
+// que es lo que corresponde a un saldo que todavía está ahí).
+export function enLempirasAprox(ix, cuentaId, saldo, periodo = '') {
   if (ix.monedaDe(cuentaId) !== 'USD') return saldo;
-  return redondear(saldo * (Number(ix.config.tasaReferencia) || 0));
+  return redondear(saldo * (ix.tasaEn ? ix.tasaEn(periodo) : Number(ix.config.tasaReferencia) || 0));
 }
 
 // ---------------------------------------------------------------- Patrimonio, resumen anual y comparación de años
