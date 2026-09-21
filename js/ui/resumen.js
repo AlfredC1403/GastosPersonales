@@ -45,11 +45,16 @@ export const VistaResumen = {
       <article class="tarjeta">
         <h2>Gasto por grupo</h2>
         <ul class="lista" style="margin-top: 8px">
+          <!-- Nombre, gasto y comparación no caben en una línea de teléfono: «+L52,440 (+43.7 %)» se
+               comía el ancho y el nombre terminaba pintado encima del monto. La comparación baja a
+               la segunda línea, como en el resto de las listas. -->
           <li v-for="g in gruposAnio" :key="g.id" class="fila compacta">
             <i class="punto" :style="{ background: g.color }"></i>
-            <span style="flex: 1; min-width: 0; font-size: 0.92rem">{{ g.nombre }}</span>
+            <div class="fila-info">
+              <span class="fila-titulo" style="font-size: 0.92rem">{{ g.nombre }}</span>
+              <span v-if="g.vs" class="tenue" :class="g.clase" style="font-size: 0.8rem">{{ g.vs }}</span>
+            </div>
             <span class="monto">{{ fmtEntero(g.valor) }}</span>
-            <span class="tenue" style="min-width: 70px; text-align: right; font-size: 0.8rem" :class="g.clase">{{ g.vs }}</span>
           </li>
         </ul>
       </article>
