@@ -252,7 +252,7 @@ export const PagoTarjetaForm = {
     // Con dólares desde una cuenta en lempiras (o lempiras desde una en dólares) hace falta la tasa.
     const tasaObligatoria = computed(() => (monedaOrigen.value === 'USD' ? pagoL.value > 0 : pagoUSD.value > 0));
     const pideTasa = computed(() => pagoUSD.value > 0 || tasaObligatoria.value);
-    const tasaSugerida = computed(() => ix.value.tarjetas.get(m.cuentaDestinoId)?.ultimaTasa || Number(store.doc.config.tasaReferencia) || 0);
+    const tasaSugerida = computed(() => ix.value.tarjetas.get(m.cuentaDestinoId)?.ultimaTasa || ix.value.tasaEn(store.periodo));
     const salida = computed(() => {
       const tasa = Number(m.tasa) || 0;
       return monedaOrigen.value === 'USD'

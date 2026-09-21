@@ -1,15 +1,16 @@
 import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
-  respaldarAhora, listarRespaldos, anioCargado, confirmar,
+  respaldarAhora, listarRespaldos, anioCargado, confirmar, guardar, borrar, vivos,
 } from '../store.js';
-import { hoy, fechaCorta, diasDesde } from '../core/util.js';
+import { hoy, nombrePeriodo, periodoDe } from '../core/util.js';
+import { idTasa, ultimaTasaAnotada, mesesSinAnotar } from '../core/tasas.js';
 import { esPristino } from '../core/modelo.js';
 import { claveDeNombre, PRINCIPAL } from '../core/anios.js';
 import * as od from '../onedrive.js';
 import { CONFIG } from '../config.js';
-import { descargar } from './componentes.js';
+import { descargar, Icono } from './componentes.js';
 
-const { ref, computed, onMounted } = Vue;
+const { ref, reactive, computed, onMounted } = Vue;
 const fechaHora = new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' });
 
 function tamano(bytes) {
@@ -20,6 +21,7 @@ function tamano(bytes) {
 }
 
 export const VistaDatos = {
+  components: { Icono },
   template: `
   <section class="pila">
     <article class="tarjeta">
@@ -109,9 +111,43 @@ export const VistaDatos = {
         <label class="campo"><span>Símbolo de moneda</span><input :value="store.doc.config.moneda" maxlength="4" @change="guardarConfig({ moneda: $event.target.value.trim() || 'L' })"></label>
         <label class="campo"><span>Mes de inicio del registro</span><input :value="store.doc.config.inicio" type="month" @change="$event.target.value && guardarConfig({ inicio: $event.target.value })"></label>
       </div>
-      <label class="campo" style="margin-top: 10px"><span>Tasa de referencia del dólar (lempiras por US$)</span>
-        <input :value="store.doc.config.tasaReferencia" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="Por ejemplo 24.65" @change="guardarTasa($event.target.value)"></label>
-      <p class="nota chica" style="margin-top: 4px">Se usa para estimar en lempiras las cuentas y los gastos en dólares que no tienen su propia tasa. {{ textoTasa }}</p>
+    </article>
+
+    <article class="tarjeta">
+      <div class="tarjeta-cab centro">
+        <h2>Tasa del dólar</h2>
+        <span v-if="estadoTasa" class="chip" :class="estadoTasa.clase">{{ estadoTasa.texto }}</span>
+      </div>
+      <p class="nota" style="margin-top: 8px">Cada mes tiene su tasa (lempiras por US$). Así un reporte de hace dos años no se valora con la tasa de hoy.
+        Un mes sin tasa propia usa la última anterior.</p>
+
+      <div class="fila-campos" style="margin-top: 14px">
+        <label class="campo"><span>Mes</span><input v-model="nueva.periodo" type="month"></label>
+        <label class="campo"><span>Lempiras por US$</span>
+          <input v-model.number="nueva.valor" type="number" inputmode="decimal" step="0.0001" min="0" :placeholder="ultima ? String(ultima.valor) : 'Por ejemplo 24.65'"></label>
+      </div>
+      <p v-if="errorTasa" class="error" role="alert">{{ errorTasa }}</p>
+      <div class="botones" style="margin-top: 10px">
+        <button type="button" class="btn primario" :disabled="!nueva.valor" @click="anotarTasa">{{ yaAnotada ? 'Cambiar la tasa del mes' : 'Anotar la tasa' }}</button>
+      </div>
+
+      <table v-if="lista.length" class="tabla" style="margin-top: 16px">
+        <caption class="oculto-visual">Tasa anotada de cada mes</caption>
+        <thead><tr><th scope="col">Mes</th><th scope="col" class="num">Lempiras por US$</th><th scope="col"><span class="oculto-visual">Quitar</span></th></tr></thead>
+        <tbody>
+          <tr v-for="t in lista" :key="t.id">
+            <td>{{ nombrePeriodo(t.periodo) }}</td>
+            <td class="num cifra">{{ t.valor }}</td>
+            <td class="num">
+              <button type="button" class="btn-icono" :aria-label="'Quitar la tasa de ' + nombrePeriodo(t.periodo)" @click="quitarTasa(t)"><icono n="x" :t="16"/></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="nota chica" style="margin-top: 12px">Todavía no hay ninguna tasa anotada.</p>
+      <p v-if="masViejas" class="nota chica" style="margin-top: 8px">
+        <button type="button" class="btn-enlace" @click="todas = !todas">{{ todas ? 'Ver solo los últimos 12 meses' : 'Ver las ' + total + ' tasas' }}</button>
+      </p>
     </article>
 
     <article class="tarjeta">
@@ -127,6 +163,9 @@ export const VistaDatos = {
   setup() {
     const ocupado = ref(false);
     const enlace = ref('');
+    const nueva = reactive({ periodo: periodoDe(store.hoy), valor: null });
+    const errorTasa = ref('');
+    const todas = ref(false);
     const respaldos = ref(null);
     const archivos = computed(() => [...store.carpeta]
       .filter((a) => claveDeNombre(a.nombre))
@@ -181,21 +220,46 @@ export const VistaDatos = {
       lector.readAsText(archivo);
     }
 
-    // Desde cuándo es la tasa anotada: una de hace meses ya no sirve para estimar.
-    const textoTasa = computed(() => {
-      const { tasaReferencia: tasa, tasaReferenciaDesde: desde } = store.doc.config;
-      if (!tasa) return '';
-      if (!desde) return 'No se sabe de cuándo es: vuelve a anotarla.';
-      const dias = diasDesde(desde, store.hoy);
-      if (dias <= 0) return 'Anotada hoy.';
-      return `Anotada el ${fechaCorta(desde)}${dias > 35 ? ` (hace ${dias} días: conviene revisarla)` : ''}.`;
+    // Las tasas anotadas, de la más nueva a la más vieja. Por defecto solo el último año:
+    // un hogar con varios años de registro tendría una tabla que no se acaba.
+    const anotadas = computed(() => vivos('tasas')
+      .filter((t) => Number(t.valor) > 0 && /^\d{4}-\d{2}$/.test(t.periodo || ''))
+      .sort((a, b) => (a.periodo < b.periodo ? 1 : a.periodo > b.periodo ? -1 : 0)));
+    const lista = computed(() => (todas.value ? anotadas.value : anotadas.value.slice(0, 12)));
+    const ultima = computed(() => ultimaTasaAnotada(store.doc));
+    const yaAnotada = computed(() => anotadas.value.some((t) => t.periodo === nueva.periodo));
+
+    // Una tasa vieja distorsiona en silencio todo lo que está en dólares y no se ha pagado.
+    const estadoTasa = computed(() => {
+      const meses = mesesSinAnotar(store.doc, store.hoy);
+      if (meses == null) return { texto: 'Sin anotar', clase: 'aviso' };
+      if (meses <= 0) return { texto: 'Al día', clase: 'ok' };
+      return { texto: meses === 1 ? 'Falta la de este mes' : `Faltan ${meses} meses`, clase: 'aviso' };
     });
 
+    function anotarTasa() {
+      errorTasa.value = '';
+      if (!/^\d{4}-\d{2}$/.test(nueva.periodo || '')) return (errorTasa.value = 'Elige el mes de la tasa.');
+      const valor = Number(nueva.valor);
+      if (!(valor > 0)) return (errorTasa.value = 'Escribe cuántos lempiras vale un dólar.');
+      const anterior = anotadas.value.find((t) => t.periodo === nueva.periodo);
+      guardar('tasas', { ...(anterior || {}), id: anterior?.id || idTasa(nueva.periodo), periodo: nueva.periodo, valor, nota: anterior?.nota || '' });
+      // La configuración sigue guardando la última tasa: es el respaldo de lo que todavía no
+      // mira la lista (la estimación de una tarjeta, por ejemplo) y de un archivo sin tasas.
+      if (!ultima.value || nueva.periodo >= ultima.value.periodo) guardarConfig({ tasaReferencia: valor, tasaReferenciaDesde: store.hoy });
+      aviso(`Tasa de ${nombrePeriodo(nueva.periodo)}: ${valor}`, 'ok');
+      nueva.valor = null;
+    }
+
+    async function quitarTasa(t) {
+      if (!await confirmar(`¿Quitar la tasa de ${nombrePeriodo(t.periodo)}? Ese mes pasará a usar la del mes anterior.`, { titulo: 'Quitar la tasa', peligro: true })) return;
+      borrar('tasas', t.id);
+    }
+
     return {
-      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos, textoTasa,
-      guardarTasa: (v) => guardarConfig(Number(v) > 0
-        ? { tasaReferencia: Number(v), tasaReferenciaDesde: store.hoy }
-        : { tasaReferencia: null, tasaReferenciaDesde: '' }),
+      store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos,
+      nueva, errorTasa, todas, lista, ultima, yaAnotada, estadoTasa, anotarTasa, quitarTasa, nombrePeriodo,
+      masViejas: computed(() => anotadas.value.length > 12), total: computed(() => anotadas.value.length),
       respaldar: () => ejecutar(async () => {
         const nombre = await respaldarAhora();
         aviso('Respaldo guardado: respaldos/' + nombre, 'ok', 6000);

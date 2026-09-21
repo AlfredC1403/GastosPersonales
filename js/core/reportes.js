@@ -2,7 +2,7 @@
 import { vivo } from './modelo.js';
 import { sumarMeses, periodoDe, fechaEnMes, ultimoDia, aCentavos, deCentavos, redondear } from './util.js';
 import { coincidePersona } from './filtro.js';
-import { estadoPartidas, ingresosDelMes, partidasDelMes, usoDelPlan } from './presupuesto.js';
+import { estadoPartidas, ingresosDelMes, partidasDelMes, usoDelPlan, tasaDe } from './presupuesto.js';
 import { cuotasDelMes, deudaAl, costoDePrestamos } from './prestamos.js';
 import { deudaTarjetasAl } from './tarjetas.js';
 import { estadoRecibo } from './nomina.js';
@@ -396,11 +396,11 @@ export function resumenAnual(ix, anio, filtro, { hasta = '', hastaMes = '' } = {
       }
     }
     // El dinero que salió de las cuentas, por la fecha del pago (una compra con tarjeta sale al pagarla).
-    const tasa = Number(ix.config.tasaReferencia) || 0;
+    // Lo que salió en dólares se valora con la tasa de su mes, no con la de hoy.
     for (const a of ix.saldos) {
       if (a.delta >= 0 || a.fecha < `${y}-01-01` || a.fecha > fin || !coincidePersona(a.personaId, filtro)) continue;
       if (!TIPOS_SALIDA.includes(ix.movimientos.get(a.origen)?.tipo)) continue;
-      const c = a.moneda === 'USD' ? Math.round(-a.delta * tasa) : -a.delta;
+      const c = a.moneda === 'USD' ? Math.round(-a.delta * tasaDe(ix, a.fecha.slice(0, 7))) : -a.delta;
       meses[Number(a.fecha.slice(5, 7)) - 1].salidas += c;
     }
     for (const m of meses) for (const k of ['bruto', 'neto', 'deducciones', 'gasto', 'ahorro', 'cuotas', 'abonos', 'salidas']) t[k] += m[k];
@@ -496,11 +496,10 @@ function varianteDelAnio(ix, y, filtro) {
     v.seguros[i] = aCentavos(costo.seguros);
     v.patrimonio.push(trioPatrimonio(patrimonioAl(ix, fechaEnMes(periodo, 31), filtro)));
   }
-  const tasa = Number(ix.config.tasaReferencia) || 0;
   for (const a of ix.saldos) {
     if (a.delta >= 0 || a.fecha < `${y}-01-01` || a.fecha > `${y}-12-31` || !coincidePersona(a.personaId, filtro)) continue;
     if (!TIPOS_SALIDA.includes(ix.movimientos.get(a.origen)?.tipo)) continue;
-    v.salidas[Number(a.fecha.slice(5, 7)) - 1] += a.moneda === 'USD' ? Math.round(-a.delta * tasa) : -a.delta;
+    v.salidas[Number(a.fecha.slice(5, 7)) - 1] += a.moneda === 'USD' ? Math.round(-a.delta * tasaDe(ix, a.fecha.slice(0, 7))) : -a.delta;
   }
   for (const k of ['porCategoria', 'porPartida', 'porMedio', 'porPersona', 'ingresosPorPersona', 'deduccionesPorConcepto', 'deduccionesPorPersona']) {
     v[k] = conClavesOrdenadas(v[k]);

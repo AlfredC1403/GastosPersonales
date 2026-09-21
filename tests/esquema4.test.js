@@ -239,3 +239,25 @@ test('las renovaciones se pueden filtrar por persona', () => {
   });
   assert.deepEqual(estadoRenovaciones(i, { hoy: HOY, filtro: { personaId: 'ana' } }).map((r) => r.id), ['licencia']);
 });
+
+// ------------------------------------------- El resumen anual valora cada mes con su propia tasa
+
+test('el resumen anual valora lo que salió en dólares con la tasa de su mes', async () => {
+  const { resumenAnual } = await import('../js/core/reportes.js');
+  const enDolares = (id, fecha) => ({
+    id, tipo: 'gasto', fecha, periodo: fecha.slice(0, 7), monto: 100, cuentaId: 'dolares', moneda: 'USD',
+    categoriaId: 'comida', creado: `${fecha}T12:00:00Z`, actualizado: `${fecha}T12:00:00Z`,
+  });
+  const datos = {
+    cuentas: [
+      { id: 'gastos', nombre: 'Gastos', tipo: 'gastos', moneda: 'L', saldoInicial: 0, titularId: null, actualizado: 't' },
+      { id: 'dolares', nombre: 'Dólares', tipo: 'banco', moneda: 'USD', saldoInicial: 1000, titularId: null, actualizado: 't' },
+    ],
+    tasas: [tasa('2026-01', 20), tasa('2026-06', 30)],
+    movimientos: [enDolares('d1', '2026-02-10'), enDolares('d2', '2026-07-10')],
+  };
+  const r = resumenAnual(ix(datos), '2026', null);
+  // US$100 en febrero valen 2,000 (la tasa de enero sigue vigente) y en julio 3,000 (la de junio).
+  assert.equal(r.meses[1].salidas, 2000);
+  assert.equal(r.meses[6].salidas, 3000);
+});

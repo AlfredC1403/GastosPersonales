@@ -1,7 +1,7 @@
 // Resumen anual: ingresos, deducciones, gasto, ahorro, deudas y patrimonio del año, comparados
 // con el año anterior hasta el mismo día.
 import { store, fmt, fmtEntero, fmtCorto, indice, filtro, personaFiltro, nombrePersona, nombreGrupo, anioCargado, resumenGuardado } from '../store.js';
-import { resumenAnual, resumenAnualDeGuardado, mismoDiaEn, diferencia, seriesDeGrupos, colorGrupo } from '../core/reportes.js';
+import { resumenAnual, resumenAnualDeGuardado, mismoDiaEn, diferencia, seriesDeGrupos, colorGrupo, costoDeLaDeuda } from '../core/reportes.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { nombrePeriodo, fechaCorta, periodoDe } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
@@ -89,6 +89,11 @@ export const VistaResumen = {
           <dt>Seguros de préstamos</dt><dd>{{ fmt(r.deuda.seguros) }}</dd>
           <template v-if="cargosTarjeta"><dt>Intereses y cargos de tarjeta</dt><dd>{{ fmt(cargosTarjeta) }}</dd></template>
         </dl>
+        <div v-if="costo && costo.total > 0" class="resalte" style="margin-top: 14px">
+          <p class="etiqueta">Lo que costó deber</p>
+          <p class="hero-num" style="font-size: 1.6rem; margin-top: 2px">{{ fmt(costo.total) }}</p>
+          <p class="nota" style="margin-top: 6px">{{ textoCosto }}</p>
+        </div>
       </article>
 
       <article class="tarjeta">
@@ -168,9 +173,24 @@ export const VistaResumen = {
       .map(([id, x]) => ({ id, nombre: id === 'sin' ? 'Hogar' : nombrePersona(id), ...x }))
       .sort((a, b) => b.bruto - a.bruto));
     const cargosTarjeta = computed(() => r.value.gasto.porCategoria['cargos-tarjeta'] || 0);
+    // Cuánto se pagó solo por deber: intereses y cargos de tarjeta más intereses y seguros de
+    // préstamos. Un año que no está en el dispositivo no tiene los movimientos para sumarlo.
+    const costo = computed(() => (anioCargado(anio.value)
+      ? costoDeLaDeuda(ix.value, `${anio.value}-01`, hasta.value ? periodoDe(hasta.value) : `${anio.value}-12`, filtro())
+      : null));
+    const textoCosto = computed(() => {
+      const c = costo.value;
+      if (!c) return '';
+      const partes = [];
+      if (c.tarjetas) partes.push(`${fmt(c.tarjetas)} de tarjetas`);
+      if (c.intereses) partes.push(`${fmt(c.intereses)} de intereses`);
+      if (c.seguros) partes.push(`${fmt(c.seguros)} de seguros`);
+      const pct = c.pctIngreso ? ` Es el ${c.pctIngreso} % de todo lo que entró.` : '';
+      return `${partes.join(' · ')}.${pct}`;
+    });
 
     return {
-      store, prefs, definirVista, anio, esEsteAnio, r, textoCorte, kpis, series, meses, gruposAnio, deducciones, porPersonaDeducciones, ingresosPersona, cargosTarjeta,
+      store, prefs, definirVista, anio, esEsteAnio, r, textoCorte, kpis, series, meses, gruposAnio, deducciones, porPersonaDeducciones, ingresosPersona, cargosTarjeta, costo, textoCosto,
       fmt, fmtEntero, fmtCorto, fechaCorta, nombrePersona, personaFiltro, periodoDe,
     };
   },

@@ -177,6 +177,9 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 
 .caja-ambar { margin-top: 14px; padding: 12px 14px; background: var(--ambar-sup); border-radius: var(--radio); font-size: 0.9rem; }
 .caja-ambar b { font-family: var(--cifra); font-weight: 600; }
+/* Un número que destaca dentro de una tarjeta, sin ser otra tarjeta (lo que costó deber). */
+.resalte { padding: 12px 14px; background: var(--sup2); border-radius: var(--radio); }
+
 .aviso-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--acento-sup); border-radius: var(--radio); padding: 12px 14px; font-size: 0.9rem; }
 .aviso-banner.ambar { background: var(--ambar-sup); }
 .aviso-banner p { flex: 1 1 220px; }
