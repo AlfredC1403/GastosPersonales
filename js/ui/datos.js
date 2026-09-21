@@ -1,9 +1,11 @@
 import {
   store, aviso, guardarConfig, importar, exportar, borrarDatosLocales, usarMiOneDrive, usarEnlace, sincronizar, desconectar, infoAlmacen,
-  respaldarAhora, listarRespaldos, anioCargado, confirmar, guardar, borrar, vivos,
+  respaldarAhora, listarRespaldos, leerRespaldo, anioCargado, confirmar, guardar, borrar, vivos,
+  buscar, nombreCuenta, nombreCategoria, fmtMoneda, fmt,
 } from '../store.js';
 import { hoy, nombrePeriodo, periodoDe } from '../core/util.js';
 import { idTasa, ultimaTasaAnotada, mesesSinAnotar } from '../core/tasas.js';
+import { diferencias, paraGuardar } from '../core/restaurar.js';
 import { esPristino } from '../core/modelo.js';
 import { claveDeNombre, PRINCIPAL } from '../core/anios.js';
 import * as od from '../onedrive.js';
@@ -91,8 +93,34 @@ export const VistaDatos = {
           <li v-for="r in respaldos" :key="r.itemId" class="fila compacta">
             <div class="fila-info"><span style="font-size: 0.88rem">{{ r.nombre }}</span><span class="fila-sub">{{ r.modificado ? fechaHora.format(new Date(r.modificado)) : '' }}</span></div>
             <span class="tenue" style="font-size: 0.82rem">{{ tamano(r.tamano) }}</span>
+            <button type="button" class="btn" :disabled="ocupado" @click="abrirRespaldo(r)">Comparar</button>
           </li>
         </ul>
+        <template v-if="abierto">
+          <h3 style="margin-top: 18px">{{ abierto.nombre }}</h3>
+          <p v-if="!faltan.length && !cambios.length" class="nota" style="margin-top: 4px">Este respaldo no tiene nada que no esté ya en los datos de hoy.</p>
+          <template v-else>
+            <p class="nota" style="margin-top: 4px">Se trae solo lo que elijas: lo demás queda como está.</p>
+            <div class="chips-filtro" style="margin-top: 10px" role="group" aria-label="Qué mostrar del respaldo">
+              <button type="button" class="chip-filtro" :class="{ activo: verCambios === false }" :aria-pressed="verCambios === false" @click="verCambios = false">Falta aquí ({{ faltan.length }})</button>
+              <button type="button" class="chip-filtro" :class="{ activo: verCambios === true }" :aria-pressed="verCambios === true" @click="verCambios = true">Cambió después ({{ cambios.length }})</button>
+            </div>
+            <ul class="lista" style="margin-top: 8px">
+              <li v-for="d in visibles" :key="d.coleccion + d.id" class="fila compacta">
+                <div class="fila-info">
+                  <span style="font-size: 0.88rem">{{ describir(d) }}</span>
+                  <span class="fila-sub">{{ d.tipo }}{{ d.actual && d.actual.borrado ? ' · borrado aquí' : '' }}</span>
+                </div>
+                <button type="button" class="btn" @click="traer(d)">Traer</button>
+              </li>
+            </ul>
+            <p v-if="restantes" class="nota chica" style="margin-top: 8px">Y {{ restantes }} más. Tráelos por grupo si son muchos.</p>
+            <div class="botones" style="margin-top: 10px">
+              <button type="button" class="btn" :disabled="!visibles.length" @click="traerTodo">Traer {{ verCambios ? 'todos los cambios' : 'todo lo que falta' }} ({{ (verCambios ? cambios : faltan).length }})</button>
+              <button type="button" class="btn" @click="abierto = null">Cerrar</button>
+            </div>
+          </template>
+        </template>
         <p v-else-if="respaldos" class="nota chica" style="margin-top: 8px">Todavía no hay respaldos.</p>
         <p v-if="store.sync.ubicacion.propio" class="nota" style="margin-top: 12px">Para que otra persona lo use: comparte la carpeta {{ carpeta }} (la carpeta,
           no el archivo) con su correo y permiso para editar, y mándale el enlace. Esa persona abre esta app, conecta su cuenta y pega el enlace.</p>
@@ -164,6 +192,8 @@ export const VistaDatos = {
     const ocupado = ref(false);
     const enlace = ref('');
     const nueva = reactive({ periodo: periodoDe(store.hoy), valor: null });
+    const abierto = ref(null); // { nombre, doc } del respaldo que se está comparando
+    const verCambios = ref(false);
     const errorTasa = ref('');
     const todas = ref(false);
     const respaldos = ref(null);
@@ -251,6 +281,35 @@ export const VistaDatos = {
       nueva.valor = null;
     }
 
+    // ------------------------------------------------ Restaurar parte de un respaldo
+    const MAXIMO = 40; // más que eso no se revisa a mano: para eso está "traer todo"
+    const todo = computed(() => (abierto.value ? diferencias(store.doc, abierto.value.doc) : []));
+    const faltan = computed(() => todo.value.filter((d) => d.estado === 'falta'));
+    const cambios = computed(() => todo.value.filter((d) => d.estado === 'cambio'));
+    const visibles = computed(() => (verCambios.value ? cambios.value : faltan.value).slice(0, MAXIMO));
+    const restantes = computed(() => Math.max(0, (verCambios.value ? cambios.value : faltan.value).length - MAXIMO));
+
+    // Cómo se reconoce un registro en la lista: sin esto serían identificadores.
+    function describir(d) {
+      const r = d.registro;
+      if (d.coleccion === 'movimientos') return `${fmtMoneda(r.monto, r.moneda)} · ${r.fecha} · ${r.nota || nombreCategoria(r.categoriaId) || nombreCuenta(r.cuentaId)}`;
+      if (d.coleccion === 'recibos') return `${fmt(r.neto)} · ${r.fecha || r.ocurrencia} · ${buscar('ingresos', r.ingresoId)?.nombre || 'Pago'}`;
+      if (d.coleccion === 'ajustesPartida') return `${r.periodo} · ${buscar('partidas', r.partidaId)?.nombre || 'Partida'}`;
+      if (d.coleccion === 'tasas') return `${nombrePeriodo(r.periodo)} · ${r.valor}`;
+      return r.nombre || r.id;
+    }
+
+    function traer(d) {
+      guardar(d.coleccion, paraGuardar(d));
+      aviso(`Recuperado: ${describir(d)}`, 'ok', 5000);
+    }
+    async function traerTodo() {
+      const lote = verCambios.value ? cambios.value : faltan.value;
+      if (!await confirmar(`¿Traer ${lote.length} ${lote.length === 1 ? 'registro' : 'registros'} de este respaldo? Lo demás queda como está.`, { titulo: 'Traer del respaldo' })) return;
+      for (const d of lote) guardar(d.coleccion, paraGuardar(d));
+      aviso(`Se trajeron ${lote.length} ${lote.length === 1 ? 'registro' : 'registros'}.`, 'ok', 6000);
+    }
+
     async function quitarTasa(t) {
       if (!await confirmar(`¿Quitar la tasa de ${nombrePeriodo(t.periodo)}? Ese mes pasará a usar la del mes anterior.`, { titulo: 'Quitar la tasa', peligro: true })) return;
       borrar('tasas', t.id);
@@ -259,6 +318,7 @@ export const VistaDatos = {
     return {
       store, ocupado, enlace, idApp, configurado, chipEstado, fechaHora, importarArchivo, guardarConfig, info, tamano, archivos, respaldos,
       nueva, errorTasa, todas, lista, ultima, yaAnotada, estadoTasa, anotarTasa, quitarTasa, nombrePeriodo,
+      abierto, verCambios, faltan, cambios, visibles, restantes, describir, traer, traerTodo,
       masViejas: computed(() => anotadas.value.length > 12), total: computed(() => anotadas.value.length),
       respaldar: () => ejecutar(async () => {
         const nombre = await respaldarAhora();
@@ -267,6 +327,10 @@ export const VistaDatos = {
       }),
       verRespaldos: () => ejecutar(async () => {
         respaldos.value = await listarRespaldos();
+      }),
+      abrirRespaldo: (r) => ejecutar(async () => {
+        abierto.value = { nombre: r.nombre, doc: await leerRespaldo(r) };
+        verCambios.value = false;
       }),
       carpeta: CONFIG.carpeta, retorno: od.direccionRetorno(),
       guardarId: () => {

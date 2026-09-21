@@ -325,3 +325,20 @@ export function dictado({ alTexto, alTerminar } = {}) {
   }
   return { hay: true, empezar, parar };
 }
+
+// Un reporte para guardar o mandar por correo: el navegador ya sabe imprimir y guardar en PDF,
+// así que basta una hoja de estilos y un encabezado que diga qué es y de cuándo.
+// El botón no sale impreso (es un `.btn`) y el encabezado no se ve en pantalla.
+export const Imprimir = {
+  components: { Icono },
+  props: { titulo: { type: String, required: true }, detalle: { type: String, default: '' } },
+  template: `
+  <div class="fila-imprimir">
+    <div class="solo-imprimir">
+      <h1>{{ titulo }}</h1>
+      <p v-if="detalle">{{ detalle }}</p>
+    </div>
+    <button type="button" class="btn" @click="imprimir"><icono n="imprimir" :t="17"/> Imprimir o guardar en PDF</button>
+  </div>`,
+  setup: () => ({ imprimir: () => globalThis.print?.() }),
+};

@@ -640,6 +640,9 @@ export async function respaldarAhora() {
 
 export const listarRespaldos = async () => od.listarRespaldos(await conCarpeta());
 
+// Lee un respaldo sin tocar nada: la pantalla lo compara con lo de hoy y trae solo lo que falte.
+export const leerRespaldo = async (r) => normalizar(await od.descargarArchivo(await conCarpeta(), r));
+
 // ---------------------------------------------------------------- Inicio
 
 function marcarActualizacion() {

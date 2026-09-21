@@ -6,7 +6,7 @@ import { SIN_RESPONSABLE } from '../core/filtro.js';
 import { SIN_GRUPO } from '../core/asientos.js';
 import { nombrePeriodo, fechaCorta, redondear, periodoDe, fechaEnMes } from '../core/util.js';
 import { prefs, definirOrdenMes } from '../tema.js';
-import { Icono } from './componentes.js';
+import { Icono, Imprimir } from './componentes.js';
 import { marcarItem, abrirItem } from './formularios.js';
 
 const { ref, computed, watch } = Vue;
@@ -109,10 +109,11 @@ export const FilaItem = {
 };
 
 export const VistaMes = {
-  components: { Icono, FilaItem },
+  components: { Icono, FilaItem, Imprimir },
   template: `
   <section class="pila">
     <div v-if="antesDelInicio" class="aviso-banner"><p>Este mes es anterior al inicio del registro ({{ nombrePeriodo(store.doc.config.inicio) }}).</p></div>
+    <imprimir :titulo="nombrePeriodo(store.periodo)" :detalle="detalleImpresion"/>
 
     <div v-if="tramos.length" class="chips-filtro" role="group" aria-label="Ver por pago">
       <button type="button" class="chip-filtro" :class="{ activo: elegido === 'todo' }" :aria-pressed="elegido === 'todo'" @click="elegido = 'todo'">Todo el mes</button>
@@ -271,9 +272,14 @@ export const VistaMes = {
       return { total, texto: `${texto}. Las compras ya cuentan como gasto en su mes; esto es el dinero que sale de la cuenta.` };
     });
 
+    // La hoja impresa se lee sola: de quién es el mes y cuánto entró y salió.
+    const detalleImpresion = computed(() => {
+      const quien = personaFiltro() ? nombrePersona(personaFiltro()) : 'Gastos del hogar';
+      return `${quien} · entran ${fmt(r.value.ingresoDelMes)} · el plan pide ${fmt(r.value.comprometido)}`;
+    });
     return {
       store, r, tramos, elegido, tramo, etiqueta, orden, ordenes: ORDENES, definirOrdenMes, sinResponsable, secciones, pct, avanceTexto, textoDescontado,
-      antesDelInicio, pagosTarjeta, fmt, nombrePeriodo, fechaCorta, periodoDe,
+      antesDelInicio, pagosTarjeta, detalleImpresion, fmt, nombrePeriodo, fechaCorta, periodoDe,
     };
   },
 };

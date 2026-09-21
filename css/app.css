@@ -507,6 +507,10 @@ dialog.modal.confirmar { max-width: 420px; }
 .busqueda-item .fila-info { flex: 1; min-width: 0; }
 .busqueda-vacio { padding: 18px 4px; color: var(--tinta3); font-size: 0.9rem; }
 
+/* Encabezado del reporte: solo existe en la hoja impresa (ver el bloque @media print). */
+.solo-imprimir { display: none; }
+.fila-imprimir { display: flex; justify-content: flex-end; }
+
 /* Solo para imprimir: el reporte sale sin menú, sin botones y en una hoja */
 @media print {
   .cabecera, .menu, .menu-fijo, .barra-abajo, .avisos, .btn, .btn-icono, .btn-punteado, .segmentos, .chips-filtro, .no-imprimir { display: none !important; }
@@ -514,6 +518,10 @@ dialog.modal.confirmar { max-width: 420px; }
   .tarjeta { break-inside: avoid; border: 1px solid #ddd; box-shadow: none; }
   a[href]::after { content: ''; }
   body { background: #fff; color: #000; }
+  .solo-imprimir { display: block; margin-bottom: 14px; }
+  .solo-imprimir h1 { font-size: 1.4rem; }
+  .solo-imprimir p { font-size: 0.9rem; color: #444; }
+  .pila { gap: 12px; }
 }
 
 /* Registro rápido: fichas grandes, pensadas para el pulgar en el teléfono. */

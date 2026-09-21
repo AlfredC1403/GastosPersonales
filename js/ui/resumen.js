@@ -6,11 +6,12 @@ import { SIN_GRUPO } from '../core/asientos.js';
 import { nombrePeriodo, fechaCorta, periodoDe } from '../core/util.js';
 import { prefs, definirVista } from '../tema.js';
 import { ColumnasApiladas } from './graficos.js';
+import { Imprimir } from './componentes.js';
 
 const { computed } = Vue;
 
 export const VistaResumen = {
-  components: { ColumnasApiladas },
+  components: { ColumnasApiladas, Imprimir },
   template: `
   <section class="pila amplia">
     <div v-if="esEsteAnio" class="segmentos" role="group" aria-label="Periodo">
@@ -18,6 +19,7 @@ export const VistaResumen = {
       <button type="button" :class="{ activo: prefs.corteAnual === 'completo' }" :aria-pressed="prefs.corteAnual === 'completo'" @click="definirVista('corteAnual', 'completo')">Año completo</button>
     </div>
     <p class="nota chica">{{ textoCorte }}</p>
+    <imprimir v-if="!r.sinDatos" :titulo="'Resumen de ' + anio" :detalle="detalleImpresion"/>
 
     <div v-if="r.sinDatos" class="aviso-banner"><p>No hay registros de {{ anio }}{{ personaFiltro() ? ' de ' + nombrePersona(personaFiltro()) : '' }}.</p></div>
     <template v-else>
@@ -131,6 +133,11 @@ export const VistaResumen = {
     const textoCorte = computed(() => (hasta.value
       ? `Del 1 de enero al ${fechaCorta(hasta.value)}; el año anterior, hasta el mismo día.`
       : `Todo ${anio.value}${esEsteAnio.value ? ', con lo registrado hasta hoy' : ''}.`));
+    // Lo que la hoja impresa necesita decir por sí sola: de quién es y hasta cuándo llega.
+    const detalleImpresion = computed(() => {
+      const quien = personaFiltro() ? nombrePersona(personaFiltro()) : 'Gastos del hogar';
+      return `${quien} · ${textoCorte.value}`;
+    });
 
     // "vs. 2025: +L1,200 (+8 %)". `sentido`: 1 si subir es bueno, -1 si subir es malo.
     const comparar = (a, b, sentido) => {
@@ -190,7 +197,7 @@ export const VistaResumen = {
     });
 
     return {
-      store, prefs, definirVista, anio, esEsteAnio, r, textoCorte, kpis, series, meses, gruposAnio, deducciones, porPersonaDeducciones, ingresosPersona, cargosTarjeta, costo, textoCosto,
+      store, prefs, definirVista, anio, esEsteAnio, r, textoCorte, kpis, series, meses, gruposAnio, deducciones, porPersonaDeducciones, ingresosPersona, cargosTarjeta, costo, textoCosto, detalleImpresion,
       fmt, fmtEntero, fmtCorto, fechaCorta, nombrePersona, personaFiltro, periodoDe,
     };
   },
