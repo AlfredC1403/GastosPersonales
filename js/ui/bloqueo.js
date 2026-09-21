@@ -1,5 +1,6 @@
 import { store, recuperarPin, confirmar, abrirConPin } from '../store.js';
-import { verificarPin, largoPin, estadoIntentos, MAX_FALLOS } from '../bloqueo.js';
+import { verificarPin, largoPin, estadoIntentos, cifradoActivo, MAX_FALLOS } from '../bloqueo.js';
+import { biometriaActiva, entrar as entrarConHuella } from '../biometria.js';
 import { Icono } from './componentes.js';
 
 const { ref, computed, onMounted, onBeforeUnmount } = Vue;
@@ -24,6 +25,9 @@ export const PantallaBloqueo = {
         <button type="button" :disabled="bloqueadoPorEspera || comprobando" @click="tecla(0)">0</button>
         <button type="button" class="borrar" aria-label="Borrar un número" :disabled="!pin.length" @click="pin = pin.slice(0, -1)"><icono n="izq" :t="22"/></button>
       </div>
+      <button v-if="conHuella" type="button" class="btn" :disabled="comprobando" @click="huella">
+        <icono n="huella" :t="18"/> Entrar con huella
+      </button>
       <button type="button" class="btn-link" :disabled="!store.listo" @click="olvide">Olvidé mi PIN</button>
     </div>
   </div>`,
@@ -34,6 +38,7 @@ export const PantallaBloqueo = {
     const sacudir = ref(false);
     const espera = ref(estadoIntentos().espera);
     const error = ref('');
+    const conHuella = computed(() => biometriaActiva());
     let reloj = null;
 
     const bloqueadoPorEspera = computed(() => espera.value > 0);
@@ -80,6 +85,33 @@ export const PantallaBloqueo = {
       }
     }
 
+    // La huella abre la app; si además se pudo guardar el PIN al registrarla, abre el cifrado.
+    // Se pide solo al tocar el botón: Safari no deja llamar a WebAuthn sin un toque del usuario.
+    async function huella() {
+      error.value = '';
+      comprobando.value = true;
+      const r = await entrarConHuella();
+      if (!r.ok) {
+        comprobando.value = false;
+        error.value = 'No se reconoció la huella. Escribe tu PIN.';
+        return;
+      }
+      if (cifradoActivo() && !r.pin) {
+        comprobando.value = false;
+        error.value = 'Los datos están cifrados: para abrirlos hace falta el PIN.';
+        return;
+      }
+      try {
+        if (r.pin) await abrirConPin(r.pin);
+      } catch (e) {
+        comprobando.value = false;
+        error.value = e.message;
+        return;
+      }
+      comprobando.value = false;
+      emit('desbloqueado');
+    }
+
     function tecla(n) {
       if (bloqueadoPorEspera.value || comprobando.value || pin.value.length >= largo) return;
       pin.value += String(n);
@@ -115,6 +147,6 @@ export const PantallaBloqueo = {
       clearInterval(reloj);
     });
 
-    return { store, largo, pin, comprobando, sacudir, bloqueadoPorEspera, mensaje, tecla, olvide };
+    return { store, largo, pin, comprobando, sacudir, bloqueadoPorEspera, mensaje, tecla, olvide, conHuella, huella };
   },
 };

@@ -1,6 +1,8 @@
 // Bloqueo con PIN, propio de cada dispositivo (no se sincroniza).
 // Se guarda solo un hash PBKDF2-SHA256 con sal aleatoria. Evita que alguien vea los datos
 // en la app, pero no los cifra ni reemplaza el bloqueo del celular.
+import { olvidar as olvidarBiometria } from './biometria.js';
+
 export const MINUTOS = [0, 1, 5, 15];
 export const MAX_FALLOS = 5;
 const ESPERA_BASE = 30000;
@@ -140,9 +142,11 @@ export function definirMinutos(minutos) {
 }
 
 // Sin pedir el PIN: solo después de volver a iniciar sesión con Microsoft o al borrar los datos.
+// La huella guardaba el PIN, así que se olvida con él.
 export function quitarPin() {
   entorno.almacen.borrar(CLAVES.pin);
   entorno.almacen.borrar(CLAVES.intentos);
+  olvidarBiometria();
 }
 
 // ¿Hay que bloquear al volver a la app después de estar oculta desde `ocultoDesde`?

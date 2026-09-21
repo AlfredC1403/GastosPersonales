@@ -55,6 +55,7 @@ const TRAZOS = {
   pegar: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h4',
   rayo: 'M13 3 5 13h5l-1 8 8-10h-5z',
   imprimir: 'M7 9V4h10v5M7 18H5v-7h14v7h-2M7 14h10v6H7z',
+  huella: 'M12 4a8 8 0 0 0-8 8v3M20 12a8 8 0 0 0-4-6.9M8 20a8 8 0 0 1-1-4v-4a5 5 0 0 1 10 0v4M12 12v5a5 5 0 0 0 .6 2.4',
 };
 
 export const Icono = {
