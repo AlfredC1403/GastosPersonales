@@ -1,9 +1,8 @@
 // Piezas comunes de los formularios de edición: pie con Guardar y Eliminar, texto de quién
 // registró, opciones de categoría y el guardado con Deshacer.
 import { guardar, borrar, aviso, confirmar, buscar, indice, fmt, fmtMoneda } from '../store.js';
-import { nombrePeriodo } from '../core/util.js';
+import { nombrePeriodo, redondear } from '../core/util.js';
 import { estadoPartidas } from '../core/presupuesto.js';
-import { redondear } from '../core/util.js';
 
 const { ref } = Vue;
 

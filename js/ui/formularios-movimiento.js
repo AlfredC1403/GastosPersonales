@@ -9,7 +9,7 @@ import { TIPOS_MOVIMIENTO } from '../core/modelo.js';
 import { partidaActivaEn } from '../core/presupuesto.js';
 import { saldosCuentas } from '../core/reportes.js';
 import { parteDe } from '../core/asientos.js';
-import { hoy, periodoDe, nombrePeriodo, fechaCorta, sumarMeses, redondear, slug } from '../core/util.js';
+import { periodoDe, nombrePeriodo, sumarMeses, redondear, slug } from '../core/util.js';
 import { copia, hayValor, opcionesCategoria, usarFormulario, estadoSinEste, textoDePartida } from './formulario-base.js';
 import { pagarTarjeta } from './formularios-tarjetas.js';
 import { nuevaQuincena } from './formularios-nomina.js';

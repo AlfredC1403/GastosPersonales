@@ -5,6 +5,13 @@
   "description": "Finanzas del hogar: app web estática que guarda los datos en OneDrive.",
   "scripts": {
     "test": "node --test \"tests/*.test.js\"",
+    "lint": "eslint .",
+    "tamano": "node herramientas/verificar-tamano.js",
+    "version": "node herramientas/verificar-version.js",
+    "verificar": "npm run lint && npm test && npm run tamano",
     "dev": "python -m http.server 8080 --bind 127.0.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5"
   }
 }

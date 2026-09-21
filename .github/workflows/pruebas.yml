@@ -13,8 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # la revisión de la versión compara contra la rama base
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No hay dependencias que instalar: las pruebas usan solo `node --test`.
-      - run: npm test
+          cache: npm
+      # La app no tiene dependencias: ESLint y las pruebas de interfaz son solo de desarrollo.
+      - run: npm ci
+      - name: Estilo
+        run: npm run lint
+      - name: Pruebas
+        run: npm test
+      - name: Tamaño de la carga inicial
+        run: npm run tamano
+      - name: La versión subió
+        if: github.event_name == 'pull_request'
+        run: node herramientas/verificar-version.js origin/${{ github.base_ref }}
