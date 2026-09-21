@@ -56,7 +56,7 @@ const reglas = {
 };
 
 export default [
-  { ignores: ['node_modules/**', 'privado/**', 'pruebas-e2e/informe/**'] },
+  { ignores: ['node_modules/**', 'privado/**', 'test-results/**', 'playwright-report/**'] },
   {
     files: ['js/**/*.js'],
     languageOptions: { ecmaVersion: 2023, sourceType: 'module', globals: navegador },
@@ -68,7 +68,7 @@ export default [
     rules: reglas,
   },
   {
-    files: ['tests/**/*.js', 'herramientas/**/*.js', 'eslint.config.js', 'pruebas-e2e/**/*.js'],
+    files: ['tests/**/*.js', 'herramientas/**/*.js', 'e2e/**/*.js', 'eslint.config.js', 'playwright.config.js'],
     languageOptions: { ecmaVersion: 2023, sourceType: 'module', globals: { ...node, ...navegador } },
     rules: { ...reglas, 'no-console': 'off' },
   },

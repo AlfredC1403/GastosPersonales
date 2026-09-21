@@ -138,12 +138,14 @@ export const MovimientoForm = {
           <option v-for="p in listaPersonas" :key="p.id" :value="p.id">{{ p.nombre }}</option></select></label>
     </div>
 
-    <label class="campo"><span>Nota</span>
+    <!-- No es un <label> que envuelva: dentro hay dos controles (el campo y el micrófono) y
+         entonces no se sabe a cuál nombra. El campo lleva su nombre con aria-label. -->
+    <div class="campo"><span>Nota</span>
       <span class="con-sufijo">
-        <input v-model.trim="m.nota" type="text" maxlength="140" placeholder="Opcional">
+        <input v-model.trim="m.nota" type="text" maxlength="140" placeholder="Opcional" aria-label="Nota">
         <button v-if="hayDictado" type="button" class="btn-icono" :class="{ activo: dictando }"
                 :aria-label="dictando ? 'Dejar de dictar' : 'Dictar la nota'" @click="alternarDictado"><icono n="microfono" :t="18"/></button>
-      </span></label>
+      </span></div>
     <campo-etiquetas v-if="usaEtiquetas" v-model="m.etiquetas" :sugerencias="sugerenciasEtiqueta"/>
 
     <div v-if="parecidos.length" class="caja-ambar" role="status">
