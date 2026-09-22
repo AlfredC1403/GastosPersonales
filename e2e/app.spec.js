@@ -10,6 +10,13 @@ import { test, expect } from '@playwright/test';
 const PANTALLAS = [...readFileSync(new URL('../js/ui/menu.js', import.meta.url), 'utf8')
   .matchAll(/\{\s*id:\s*'([\w-]+)',\s*nombre:/g)].map(([, id]) => id);
 
+// El día en que vive la prueba. Se fija antes de abrir la app para que el hogar de abajo caiga
+// siempre en el mes en curso: media quincena registrada, media por venir. Sin fijarlo, los datos
+// de septiembre de 2026 se irían quedando en el pasado y las pantallas del mes en curso
+// (que son otro camino: ver la quincena que corre, los cargos de la tarjeta hasta hoy) dejarían
+// de probarse solas.
+const HOY = '2026-09-22T10:00:00';
+
 // Un hogar mínimo, del esquema de hoy, puesto antes de que la app arranque: sin esto la app
 // abre en el asistente de la primera vez y no hay nada que mirar.
 async function hogarDePrueba(page) {
@@ -22,6 +29,16 @@ async function hogarDePrueba(page) {
       cuentas: [
         { id: 'gastos', nombre: 'Gastos', tipo: 'gastos', saldoInicial: 20000, moneda: 'L', titularId: null, ...sello },
         { id: 'ahorro', nombre: 'Ahorro', tipo: 'ahorro', saldoInicial: 5000, moneda: 'L', titularId: null, ...sello },
+        // Una tarjeta con su membresía: el cargo que la app genera sola en cada corte no es un
+        // movimiento anotado, y aun así se lista con los del mes.
+        {
+          id: 'visa', nombre: 'Visa', tipo: 'tarjeta', saldoInicial: 0, moneda: 'L', titularId: 'p1', ...sello,
+          tarjeta: {
+            diaCorte: 20, diaPago: 10, cuentaPagoId: 'gastos', limite: { L: 50000, USD: null },
+            saldoInicial: { L: 0, USD: 0 }, saldoFecha: '2026-08-31', saldoRegistrado: '2026-08-31T10:00:00Z',
+            cargos: [{ id: 'membresia', nombre: 'Membresía', tipo: 'membresia', monto: 150, moneda: 'L', periodicidad: 'mensual', activo: true }],
+          },
+        },
       ],
       partidas: [{
         id: 'mercado', nombre: 'Mercado', categoriaId: 'comida', responsableId: 'p1', tipo: 'gasto', forma: 'variable',
@@ -30,11 +47,19 @@ async function hogarDePrueba(page) {
         acumula: false, sePagaCon: 'auto', activo: true, desde: null, hasta: null, nota: '', ...sello,
       }],
       ingresos: [{
-        id: 'sueldo', nombre: 'Sueldo', personaId: 'p1', frecuencia: 'mensual', diasPago: [30], finDeSemana: 'igual',
-        cuentaId: 'gastos', categoriaId: 'salario', netoEsperado: 25000, meses: [], decimo13: true, decimo14: true,
-        vigenteDesde: null, activo: true, deducciones: [], nota: '', ...sello,
+        id: 'sueldo', nombre: 'Sueldo', personaId: 'p1', frecuencia: 'quincenal', diasPago: [15, 30], finDeSemana: 'igual',
+        cuentaId: 'gastos', categoriaId: 'salario', netoEsperado: 12500, meses: [], decimo13: true, decimo14: true,
+        vigenteDesde: null, activo: true, nota: '', ...sello,
+        deducciones: [{ id: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', fija: true, montoEsperado: 480.5 }],
       }],
-      prestamos: [], metas: [], resumenes: [], ajustesPartida: [], recibos: [],
+      prestamos: [], metas: [], resumenes: [], ajustesPartida: [],
+      // La quincena del 15 ya llegó; la del 30 no. Un pago registrado tampoco es un movimiento
+      // anotado, y también se lista con los del mes.
+      recibos: [{
+        id: 'rec1', ingresoId: 'sueldo', tipo: 'ordinario', ocurrencia: '2026-09-15', periodo: '2026-09', fecha: '2026-09-15',
+        cuentaId: 'gastos', neto: 12400, extras: [], nota: '', ...sello,
+        deducciones: [{ deduccionId: 'ihss', nombre: 'IHSS', naturaleza: 'gasto', categoriaId: 'ihss', monto: 480.5 }],
+      }],
       grupos: [], categorias: [],
       // Lo nuevo del esquema 4, con contenido: una pantalla vacía no prueba su plantilla.
       topes: [{ id: 't1', ambito: 'categoria', referenciaId: 'comida', monto: 7000, moneda: 'L', avisarEn: 80, activo: true, nota: '', ...sello }],
@@ -48,6 +73,7 @@ async function hogarDePrueba(page) {
         { id: 'm1', tipo: 'gasto', fecha: '2026-09-03', periodo: '2026-09', monto: 1450, moneda: 'L', cuentaId: 'gastos', categoriaId: 'comida', partidaId: 'mercado', comercioId: 'super', personaId: 'p1', etiquetas: ['casa'], nota: '', ...sello },
         { id: 'm2', tipo: 'gasto', fecha: '2026-09-10', periodo: '2026-09', monto: 1450, moneda: 'L', cuentaId: 'gastos', categoriaId: 'comida', partidaId: 'mercado', comercioId: 'super', personaId: 'p1', etiquetas: ['casa'], nota: '', ...sello },
         { id: 'm3', tipo: 'gasto', fecha: '2026-08-20', periodo: '2026-08', monto: 300, moneda: 'L', cuentaId: 'gastos', categoriaId: 'comida', partidaId: null, comercioId: null, personaId: 'p1', etiquetas: [], nota: 'Borrado de prueba', borrado: true, ...sello },
+        { id: 'm4', tipo: 'gasto', fecha: '2026-09-08', periodo: '2026-09', monto: 900, moneda: 'L', cuentaId: 'visa', categoriaId: 'restaurantes', partidaId: null, comercioId: null, personaId: 'p1', etiquetas: [], nota: 'Cena', ...sello },
       ],
     };
     localStorage.setItem('gastos.doc', JSON.stringify(doc));
@@ -80,6 +106,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://cdn.jsdelivr.net/**/vue.global.prod.js', (ruta) => ruta.fulfill({
     status: 200, contentType: 'application/javascript', body: VUE,
   }));
+  await page.clock.setFixedTime(new Date(HOY));
   await hogarDePrueba(page);
 });
 
@@ -122,6 +149,29 @@ test('registrar un gasto: aparece en Movimientos y baja lo libre del mes', async
   await expect(page.locator('.cargando')).toHaveCount(0);
   await expect(page.getByText('Prueba de extremo a extremo')).toBeVisible();
   expect(errores).toEqual([]);
+});
+
+// El mes en curso trae filas que no son movimientos anotados: el pago del salario que ya llegó y
+// el cargo que la tarjeta genera sola en su corte. Los meses de al lado no las tienen todavía,
+// así que si la lista da por hecho que toda fila se parece a un gasto, el mes en curso —y solo
+// ese— se queda en blanco.
+test('Movimientos dibuja el mes en curso con el salario y el cargo de la tarjeta', async ({ page }) => {
+  const errores = vigilarErrores(page);
+  await page.goto('/index.html#/movimientos');
+  await expect(page.locator('.cargando')).toHaveCount(0);
+
+  await expect(page.getByText('Sueldo · pago del 15 sep')).toBeVisible();
+  await expect(page.getByText('Membresía').first()).toBeVisible();
+  await expect(page.getByText('Cena')).toBeVisible();
+  expect(errores).toEqual([]);
+
+  // Y se puede ir al mes anterior y volver.
+  for (const boton of ['Mes anterior', 'Mes siguiente']) {
+    await page.getByRole('button', { name: boton }).click();
+    await expect(page.locator('main.contenido')).toBeVisible();
+    expect(errores, `la lista falló al ir al ${boton.toLowerCase()}`).toEqual([]);
+  }
+  await expect(page.getByText('Sueldo · pago del 15 sep')).toBeVisible();
 });
 
 test('nada se sale de la pantalla del teléfono', async ({ page }) => {
