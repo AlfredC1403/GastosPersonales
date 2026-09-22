@@ -105,6 +105,9 @@ export const VistaMovimientos = {
 
     // Movimientos, pagos recibidos, cuotas de las compras a cuotas y cargos de las tarjetas, con lo
     // necesario para mostrarlos, filtrarlos y agruparlos. `enL`: el monto en lempiras.
+    // Todas las filas se arman con los mismos campos, aunque la mitad no sean movimientos anotados:
+    // la lista las dibuja igual y no tiene por qué preguntar de dónde salió cada una. Las etiquetas
+    // solo las lleva un movimiento, así que las demás van con la lista vacía.
     const registros = computed(() => {
       const ix = indice();
       const out = [];
@@ -174,7 +177,7 @@ export const VistaMovimientos = {
           id: r.id, registro: r, tipo: 'recibo', fecha: r.fecha, periodo: r.periodo || periodoDe(r.ocurrencia || r.fecha), monto: Number(r.neto) || 0,
           moneda, enL: ix.enLempiras(r.neto, moneda).c / 100, cuentaId: r.cuentaId, cuentaDestinoId: null, categoriaId, grupoId: ix.grupoDe(categoriaId), partidaId: null,
           personaId: r.personaId || ingreso?.personaId || null, personaAnotada: r.personaId || ingreso?.personaId || null, creadoPor: r.creadoPor, nota: r.nota || '', nombreVinculo: nombre, comercio: '',
-          faltan: estadoRecibo(r).pendientes,
+          etiquetas: [], faltan: estadoRecibo(r).pendientes,
           titulo: r.nota || (r.tipo === 'ordinario' ? `${nombre} · pago del ${fechaCorta(r.ocurrencia)}` : `${nombre} · ${TIPOS_RECIBO[r.tipo]?.toLowerCase() || 'pago'}`),
           abrir: () => editarRecibo(r),
         });
@@ -185,7 +188,7 @@ export const VistaMovimientos = {
           out.push({
             id: cargo.clave, registro: { creado: '' }, tipo: 'cargo', fecha: cargo.fecha, periodo: cargo.periodo, monto: cargo.c / 100, moneda: cargo.moneda, enL: l.c / 100,
             estimado: cargo.moneda === 'USD' && l.estimado, cuentaId: t.cuenta.id, cuentaDestinoId: null, categoriaId: 'cargos-tarjeta', grupoId: ix.grupoDe('cargos-tarjeta'), partidaId: null,
-            personaId: t.cuenta.titularId || null, personaAnotada: null, creadoPor: null, nota: '', nombreVinculo: '', comercio: '',
+            personaId: t.cuenta.titularId || null, personaAnotada: null, creadoPor: null, nota: '', nombreVinculo: '', comercio: '', etiquetas: [],
             titulo: cargo.cargo.nombre, abrir: () => { location.hash = `#/tarjeta/${t.cuenta.id}/${cargo.fecha}`; },
           });
         }
